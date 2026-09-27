@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>__TITLE__</title>
+<link rel="stylesheet" href="/gallery.css">
+</head>
+<body>
+<header>
+    <h1>__TITLE__</h1>
+    <span class="gallery-stats" id="gallery-stats"></span>
+</header>
+<div id="category-list"></div>
+
+<div class="album-view" id="album-view">
+    <div class="album-view-header">
+        <div><h2 id="album-title"></h2><span class="album-stats" id="album-stats"></span></div>
+        <button id="album-close">Close</button>
+    </div>
+    <div class="album-grid" id="album-grid"></div>
+</div>
+
+<div class="viewer" id="viewer">
+    <button class="viewer-close" id="viewer-close" aria-label="Close image">&times;</button>
+    <button class="viewer-nav viewer-prev" id="viewer-prev" aria-label="Previous image">&#10094;</button>
+    <button class="viewer-nav viewer-next" id="viewer-next" aria-label="Next image">&#10095;</button>
+    <div class="viewer-image-container"><img id="viewer-image" src="" alt=""></div>
+    <div class="viewer-strip" id="viewer-strip"></div>
+</div>
+
+<script>
+'use strict';
+
+const GALLERY_DATA = __GALLERY_DATA__;
+const categoryList = document.getElementById('category-list');
+const albumView = document.getElementById('album-view');
+const albumGrid = document.getElementById('album-grid');
+const viewer = document.getElementById('viewer');
+const viewerStrip = document.getElementById('viewer-strip');
+const viewerImage = document.getElementById('viewer-image');
+const categoriesByDirectoryName = new Map(GALLERY_DATA.map(category => [category.directory_name, category]));
+let selectedCategoryName = null;
+let currentImagePaths = [];
+let currentImageIndex = -1;
+let albumObserver = null;
+
+function createElement(tag, className, label) {
+    const node = document.createElement(tag);
+    if (className) node.className = className;
+    if (label !== undefined) node.textContent = label;
+    return node;
+}
+
+function imageUrl(album, name) {
+    return album.url_prefix + encodeURIComponent(name);
+}
+
+function observeImages(container, margin) {
+    const observer = new IntersectionObserver((items) => {
+        for (const item of items) {
+            if (!item.isIntersecting) continue;
+            item.target.src = item.target.dataset.src;
+            observer.unobserve(item.target);
+        }
+    }, {rootMargin: margin});
+    for (const img of container.querySelectorAll('img[data-src]')) observer.observe(img);
+    return observer;
+}
+
+function createThumbnail(path) {
+    const img = createElement('img');
+    img.dataset.src = path;
+    img.dataset.path = path;
+    img.alt = '';
+    return img;
+}
+
+function buildCategoryList() {
+    let albumCount = 0;
+    let imageCount = 0;
+    for (const category of GALLERY_DATA) {
+        albumCount += category.albums.length;
+        imageCount += category.image_count;
+        const card = createElement('div', 'category-card');
+        card.dataset.directoryName = category.directory_name;
+        card.tabIndex = 0;
+        card.setAttribute('role', 'button');
+        card.setAttribute('aria-label', 'Open ' + category.name);
+        const header = createElement('div', 'category-header');
+        header.append(
+            createElement('h2', '', category.name),
+            createElement('span', 'category-stats', category.albums.length + ' albums · ' + category.image_count + ' images')
+        );
+        const previews = createElement('div', 'preview-strip');
+        for (const album of category.albums) {
+            previews.append(createThumbnail(imageUrl(album, album.images[0])));
+        }
+        card.append(header, previews);
+        categoryList.append(card);
+    }
+    document.getElementById('gallery-stats').textContent =
+        GALLERY_DATA.length + ' categories · ' + albumCount + ' albums · ' + imageCount + ' images';
+    observeImages(categoryList, '200px');
+}
+
+function buildAlbumView(category) {
+    if (albumObserver) albumObserver.disconnect();
+    selectedCategoryName = category.directory_name;
+    currentImagePaths = [];
+    albumGrid.replaceChildren();
+    document.getElementById('album-title').textContent = category.name;
+    document.getElementById('album-stats').textContent =
+        category.albums.length + ' albums, ' + category.image_count + ' images';
+
+    for (const album of category.albums) {
+        const row = createElement('div', 'album-row');
+        const imageRow = createElement('div', 'album-images');
+        row.append(createElement('div', 'album-label', album.name + ' (' + album.image_count + ')'), imageRow);
+        for (const name of album.images) {
+            const path = imageUrl(album, name);
+            currentImagePaths.push(path);
+            imageRow.append(createThumbnail(path));
+        }
+        albumGrid.append(row);
+    }
+    albumObserver = observeImages(albumGrid, '300px');
+    albumView.scrollTop = 0;
+}
+
+function showSelectedImage(index) {
+    currentImageIndex = index;
+    const path = currentImagePaths[index];
+    viewerImage.src = path;
+    viewerImage.alt = 'Image ' + (index + 1) + ' of ' + currentImagePaths.length;
+    if (viewerStrip.children.length !== currentImagePaths.length) {
+        viewerStrip.replaceChildren();
+        for (const [i, src] of currentImagePaths.entries()) {
+            const thumb = createElement('img');
+            thumb.src = src;
+            thumb.loading = 'lazy';
+            thumb.alt = 'Image ' + (i + 1);
+            thumb.dataset.index = i;
+            viewerStrip.append(thumb);
+        }
+    }
+    for (const thumb of viewerStrip.children) {
+        thumb.classList.toggle('active', Number(thumb.dataset.index) === index);
+    }
+    viewerStrip.children[index].scrollIntoView({block: 'nearest', inline: 'center'});
+}
+
+function renderView() {
+    const params = new URLSearchParams(location.search);
+    const directoryName = params.get('category') ?? params.get('m');
+    const category = categoriesByDirectoryName.get(directoryName);
+    if (!category) {
+        albumView.classList.remove('active');
+        viewer.classList.remove('active');
+        selectedCategoryName = null;
+        return;
+    }
+    if (selectedCategoryName !== directoryName) {
+        buildAlbumView(category);
+        viewerStrip.replaceChildren();
+    }
+    albumView.classList.add('active');
+    const index = currentImagePaths.indexOf(params.get('image') ?? params.get('img'));
+    if (index < 0) {
+        viewer.classList.remove('active');
+        return;
+    }
+    viewer.classList.add('active');
+    showSelectedImage(index);
+}
+
+function navigateTo(directoryName, path, replace) {
+    const params = new URLSearchParams();
+    if (directoryName) params.set('category', directoryName);
+    if (path) params.set('image', path);
+    const url = location.pathname + (params.size ? '?' + params : '');
+    history[replace ? 'replaceState' : 'pushState'](null, '', url);
+    renderView();
+}
+
+function moveImage(direction) {
+    if (currentImageIndex < 0 || !viewer.classList.contains('active')) return;
+    const next = (currentImageIndex + direction + currentImagePaths.length) % currentImagePaths.length;
+    navigateTo(selectedCategoryName, currentImagePaths[next], true);
+}
+
+categoryList.addEventListener('click', (event) => {
+    const card = event.target.closest('.category-card');
+    if (!card) return;
+    const path = event.target.dataset.path;
+    navigateTo(card.dataset.directoryName, path || null);
+});
+categoryList.addEventListener('keydown', (event) => {
+    if ((event.key === 'Enter' || event.key === ' ') && event.target.classList.contains('category-card')) {
+        event.preventDefault();
+        navigateTo(event.target.dataset.directoryName);
+    }
+});
+albumGrid.addEventListener('click', (event) => {
+    const path = event.target.dataset.path;
+    if (path) navigateTo(selectedCategoryName, path);
+});
+viewerStrip.addEventListener('click', (event) => {
+    const index = Number(event.target.dataset.index);
+    if (event.target.matches('img[data-index]')) navigateTo(selectedCategoryName, currentImagePaths[index], true);
+});
+document.getElementById('album-close').addEventListener('click', () => navigateTo());
+document.getElementById('viewer-close').addEventListener('click', () => navigateTo(selectedCategoryName));
+document.getElementById('viewer-prev').addEventListener('click', () => moveImage(-1));
+document.getElementById('viewer-next').addEventListener('click', () => moveImage(1));
+document.addEventListener('keydown', (event) => {
+    if (viewer.classList.contains('active')) {
+        if (event.key === 'ArrowRight' || event.key === 'ArrowDown') moveImage(1);
+        else if (event.key === 'ArrowLeft' || event.key === 'ArrowUp') moveImage(-1);
+        else if (event.key === 'Escape') navigateTo(selectedCategoryName);
+    } else if (albumView.classList.contains('active') && event.key === 'Escape') {
+        navigateTo();
+    }
+});
+viewer.addEventListener('wheel', (event) => {
+    if (!viewer.classList.contains('active') || !event.deltaY) return;
+    event.preventDefault();
+    moveImage(event.deltaY > 0 ? 1 : -1);
+}, {passive: false});
+window.addEventListener('popstate', renderView);
+
+buildCategoryList();
+renderView();
+</script>
+</body>
+</html>

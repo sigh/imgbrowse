@@ -1,0 +1,104 @@
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { background: #111; color: #ccc; font-family: -apple-system, system-ui, sans-serif; }
+header {
+    position: sticky; top: 0; z-index: 50; background: #1a1a1a;
+    border-bottom: 1px solid #333; padding: 12px 20px;
+    display: flex; align-items: center; gap: 16px;
+}
+header h1 { font-size: 1.2em; color: #e91e63; white-space: nowrap; }
+.gallery-stats { font-size: 0.82em; color: #777; }
+#category-list { padding: 16px; }
+.category-card {
+    background: #181818; border: 1px solid #2a2a2a; border-radius: 8px;
+    margin-bottom: 12px; overflow: hidden; cursor: pointer;
+    transition: border-color 0.15s, background 0.15s;
+}
+.category-card:hover { border-color: #e91e63; background: #1e1e1e; }
+.category-header {
+    display: flex; align-items: baseline; gap: 12px;
+    padding: 10px 14px; flex-wrap: wrap;
+}
+.category-header h2 { font-size: 1em; color: #ddd; white-space: nowrap; }
+.category-stats { font-size: 0.78em; color: #666; }
+.preview-strip {
+    display: flex; gap: 4px; padding: 0 14px 10px;
+    overflow-x: auto; align-items: center;
+}
+.preview-strip img {
+    height: 120px; width: auto; min-width: 80px; border-radius: 3px;
+    object-fit: cover; border: 1px solid #2a2a2a; flex-shrink: 0;
+    transition: transform 0.15s, border-color 0.15s;
+    cursor: pointer; background: #1a1a1a;
+}
+.preview-strip img:hover { transform: scale(1.04); border-color: #e91e63; }
+
+.album-view {
+    display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+    background: #111; z-index: 100; overflow-y: auto;
+}
+.album-view.active { display: block; }
+.album-view-header {
+    position: sticky; top: 0; z-index: 10; background: #1a1a1a;
+    border-bottom: 1px solid #333; padding: 12px 20px;
+    display: flex; align-items: center; justify-content: space-between;
+}
+.album-view-header h2 { font-size: 1.1em; color: #ddd; }
+.album-stats { font-size: 0.78em; color: #666; margin-left: 12px; }
+.album-view-header button {
+    background: #333; color: #ccc; border: none; border-radius: 4px;
+    padding: 6px 14px; cursor: pointer; font-size: 0.85em;
+}
+.album-view-header button:hover { background: #e91e63; color: #fff; }
+.album-grid { padding: 12px; }
+.album-row { margin-bottom: 16px; }
+.album-label {
+    color: #555; font-size: 0.75em; margin-bottom: 4px; padding-left: 2px;
+}
+.album-images {
+    display: flex; flex-wrap: wrap; gap: 4px;
+}
+.album-images img {
+    height: 180px; width: auto; border-radius: 3px; object-fit: cover;
+    border: 1px solid #2a2a2a; cursor: pointer;
+    transition: transform 0.12s, border-color 0.12s;
+    background: #1a1a1a;
+}
+.album-images img:hover { transform: scale(1.03); border-color: #e91e63; }
+
+.viewer {
+    display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+    background: rgba(0,0,0,0.96); z-index: 1000;
+    flex-direction: column; align-items: center; justify-content: center;
+}
+.viewer.active { display: flex; }
+.viewer-close {
+    position: absolute; top: 16px; right: 24px; font-size: 2.5em;
+    color: #999; cursor: pointer; z-index: 1001; line-height: 1;
+}
+.viewer-close:hover { color: #fff; }
+.viewer-nav {
+    position: absolute; top: 50%; transform: translateY(-50%);
+    font-size: 2.5em; color: #999; cursor: pointer; user-select: none;
+    padding: 20px; z-index: 1001;
+}
+.viewer-nav:hover { color: #fff; }
+.viewer-close, .viewer-nav { background: none; border: 0; }
+.viewer-prev { left: 0; } .viewer-next { right: 0; }
+.viewer-image-container {
+    max-width: 90vw; max-height: 80vh; display: flex;
+    align-items: center; justify-content: center;
+}
+.viewer-image-container img {
+    max-width: 90vw; max-height: 80vh; object-fit: contain;
+    border-radius: 4px;
+}
+.viewer-strip {
+    display: flex; gap: 4px; padding: 12px 20px; overflow-x: auto;
+    max-width: 90vw; margin-top: 8px;
+}
+.viewer-strip img {
+    height: 60px; width: auto; border-radius: 3px; object-fit: cover;
+    cursor: pointer; border: 2px solid transparent; opacity: 0.45;
+}
+.viewer-strip img.active { border-color: #e91e63; opacity: 1; }
+.viewer-strip img:hover { opacity: 0.85; }
