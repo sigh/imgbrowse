@@ -10,8 +10,18 @@ await new Promise(resolve => socket.addEventListener('open', resolve, {once: tru
 let sequence = 0;
 const pending = new Map();
 const exceptions = [];
+const requests = [];
+const held = [];
+let pauseImages = false;
+let pauseWalk = false;
 socket.addEventListener('message', event => {
     const message = JSON.parse(event.data);
+    if (message.method === 'Network.requestWillBeSent') requests.push(message.params.request.url);
+    if (message.method === 'Fetch.requestPaused') {
+        const {requestId, request} = message.params;
+        if ((pauseImages && request.url.includes('/image?')) || (pauseWalk && request.url.includes('/api/walk'))) held.push(requestId);
+        else call('Fetch.continueRequest', {requestId}).catch(() => {});
+    }
     if (message.method === 'Runtime.exceptionThrown') exceptions.push(message.params.exceptionDetails);
     const callback = pending.get(message.id);
     if (!callback) return;
@@ -36,170 +46,288 @@ async function waitFor(expression) {
         if (await evaluate(expression)) return;
         await new Promise(resolve => setTimeout(resolve, 50));
     }
-    throw new Error('Timed out: ' + expression);
+    throw new Error('Timed out: ' + expression + '\n' + JSON.stringify(exceptions) + '\n' + await evaluate("document.getElementById('grid-status')?.textContent"));
 }
 async function open(path) {
     const url = new URL(path, base).href;
+    await evaluate('window.__leavingPage = true');
     await call('Page.navigate', {url});
-    await waitFor(`location.href === ${JSON.stringify(url)} && document.readyState === 'complete'`);
+    await waitFor("!window.__leavingPage && document.readyState === 'complete'");
 }
-const click = id => evaluate(`document.getElementById(${JSON.stringify(id)}).click()`);
+const click = id => evaluate(`{ const button=document.getElementById(${JSON.stringify(id)}); button.focus(); button.click(); }`);
 const imageIs = path => `new URLSearchParams(location.search).get('image') === ${JSON.stringify(path)}`;
 const waitImage = path => waitFor(imageIs(path));
 const key = (key, repeat = false) => evaluate(`document.dispatchEvent(new KeyboardEvent('keydown', ${JSON.stringify({key, repeat})}))`);
-const wheel = deltaY => evaluate(`document.getElementById('viewer').dispatchEvent(new WheelEvent('wheel', {deltaY: ${deltaY}, cancelable: true}))`);
+const wheel = async deltaY => { await call('Input.dispatchMouseEvent', {type:'mouseWheel', x:700, y:350, deltaX:0, deltaY}); await new Promise(resolve => setTimeout(resolve, 70)); };
 async function screenshot(name) {
     if (screenshots) writeFileSync(join(screenshots, name + '.png'), Buffer.from((await call('Page.captureScreenshot')).data, 'base64'));
 }
 
+
+const readyImage = path => waitFor(`document.getElementById('viewer-image').dataset.path === ${JSON.stringify(path)} && !document.getElementById('viewer-zoom').disabled`);
+const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
+const position = () => evaluate("({top:document.getElementById('viewer-canvas').scrollTop,max:document.getElementById('viewer-canvas').scrollHeight-document.getElementById('viewer-canvas').clientHeight})");
+const viewerUrl = (image, size = 'page', folder = 'Album') => '/?' + new URLSearchParams({folder, image, size});
+const first = 'Album/Chapter 1/page2.jpg';
+const second = 'Album/Chapter 1/page10.jpg';
+const last = 'Album/Chapter 2/deep/page1.jpg';
 await call('Runtime.enable');
+await call('Network.enable');
+await call('Page.enable');
+await call('Emulation.setDeviceMetricsOverride', {width:1440,height:900,deviceScaleFactor:1,mobile:false});
 await open('/');
-await waitFor("document.querySelectorAll('.card').length > 0");
+await waitFor("document.querySelectorAll('.card').length > 5");
 assert.ok(await evaluate("document.querySelectorAll('.card').length < 50"));
-assert.match(await evaluate("document.getElementById('summary').textContent"), /160 direct images/);
 await screenshot('grid');
-await evaluate("document.getElementById('grid-viewport').scrollTop = 2500");
-await waitFor("[...document.querySelectorAll('.grid-row')].some(node => parseInt(node.style.top) > 2000)");
-assert.ok(await evaluate("document.querySelectorAll('.card').length < 50"));
 
-await click('recursive');
-await waitFor("document.getElementById('summary').textContent.includes('60 images')");
-for (let page = 0; page < 5; page++) {
-    await evaluate("{ const viewport = document.getElementById('grid-viewport'); viewport.scrollTop = viewport.scrollHeight; }");
-    await new Promise(resolve => setTimeout(resolve, 150));
-}
-await waitFor("document.getElementById('summary').textContent === '164 images'");
-assert.ok(await evaluate("document.querySelectorAll('.card').length < 50"));
+// Filtering is immediate and makes no directory request. Both presentations preserve an item.
+const folderRequests = () => requests.filter(url => url.includes('/api/folder')).length;
+const countBeforeFilter = folderRequests();
+await evaluate("{ const input=document.getElementById('filter'); input.value='root12'; input.dispatchEvent(new Event('input')); }");
+await waitFor("document.getElementById('summary').textContent.includes('11 matches')");
+assert.equal(folderRequests(), countBeforeFilter);
+await click('refresh');
+await waitFor("!document.getElementById('refresh').disabled");
+assert.equal(folderRequests(), countBeforeFilter + 1);
+assert.ok(await evaluate("document.getElementById('summary').textContent.includes('11 matches')"));
+await evaluate("{ const input=document.getElementById('filter'); input.value=''; input.dispatchEvent(new Event('input')); }");
+await waitFor("!new URLSearchParams(location.search).has('filter')");
+await evaluate("document.getElementById('grid-viewport').scrollTop = 1800");
+await pause(100);
+const anchor = await evaluate('history.state.position.path');
+await click('layout-list');
+await waitFor("document.querySelector('.list-item')");
+assert.equal(await evaluate('history.state.position.path'), anchor);
+assert.ok(await evaluate("[...document.querySelectorAll('.list-name')].some(node=>node.textContent=== " + JSON.stringify(anchor) + ")"));
+assert.equal(await evaluate("document.querySelectorAll('#grid img').length"), 0);
+await screenshot('list');
+const historyBeforeSameLayout = await evaluate('history.length');
+await click('layout-list');
+assert.equal(await evaluate('history.length'), historyBeforeSameLayout);
 
+// Back preserves folder position; close uses the opener entry and Forward reopens the viewer.
 await open('/?folder=Album');
 await waitFor("document.querySelectorAll('.card').length === 2");
 await click('read-folder');
-await waitImage('Album/Chapter 1/page2.jpg');
-await waitFor("document.getElementById('viewer-image').naturalWidth > 0");
-await screenshot('viewer');
+await readyImage(first);
 await click('viewer-next');
-await waitImage('Album/Chapter 1/page10.jpg');
-await click('viewer-next');
-await waitImage('Album/Chapter 2/deep/page1.jpg');
-await click('viewer-next');
-await waitFor("!document.getElementById('viewer-wrap').hidden");
-assert.equal(await evaluate("document.getElementById('viewer-cancel')"), null);
-await key('ArrowRight', true);
-assert.ok(await evaluate(imageIs('Album/Chapter 2/deep/page1.jpg')));
-await key('ArrowRight');
-await waitImage('Album/Chapter 1/page2.jpg');
-await key('ArrowLeft');
-await waitFor("!document.getElementById('viewer-wrap').hidden");
-await wheel(-100);
-await waitImage('Album/Chapter 2/deep/page1.jpg');
-await new Promise(resolve => setTimeout(resolve, 350));
-await wheel(100);
-await waitFor("!document.getElementById('viewer-wrap').hidden");
-await wheel(100);
-assert.ok(await evaluate(imageIs('Album/Chapter 2/deep/page1.jpg')));
-await new Promise(resolve => setTimeout(resolve, 350));
-await wheel(100);
-await waitImage('Album/Chapter 1/page2.jpg');
-await click('viewer-next');
-assert.equal(await evaluate("document.getElementById('viewer-status').textContent"), '');
-await waitImage('Album/Chapter 1/page10.jpg');
+await readyImage(second);
 await click('viewer-close');
 await waitFor("document.getElementById('viewer').hidden");
-assert.equal(await evaluate("document.getElementById('recursive').checked"), false);
-
-await click('recursive');
-await waitFor("document.getElementById('summary').textContent === '3 images'");
-assert.equal(await evaluate("document.querySelectorAll('.folder-heading').length"), 2);
+assert.equal(await evaluate('document.activeElement.id'), 'read-folder');
+await evaluate('history.forward()');
+await readyImage(second);
 await evaluate('history.back()');
-await waitFor("!document.getElementById('recursive').checked && document.querySelectorAll('.card').length === 2");
-await open('/?' + new URLSearchParams({folder: 'Odd & #', image: 'Odd & #/a ?#%.jpg'}));
-await waitFor("document.getElementById('viewer-image').naturalWidth > 0");
-await open('/?' + new URLSearchParams({category: 'Album', image: 'Album/Chapter%201/page2.jpg'}));
-await waitFor("document.getElementById('viewer-name').textContent === 'page2.jpg'");
-await open('/?folder=Names');
-await waitFor("document.querySelector('.card-caption a')?.textContent.endsWith('Chapter 123')");
-assert.ok(await evaluate("document.querySelector('.card-caption').getBoundingClientRect().bottom <= document.querySelector('.card').getBoundingClientRect().bottom"));
-await screenshot('long-names');
-await open('/?folder=Empty&viewer=1');
-await waitFor("document.getElementById('viewer-status').textContent.includes('No images')");
-
-// Leaving a scrolled folder and returning via Back restores its location.
-await open('/');
-await waitFor("document.querySelector('.folder-card a')");
-await evaluate("window.folderToOpen = [...document.querySelectorAll('.folder-card a')].find(a => a.textContent === 'Album')");
-await evaluate("document.getElementById('grid-viewport').scrollTop = 1800");
-await waitFor("history.state?.gridTop === 1800");
-await evaluate('window.folderToOpen.click()');
-await waitFor("new URLSearchParams(location.search).get('folder') === 'Album'");
-await evaluate('history.back()');
-await waitFor("document.getElementById('grid-viewport').scrollTop === 1800");
-
-// Reading controls preserve image selection and provide usable scrolling.
-await open('/?' + new URLSearchParams({folder: 'Album', image: 'Album/Chapter 1/page2.jpg'}));
-await waitFor("document.getElementById('viewer-image').naturalWidth > 0");
-await new Promise(resolve => setTimeout(resolve, 350));
-await evaluate("document.getElementById('viewer').dispatchEvent(new WheelEvent('wheel', {deltaY:100, ctrlKey:true, cancelable:true}))");
-assert.ok(await evaluate(imageIs('Album/Chapter 1/page2.jpg')));
-await key('w');
-await waitFor("document.getElementById('viewer-canvas').scrollHeight > document.getElementById('viewer-canvas').clientHeight");
-await key('ArrowDown');
-assert.ok(await evaluate("document.getElementById('viewer-canvas').scrollTop > 0"));
-assert.ok(await evaluate(imageIs('Album/Chapter 1/page2.jpg')));
-await click('viewer-zoom-in');
-assert.ok(await evaluate("[.1,.25,.5,.75,1,1.25,1.5,2,3,4,6,8].includes(Number(document.getElementById('viewer-zoom').value))"));
-await evaluate("{ const zoom = document.getElementById('viewer-zoom'); zoom.value = '1'; zoom.dispatchEvent(new Event('change')); }");
-await click('viewer-zoom-in');
-assert.equal(await evaluate("document.getElementById('viewer-zoom').value"), '1.25');
-await click('viewer-zoom-out');
-assert.equal(await evaluate("document.getElementById('viewer-zoom').value"), '1');
-await click('viewer-zoom-out');
-assert.equal(await evaluate("document.getElementById('viewer-zoom').value"), '0.75');
-await click('viewer-zoom-out');
-assert.equal(await evaluate("document.getElementById('viewer-zoom').value"), '0.5');
-await click('viewer-zoom-in');
-assert.equal(await evaluate("document.getElementById('viewer-zoom').value"), '0.75');
-await screenshot('zoom');
-await key('f');
-await key('t');
-assert.ok(await evaluate("document.getElementById('viewer-strip').hidden"));
-await key('h');
-assert.equal(await evaluate('document.activeElement.id'), 'viewer-show-controls');
-await key('Tab');
-assert.ok(await evaluate("document.activeElement.getClientRects().length > 0"));
-await click('viewer-show-controls');
-await evaluate("document.querySelector('#viewer-options summary').click()");
-assert.ok(await evaluate("document.getElementById('viewer-options').open"));
-await click('viewer-close');
-
-// Recursive headings are real folder links; compact layout is bookmarkable.
-await open('/?folder=Album&recursive=1');
-await waitFor("document.querySelector('.folder-heading a')");
+await waitFor("document.getElementById('viewer').hidden");
+await click('scope-all');
+await waitFor("document.querySelectorAll('.folder-heading a').length === 2");
 await evaluate("document.querySelector('.folder-heading a').click()");
 await waitFor("new URLSearchParams(location.search).get('folder') === 'Album/Chapter 1'");
-await click('compact');
-await waitFor("document.getElementById('grid-viewport').classList.contains('compact')");
-assert.equal(await evaluate("new URLSearchParams(location.search).get('compact')"), '1');
-assert.equal(await evaluate("document.querySelectorAll('#grid img').length"), 0);
-assert.ok(await evaluate("document.querySelector('.list-item').getBoundingClientRect().height <= 44"));
-await screenshot('compact');
+assert.equal(await evaluate("document.getElementById('scope-all').getAttribute('aria-pressed')"), 'true');
 
-// Each history entry restores its own position, including a recursive grid.
-for (const path of ['/', '/?recursive=1']) {
-    await open(path);
-    await waitFor("document.querySelectorAll('.card').length > 0");
-    await evaluate("document.getElementById('grid-viewport').scrollTop = 800");
-    await waitFor("history.state?.gridTop === 800");
-    await click('compact');
-    await waitFor("document.getElementById('compact').checked");
-    await evaluate('history.back()');
-    await waitFor("document.getElementById('grid-viewport').scrollTop === 800");
+// Recursive paging and Back reuse discovered items without rebuilding the traversal.
+await open('/?recursive=1');
+await waitFor("document.getElementById('summary').textContent.includes('60 images')");
+for (let page=0; page<5; page++) {
+    await evaluate("document.getElementById('grid-viewport').scrollTop = document.getElementById('grid-viewport').scrollHeight");
+    await pause(100);
 }
-await call('Emulation.setDeviceMetricsOverride', {width:390, height:844, deviceScaleFactor:1, mobile:true});
-await open('/?' + new URLSearchParams({folder:'Album', image:'Album/Chapter 1/page2.jpg'}));
-await waitFor("document.getElementById('viewer-image').naturalWidth > 0");
-await screenshot('mobile-viewer');
-assert.ok(await evaluate('document.documentElement.scrollWidth <= innerWidth'));
+await waitFor("document.getElementById('summary').textContent === '165 images'");
+await evaluate("document.getElementById('grid-viewport').scrollTop = 1800");
+await pause(100);
+const recursiveAnchor = await evaluate('history.state.position.path');
+await click('layout-list');
+await pause(100);
+assert.equal(await evaluate('history.state.position.path'),recursiveAnchor);
+await evaluate('history.back()');
+await waitFor("document.getElementById('layout-previews').getAttribute('aria-pressed') === 'true'");
+assert.equal(await evaluate('history.state.position.path'),recursiveAnchor);
 
+// Fit page never upscales a small photo. Native wheel events turn fitted pages.
+await open(viewerUrl('root2.jpg', 'page', ''));
+await readyImage('root2.jpg');
+assert.ok(await evaluate("document.getElementById('viewer-image').width <= 320"));
+await call('Input.dispatchMouseEvent', {type:'mouseWheel', x:700,y:350,deltaX:0,deltaY:120});
+await readyImage('root3.jpg');
+await open(viewerUrl(first));
+await readyImage(first);
+await screenshot('viewer');
+await click('viewer-next');
+await readyImage(second);
+await click('viewer-next');
+await readyImage(last);
+const heightAtEnd = await evaluate("document.getElementById('viewer-image').height");
+await click('viewer-next');
+await waitFor("document.getElementById('viewer-next').getAttribute('aria-label') === 'Go to first image'");
+assert.equal(await evaluate("document.getElementById('viewer-image').height"), heightAtEnd);
+await key('ArrowRight', true);
+assert.ok(await evaluate(imageIs(last)));
+await key('ArrowRight');
+await readyImage(first);
+assert.equal(await evaluate("document.getElementById('viewer-wrap')"), null);
+
+// Edge gestures consume momentum; reverse wheel entry is at the previous image's bottom.
+await key('w');
+await waitFor("new URLSearchParams(location.search).get('size') === 'width'");
+assert.ok((await position()).max > 1000);
+await evaluate("document.getElementById('viewer-canvas').scrollTop = 400");
+await wheel(120);
+assert.ok((await position()).top > 400);
+assert.ok(await evaluate(imageIs(first)));
+await wheel(100000);
+assert.equal((await position()).top, (await position()).max);
+await wheel(70);
+await wheel(20);
+assert.ok(await evaluate(imageIs(first)));
+await pause(300);
+await wheel(100);
+await readyImage(second);
+assert.equal((await position()).top, 0);
+await wheel(20);
+assert.equal((await position()).top, 0);
+await pause(300);
+await wheel(-100);
+await readyImage(first);
+assert.ok(Math.abs((await position()).top - (await position()).max) <= 2);
+await click('viewer-next');
+await readyImage(second);
+await click('viewer-prev');
+await readyImage(first);
+assert.equal((await position()).top, 0);
+
+// Zoom preserves the source image point; manual sizing survives navigation and URLs.
+await evaluate("document.getElementById('viewer-canvas').scrollTop = 450");
+const sourcePoint = () => evaluate("(()=>{const c=document.getElementById('viewer-canvas'),i=document.getElementById('viewer-image'),b=c.getBoundingClientRect(),r=i.getBoundingClientRect();return (b.top+c.clientHeight/2-r.top)/(r.width/i.naturalWidth);})()");
+const beforeZoom = await sourcePoint();
+await click('viewer-zoom');
+await click('viewer-zoom-in');
+await click('viewer-zoom');
+assert.ok(Math.abs(await sourcePoint() - beforeZoom) < 3);
+await evaluate("document.getElementById('viewer-canvas').scrollLeft = 0");
+await call('Input.dispatchMouseEvent',{type:'mouseWheel',x:700,y:350,deltaX:120,deltaY:0});
+await pause(150);
+assert.ok(await evaluate("document.getElementById('viewer-canvas').scrollLeft > 0"));
+const size = await evaluate("document.getElementById('viewer-zoom').dataset.size");
+assert.equal(await evaluate("new URLSearchParams(location.search).get('size')"), size);
+await click('viewer-next');
+await readyImage(second);
+assert.equal(await evaluate("document.getElementById('viewer-zoom').dataset.size"), size);
+await evaluate("document.getElementById('viewer-stage').dispatchEvent(new WheelEvent('wheel',{deltaY:100,ctrlKey:true,cancelable:true}))");
+assert.ok(await evaluate(imageIs(second)));
+
+await click('viewer-thumbnails');
+await waitFor("document.querySelectorAll('#viewer-strip button').length === 3");
+// Hidden filmstrip cancels preview work and does not request thumbnails on later pages.
+await evaluate("document.getElementById('viewer-canvas').scrollTop = 450");
+const beforeStrip = await sourcePoint();
+await click('viewer-thumbnails');
+await pause(150);
+assert.ok(Math.abs(await sourcePoint() - beforeStrip) < 3);
+const thumbnailsBefore = requests.filter(url=>url.includes('/thumbnail?')).length;
+await click('viewer-next');
+await readyImage(last);
+await pause(300);
+assert.equal(requests.filter(url=>url.includes('/thumbnail?')).length, thumbnailsBefore);
+await key('Escape');
+await waitFor("document.getElementById('viewer').hidden");
+assert.ok(await evaluate("document.activeElement.getClientRects().length > 0"));
+
+// Delayed originals leave the old page stable; cancelled work cannot reopen a closed viewer.
+await open(viewerUrl(first));
+await readyImage(first);
+await call('Fetch.enable', {patterns:[{urlPattern:'*/image?*'},{urlPattern:'*/api/walk'}]});
+pauseImages = true;
+await click('viewer-next');
+await waitImage(second);
+await waitFor("document.getElementById('viewer-status').textContent.includes('Loading')");
+assert.equal(await evaluate("document.getElementById('viewer-image').dataset.path"), first);
+assert.equal(await evaluate("document.getElementById('viewer-zoom').disabled"), false);
+await click('viewer-zoom');
+assert.equal(await evaluate("document.getElementById('size-menu').hidden"), false);
+await evaluate("document.querySelector('[data-size=width]').click()");
+assert.equal(await evaluate("new URLSearchParams(location.search).get('size')"), 'width');
+assert.equal(await evaluate("document.getElementById('viewer-image').dataset.path"), first);
+
+await key('Escape');
+await waitFor("document.getElementById('viewer').hidden");
+pauseImages = false;
+for (const requestId of held.splice(0)) await call('Fetch.continueRequest',{requestId}).catch(()=>{});
+await pause(150);
+assert.ok(await evaluate("document.getElementById('viewer').hidden"));
+
+// A delayed walk isn't an end boundary. Empty and single-image collections have no dead controls.
+pauseWalk = true;
+await open('/?folder=Empty&viewer=1');
+await waitFor("document.getElementById('viewer-status').textContent.includes('Finding')");
+assert.ok(await evaluate("document.getElementById('viewer-next').disabled"));
+pauseWalk = false;
+for (const requestId of held.splice(0)) await call('Fetch.continueRequest',{requestId}).catch(()=>{});
+await waitFor("document.getElementById('viewer-status').textContent.includes('No images')");
+assert.ok(await evaluate("document.getElementById('viewer-zoom').disabled"));
+await call('Fetch.disable');
+await open('/?folder=Single&viewer=1');
+await readyImage('Single/only.jpg');
+await waitFor("document.getElementById('viewer-prev').disabled && document.getElementById('viewer-next').disabled");
+
+await open(viewerUrl('Album/Chapter 1/missing.jpg'));
+await waitFor("!document.getElementById('viewer-retry').hidden");
+assert.ok(await evaluate("!document.getElementById('viewer-next').disabled"));
+await click('viewer-next');
+await readyImage(first);
+await click('viewer-refresh');
+await readyImage(first);
+
+// Continued wheel input advances fitted pages without requiring a pause after every image.
+await open(viewerUrl('root2.jpg', 'page', ''));
+await readyImage('root2.jpg');
+for (let i=0; i<12; i++) await wheel(60);
+await pause(100);
+assert.ok(await evaluate("Number(new URLSearchParams(location.search).get('image').match(/root(\\d+)/)[1]) >= 4"));
+
+// A visible strip retains buttons and their order as pages turn; discovery is demand driven.
+await click('viewer-thumbnails');
+await waitFor("document.querySelectorAll('#viewer-strip button').length >= 32");
+await evaluate("window.retainedThumbnail=document.querySelector('#viewer-strip button')");
+const stripPaths = await evaluate("Array.from(document.querySelectorAll('#viewer-strip button'),button=>button.dataset.path)");
+await click('viewer-next');
+await pause(200);
+assert.ok(await evaluate('window.retainedThumbnail.isConnected'));
+assert.deepEqual(await evaluate("Array.from(document.querySelectorAll('#viewer-strip button'),button=>button.dataset.path)"),stripPaths);
+await evaluate("document.getElementById('viewer-strip').scrollLeft=100000");
+await waitFor(`document.querySelectorAll('#viewer-strip button').length > ${stripPaths.length}`);
+assert.ok(await evaluate("document.querySelectorAll('#viewer-strip button').length < 165"));
+await screenshot('thumbnails');
+await click('viewer-zoom');
+assert.equal(await evaluate("document.querySelectorAll('#size-menu > button').length"),3);
+await screenshot('sizing');
+await key('Escape');
+assert.ok(await evaluate("document.getElementById('size-menu').hidden && !document.getElementById('viewer').hidden"));
+await click('viewer-thumbnails');
+
+// Breadcrumbs leave the reader for the image's actual folder, preserving the grid layout.
+await open(viewerUrl(first));
+await readyImage(first);
+await evaluate("document.querySelector('#viewer-path a:last-child').click()");
+await waitFor("document.getElementById('viewer').hidden && document.querySelectorAll('.card').length === 2");
+assert.equal(await evaluate("new URLSearchParams(location.search).get('folder')"),'Album/Chapter 1');
+assert.equal(await evaluate("document.querySelector('#breadcrumbs [aria-current]').tagName"),'SPAN');
+
+// Special filenames and narrow screens retain controls, full names, and a visible focus target.
+await open(viewerUrl('Odd & #/a ?#%.jpg', 'page', 'Odd & #'));
+await readyImage('Odd & #/a ?#%.jpg');
+await call('Emulation.setDeviceMetricsOverride', {width:390,height:844,deviceScaleFactor:1,mobile:true});
+await open(viewerUrl(first,'width'));
+await readyImage(first);
+assert.ok(await evaluate('document.documentElement.scrollWidth <= innerWidth'));
+await screenshot('mobile-viewer');
+await key('Tab');
+assert.ok(await evaluate("document.activeElement.getClientRects().length > 0"));
+await open('/?folder=Names&compact=1');
+await waitFor("document.querySelector('.list-name')");
+assert.ok(await evaluate("document.querySelector('.list-name').getBoundingClientRect().bottom <= document.querySelector('.list-item').getBoundingClientRect().bottom"));
+assert.ok(await evaluate("document.querySelector('.list-read').getBoundingClientRect().right < document.querySelector('.list-name').getBoundingClientRect().left"));
+assert.equal(await evaluate("document.querySelector('.list-item').firstElementChild.className"),'list-read');
+await screenshot('long-names');
 assert.equal(exceptions.length, 0, JSON.stringify(exceptions));
-console.log('Browser smoke passed: virtual grid, recursive viewer, natural order, gesture wrapping, history, URLs, long names, empty folders, scroll restoration, zoom, reading controls, compact layout, chapter links.');
+console.log('Browser smoke passed: navigation, history, filtering, layout anchors, gesture edges, zoom anchors, slow loads, cancellation, filmstrip, URLs, empty/single images, responsive controls.');
 socket.close();

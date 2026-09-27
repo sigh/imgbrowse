@@ -6,7 +6,7 @@ import {PreviewLoader} from '../static/preview-loader.js';
 
 test('image URLs retain independent grid and viewer contexts', () => {
     const state = {
-        folder: 'Album & photos', recursive: false, compact: true, filter: 'chapter',
+        folder: 'Album & photos', recursive: false, compact: true, size: 'width', filter: 'chapter',
         viewing: true, collection: 'Album & photos/Chapter 2',
         image: 'Album & photos/Chapter 2/page #1%.jpg',
     };
@@ -74,4 +74,15 @@ test('queued previews are discarded when their row is removed', async () => {
     scope.dispose();
     await assert.rejects(job, {name: 'AbortError'});
     assert.equal(started, false);
+});
+
+
+test('invalid image sizes fall back to Fit page and valid sizes survive URLs', () => {
+    for (const size of ['0', '-1', 'NaN', 'Infinity', '10', '<script>']) {
+        assert.equal(readState(new URLSearchParams({size})).size, 'page');
+    }
+    for (const size of ['page', 'width', '0.5', '1.25', '8']) {
+        const state = {...readState(''), viewing: true, size};
+        assert.equal(readState(new URL(stateUrl(state), 'http://localhost').search).size, size);
+    }
 });

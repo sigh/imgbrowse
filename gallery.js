@@ -4,58 +4,91 @@ import {ImageViewer} from './static/image-viewer.js';
 import {PreviewLoader} from './static/preview-loader.js';
 import {filename, joinPath, readState, stateUrl} from './static/state.js';
 
-const FILTER_DELAY = 200;
+const FILTER_DELAY = 150;
 
-/** Coordinates URL navigation and the two views; each view owns its own work. */
+/** Coordinates browser history and independent folder/reader views. */
 class GalleryApp {
     constructor() {
         this.rootName = 'Collection';
+        this.readingSize = 'page';
         this.previews = new PreviewLoader(byId('grid-viewport'), byId('viewer'));
         this.grid = new FolderGrid(this.previews, {
             folderLink: (path, label) => this.folderLink(path, label),
-            openViewer: (image, collection) => this.navigate({viewing: true, image, collection}),
+            openViewer: (image, collection, opener) => this.openViewer(image, collection, opener),
             folderLoaded: name => this.folderLoaded(name),
         });
         this.viewer = new ImageViewer(this.previews, {
-            selectImage: image => this.navigate({image}, true),
-            close: () => this.navigate({viewing: false, image: null}),
+            selectImage: (image, entry) => this.navigate({image}, true, entry),
+            changeSize: size => this.navigate({size}, true),
+            close: () => this.closeViewer(),
+            folderLink: (path, label) => this.folderLink(path, label),
         });
         history.scrollRestoration = 'manual';
         this.bindControls();
-        this.render();
+        this.render(false, true);
     }
 
     bindControls() {
-        byId('compact').addEventListener('change', event => this.navigate({compact: event.target.checked}));
+        for (const button of document.querySelectorAll('[data-layout]')) {
+            button.addEventListener('click', () => this.navigate({compact: button.dataset.layout === 'list'}));
+        }
+        byId('scope-all').addEventListener('click', () => this.navigate({recursive: !this.state.recursive}));
         this.grid.viewport.addEventListener('scroll', () => {
-            if (this.grid.restoreTop == null) this.savePosition();
+            if (this.scrollScheduled) return;
+            this.scrollScheduled = true;
+            requestAnimationFrame(() => { this.scrollScheduled = false; this.savePosition(); });
         });
-        byId('recursive').addEventListener('change', event => this.navigate({recursive: event.target.checked}));
         byId('filter').addEventListener('input', event => {
             const filter = event.target.value;
             clearTimeout(this.filterTimer);
             this.filterTimer = setTimeout(() => this.navigate({filter}, true), FILTER_DELAY);
         });
-        byId('refresh').addEventListener('click', () => this.render(true));
-        byId('read-folder').addEventListener('click', () => {
-            this.navigate({viewing: true, image: null, collection: this.state.folder});
-        });
-        window.addEventListener('popstate', () => this.render());
+        byId('refresh').addEventListener('click', () => { this.savePosition(); this.render(true, true); });
+        byId('read-folder').addEventListener('click', event => this.openViewer(null, this.state.folder, event.currentTarget));
+        window.addEventListener('popstate', () => this.render(false, true));
     }
 
     savePosition() {
-        history.replaceState({...history.state, gridTop: this.grid.viewport.scrollTop}, '');
+        if (this.grid.loadingFolder || this.grid.restorePosition || !this.state) return;
+        history.replaceState({...history.state, position: this.grid.position()}, '');
     }
 
-    navigate(changes, replace = false) {
+    openViewer(image, collection, opener) {
+        this.viewer.openingFocus = opener || document.activeElement;
+        this.navigate({viewing: true, image, collection, size: this.readingSize});
+    }
+
+    closeViewer() {
+        if (!this.state.viewing || this.closing) return;
+        clearTimeout(this.filterTimer);
+        if (history.state?.openedFromGrid) {
+            this.closing = true;
+            history.back();
+        } else {
+            // A direct viewer URL has no app-owned grid entry to go back to.
+            this.navigate({viewing: false, image: null}, true);
+        }
+    }
+
+    navigate(changes, replace = false, entry = 'top') {
         clearTimeout(this.filterTimer);
         this.savePosition();
         const next = {...this.state, ...changes};
-        const sameGrid = ['folder', 'recursive', 'filter', 'compact'].every(key => next[key] === this.state[key]);
-        const position = sameGrid ? history.state : {gridTop: 0};
-        const url = stateUrl(next);
-        history[replace ? 'replaceState' : 'pushState'](position, '', url);
-        this.render();
+        if (!replace && stateUrl(next) === stateUrl(this.state)) return;
+        const opening = next.viewing && !this.state.viewing;
+        const sameFolder = next.folder === this.state.folder;
+        let position = sameFolder ? this.grid.position() : null;
+        if (this.state.viewing && !next.viewing && this.state.image) {
+            const relative = this.state.image.slice(next.folder ? next.folder.length + 1 : 0);
+            const path = next.recursive ? this.state.image : joinPath(next.folder, relative.split('/')[0]);
+            position = {path, offset: 0};
+        }
+        const metadata = {
+            position,
+            openedFromGrid: opening || (next.viewing && Boolean(history.state?.openedFromGrid)),
+        };
+        history[replace ? 'replaceState' : 'pushState'](metadata, '', stateUrl(next));
+        this.render(false, true, entry);
     }
 
     folderLink(path, label) {
@@ -79,30 +112,40 @@ class GalleryApp {
 
     renderBreadcrumbs() {
         const breadcrumbs = byId('breadcrumbs');
-        breadcrumbs.replaceChildren(this.folderLink('', this.rootName));
+        breadcrumbs.replaceChildren();
+        const parts = [{path: '', name: this.rootName}];
         let path = '';
         for (const name of this.state.folder.split('/').filter(Boolean)) {
             path = joinPath(path, name);
-            breadcrumbs.append(element('span', '', '/'), this.folderLink(path, name));
+            parts.push({path, name});
         }
+        parts.forEach((part, index) => {
+            if (index) breadcrumbs.append(element('span', '', '/'));
+            const node = index === parts.length - 1 ? element('span', '', part.name) : this.folderLink(part.path, part.name);
+            if (index === parts.length - 1) node.setAttribute('aria-current', 'page');
+            breadcrumbs.append(node);
+        });
     }
 
-    render(force = false) {
+    render(force = false, restore = false, entry = 'top') {
         clearTimeout(this.filterTimer);
+        this.closing = false;
         this.state = readState();
-        byId('compact').checked = this.state.compact;
-        byId('recursive').checked = this.state.recursive;
-        const filter = byId('filter');
-        filter.value = this.state.filter;
-        filter.disabled = this.state.recursive;
-        filter.placeholder = this.state.recursive
-            ? 'Name filtering is available in folder view' : 'Filter this folder by name';
+        if (this.state.viewing) this.readingSize = this.state.size;
+        for (const button of document.querySelectorAll('[data-layout]')) {
+            button.setAttribute('aria-pressed', String((button.dataset.layout === 'list') === this.state.compact));
+        }
+        byId('scope-all').setAttribute('aria-pressed', String(this.state.recursive));
+        byId('scope-note').hidden = !this.state.recursive;
+        byId('filter').value = this.state.filter;
+        byId('filter').hidden = this.state.recursive;
+        byId('filter-note').hidden = !this.state.recursive;
         document.querySelector('.toolbar').inert = this.state.viewing;
         document.querySelector('.app-header').inert = this.state.viewing;
         this.renderBreadcrumbs();
         this.previews.setViewerOpen(this.state.viewing);
-        this.grid.show(this.state, force, history.state?.gridTop || 0);
-        this.viewer.show(this.state, force);
+        this.grid.show(this.state, force, restore ? history.state?.position : null);
+        this.viewer.show(this.state, force, entry);
     }
 }
 

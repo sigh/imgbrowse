@@ -24,7 +24,6 @@ export class GridLayout {
         this.imageHeight = number('--card-image-height');
         this.captionPadding = number('--card-caption-padding');
         this.rowPadding = number('--grid-row-padding');
-        this.actionHeight = number('--card-action-height');
         this.fontFamily = style.fontFamily;
         this.compact = this.viewport.classList.contains('compact');
         this.columns = this.compact ? 1 : Math.max(1, Math.floor(this.width / number('--grid-min-column-width')));
@@ -79,12 +78,14 @@ export class GridLayout {
                 this.height += current.height;
             }
             current.items.push(item);
-            const labelWidth = cardWidth - (this.compact ? 138 : this.captionPadding * 2 + 2); // Card borders.
+            const isFolder = item.type === 'folder';
+            const controlsWidth = this.compact ? (isFolder ? 108 : 48)
+                : this.captionPadding * 2 + 2 + (isFolder ? 80 : 0);
+            const labelWidth = cardWidth - controlsWidth;
             const contentHeight = this.compact
                 ? this.labelHeight(filename(item.path), labelWidth, this.cardFont) + 16
                 : this.imageHeight + this.captionPadding * 2 + 2 + this.rowPadding * 2
-                + this.labelHeight(filename(item.path), labelWidth, this.cardFont)
-                + (item.type === 'folder' ? this.actionHeight : 0);
+                + this.labelHeight(filename(item.path), labelWidth, this.cardFont);
             const newHeight = Math.max(current.height, contentHeight);
             this.height += newHeight - current.height;
             current.height = newHeight;

@@ -9,64 +9,61 @@
 </head>
 <body>
     <header class="app-header">
-        <a class="brand" href="/">Image Browser</a>
         <nav id="breadcrumbs" aria-label="Folder path"></nav>
-        <button id="refresh" title="Reload this folder">Refresh</button>
+        <div class="browse-controls">
+            <div class="choice-group" role="group" aria-label="Folder layout">
+                <button id="layout-previews" data-layout="previews" aria-pressed="true">Previews</button>
+                <button id="layout-list" data-layout="list" aria-pressed="false">List</button>
+            </div>
+            <button id="scope-all" aria-pressed="false">Include subfolders</button>
+            <button id="refresh" title="Reload this folder">Refresh</button>
+        </div>
     </header>
     <div class="toolbar">
-        <label><input id="recursive" type="checkbox"> Include subfolders in grid</label>
-        <label><input id="compact" type="checkbox"> List view</label>
+        <button id="read-folder" title="View this folder and all its subfolders">View images</button>
+        <span id="scope-note" hidden>Including subfolders</span>
         <input id="filter" type="search" placeholder="Filter this folder by name" aria-label="Filter this folder by name">
-        <button id="read-folder">View all images</button>
+        <span id="filter-note" hidden>Name filtering is available in This folder.</span>
     </div>
     <main id="grid-viewport" tabindex="0" aria-label="Folder contents">
         <div id="grid"></div>
         <p id="grid-status" role="status"></p>
-        <button id="load-more" hidden>Continue loading</button>
+        <button id="load-more" hidden>Retry</button>
     </main>
     <footer id="summary" aria-live="polite"></footer>
 
     <section id="viewer" class="viewer" role="dialog" aria-modal="true" aria-label="Image viewer" hidden>
         <header class="viewer-header">
-            <div><div id="viewer-collection"></div><div id="viewer-chapter"></div><div id="viewer-name"></div></div>
+            <div class="viewer-location"><nav id="viewer-path" aria-label="Image folder path"></nav><div id="viewer-name"></div></div>
             <div class="viewer-tools" aria-label="Reading controls">
-                <div class="zoom-controls">
-                    <button id="viewer-zoom-out" aria-label="Zoom out" title="Zoom out (−)">−</button>
-                    <select id="viewer-zoom" aria-label="Image size">
-                        <option value="page">Fit page</option>
-                        <option value="width">Fit width</option>
-                        <option value="0.1">10%</option><option value="0.25">25%</option>
-                        <option value="0.5">50%</option><option value="0.75">75%</option>
-                        <option value="1">100%</option><option value="1.25">125%</option>
-                        <option value="1.5">150%</option><option value="2">200%</option>
-                        <option value="3">300%</option><option value="4">400%</option>
-                        <option value="6">600%</option><option value="8">800%</option>
-                    </select>
-                    <button id="viewer-zoom-in" aria-label="Zoom in" title="Zoom in (+)">+</button>
-                </div>
-                <details id="viewer-options">
-                    <summary aria-label="Viewer options" title="Viewer options">•••</summary>
-                    <div class="viewer-options-panel">
-                        <label><input id="viewer-thumbnails" type="checkbox" checked> Show filmstrip</label>
-                        <button id="viewer-controls">Reading mode <small>H</small></button>
-                        <p>← / → &nbsp; Previous / next<br>+ / − &nbsp; Zoom<br>F / W &nbsp; Fit page / width<br>T &nbsp; Toggle filmstrip<br>H &nbsp; Toggle reading mode<br>Esc &nbsp; Close viewer</p>
-                        <p>Scroll turns pages in Fit page mode; otherwise it scrolls the image.</p>
+                <button id="viewer-refresh" aria-label="Refresh image" title="Reload the current image and its neighbors"></button>
+                <button id="viewer-thumbnails" aria-label="Thumbnails" aria-expanded="false" aria-controls="viewer-strip" title="Thumbnails (T)"></button>
+                <div class="size-control">
+                    <button id="viewer-zoom" aria-expanded="false" aria-controls="size-menu">Fit ▾</button>
+                    <div id="size-menu" role="group" aria-label="Image size" hidden>
+                        <button data-size="page">Fit page</button>
+                        <button data-size="width">Fit width</button>
+                        <button data-size="1">Actual size</button>
+                        <div class="zoom-controls">
+                            <button id="viewer-zoom-out" aria-label="Zoom out" title="Zoom out (−)">−</button>
+                            <span id="zoom-value"></span>
+                            <button id="viewer-zoom-in" aria-label="Zoom in" title="Zoom in (+)">+</button>
+                        </div>
                     </div>
-                </details>
-                <button id="viewer-close" aria-label="Close viewer (Escape)">Close ×</button>
+                </div>
+                <button id="viewer-close" aria-label="Close viewer (Escape)" title="Close (Escape)">×</button>
             </div>
         </header>
-        <button id="viewer-show-controls" hidden>Show controls</button>
-        <div class="viewer-stage">
-            <button id="viewer-prev" class="viewer-nav" aria-label="Previous image">❮</button>
-            <div id="viewer-canvas" tabindex="0" aria-label="Image; scroll when enlarged"><img id="viewer-image" alt=""></div>
-            <button id="viewer-next" class="viewer-nav" aria-label="Next image">❯</button>
+        <div id="viewer-stage" class="viewer-stage">
+            <button id="viewer-prev" class="viewer-nav" aria-label="Previous image" title="Previous image (←)"><span aria-hidden="true">❮</span><span class="nav-label">Previous</span></button>
+            <div id="viewer-canvas" tabindex="-1" aria-label="Image; scroll when enlarged"><div class="image-surface"><img id="viewer-image" alt="" hidden></div></div>
+            <button id="viewer-next" class="viewer-nav" aria-label="Next image" title="Next image (→)"><span aria-hidden="true">❯</span><span class="nav-label">Next</span></button>
         </div>
-        <div class="viewer-feedback">
+        <div class="viewer-footer">
             <span id="viewer-status" role="status"></span>
-            <button id="viewer-wrap" hidden></button>
+            <button id="viewer-retry" hidden>Retry</button>
         </div>
-        <div id="viewer-strip" class="viewer-strip" aria-label="Nearby images"></div>
+        <div id="viewer-strip" class="viewer-strip" aria-label="Collection thumbnails" tabindex="0" hidden></div>
     </section>
 </body>
 </html>

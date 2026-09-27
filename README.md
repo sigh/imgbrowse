@@ -20,7 +20,7 @@ The server currently listens on localhost.
 
 Open folders or select an image to read. The viewer includes all descendants in
 natural filename order. Use left/right arrows to turn pages, Escape to close,
-and the size selector to fit or zoom. Viewer options contain the other shortcuts.
+and the size selector to fit or zoom. Scroll again at an image edge to turn pages.
 
 Switch between previews and a name list; optionally include subfolders. Filtering
 matches names in the current folder. URLs can be bookmarked, and browser history

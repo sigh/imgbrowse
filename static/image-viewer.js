@@ -1,124 +1,84 @@
 import {imageUrl, walkImages} from './api.js';
 import {byId, element, TaskScope} from './dom.js';
-import {filename, parentPath} from './state.js';
+import {filename, parentPath, joinPath, IMAGE_SIZES} from './state.js';
+import {ViewerViewport} from './viewer-viewport.js';
+import {WheelGesture} from './wheel-gesture.js';
 
-const ZOOM_STEPS = [.1, .25, .5, .75, 1, 1.25, 1.5, 2, 3, 4, 6, 8];
-const NEARBY_COUNT = 4;
+import {icon} from './icons.js';
+import {ThumbnailStrip} from './thumbnail-strip.js';
+
+const NEARBY_COUNT = 1;
 const LOADING_DELAY = 700;
-const WHEEL_INTERVAL = 220;
-const WHEEL_GESTURE_GAP = 300;
-const PREVIOUS_KEYS = ['ArrowLeft', 'ArrowUp'];
-const NEXT_KEYS = ['ArrowRight', 'ArrowDown'];
+const ZOOM_STEPS = IMAGE_SIZES.slice(2).map(Number);
 
-/** Single-image viewing, neighbor discovery, and deliberate boundary wrapping. */
+/** Owns image loading and collection navigation; geometry and gestures are separate. */
 export class ImageViewer {
-    constructor(previews, {selectImage, close}) {
-        this.previews = previews;
-        this.selectImage = selectImage;
-        this.close = close;
+    constructor(previews, {selectImage, changeSize, close, folderLink}) {
+        Object.assign(this, {previews, selectImage, changeSize, close, folderLink});
         this.container = byId('viewer');
-        this.image = byId('viewer-image');
         this.canvas = byId('viewer-canvas');
-        this.fit = 'page';
-        this.zoom = 1;
-        this.controlsHidden = false;
-        this.thumbnailsVisible = true;
+        this.viewport = new ViewerViewport(this.canvas);
+        this.wheel = new WheelGesture();
         this.strip = byId('viewer-strip');
         this.status = byId('viewer-status');
-        this.collectionLabel = byId('viewer-collection');
-        this.nameLabel = byId('viewer-name');
         this.closeButton = byId('viewer-close');
-        this.wrapButton = byId('viewer-wrap');
-        this.key = null;
+        this.previousButton = byId('viewer-prev');
+        this.nextButton = byId('viewer-next');
         this.rootName = 'Collection';
-        this.nearbyImages = [];
-        this.nearbyCollection = null;
+        this.key = null;
         this.boundaryDirection = null;
-        this.lastWheel = 0;
-        this.lastWheelEvent = -Infinity;
+        this.nearbyImages = [];
+        this.thumbnailsVisible = sessionStorage.getItem('thumbnails') === 'true';
+        this.filmstrip = new ThumbnailStrip(this.strip, previews, selectImage);
+        this.lastWheelTurn = -Infinity;
+        this.loadingImage = false;
+        this.singleImage = false;
         this.bindControls();
-        new ResizeObserver(() => this.sizeImage()).observe(this.canvas);
-        this.image.addEventListener('load', () => this.sizeImage());
     }
 
     bindControls() {
-        byId('viewer-zoom').addEventListener('change', event => {
-            const value = event.target.value;
-            if (value === 'page' || value === 'width') this.setFit(value);
-            else {
-                this.fit = 'manual';
-                this.zoom = Number(value);
-                this.sizeImage();
-            }
+        byId('viewer-thumbnails').append(icon('thumbnails'));
+        byId('viewer-refresh').append(icon('refresh'));
+        byId('viewer-zoom').addEventListener('click', () => this.setSizeMenu(byId('size-menu').hidden));
+        for (const button of document.querySelectorAll('[data-size]')) {
+            button.addEventListener('click', () => { this.changeSize(button.dataset.size); this.setSizeMenu(false); });
+        }
+        document.addEventListener('pointerdown', event => {
+            if (!event.target.closest('.size-control')) this.setSizeMenu(false, false);
         });
-        byId('viewer-zoom-in').addEventListener('click', () => this.changeZoom(1));
-        byId('viewer-zoom-out').addEventListener('click', () => this.changeZoom(-1));
-        byId('viewer-thumbnails').addEventListener('change', () => this.toggleThumbnails());
-        byId('viewer-controls').addEventListener('click', () => this.toggleControls());
-        byId('viewer-show-controls').addEventListener('click', () => this.toggleControls());
-        this.container.addEventListener('click', event => {
-            if (!event.target.closest('#viewer-options')) byId('viewer-options').open = false;
-        });
+        byId('viewer-zoom-in').addEventListener('click', () => this.zoom(1));
+        byId('viewer-zoom-out').addEventListener('click', () => this.zoom(-1));
+        byId('viewer-thumbnails').addEventListener('click', () => this.toggleThumbnails());
+        byId('viewer-retry').addEventListener('click', () => this.show(this.state, true));
+        byId('viewer-refresh').addEventListener('click', () => this.show(this.state, true));
         this.closeButton.addEventListener('click', this.close);
-        byId('viewer-prev').addEventListener('click', () => this.requestMove(true));
-        byId('viewer-next').addEventListener('click', () => this.requestMove(false));
-        this.wrapButton.addEventListener('click', () => {
-            if (this.boundaryDirection === null) return;
-            const reverse = this.boundaryDirection;
-            this.clearBoundary();
-            this.moveImage(reverse, true);
-        });
+        this.previousButton.addEventListener('click', () => this.requestMove(true));
+        this.nextButton.addEventListener('click', () => this.requestMove(false));
         document.addEventListener('keydown', event => this.onKey(event));
-        this.container.addEventListener('wheel', event => this.onWheel(event), {passive: false});
+        byId('viewer-stage').addEventListener('wheel', event => this.onWheel(event), {passive: false});
     }
 
-    setFit(fit) {
-        this.fit = fit;
-        this.zoom = 1;
-        this.canvas.scrollTo(0, 0);
-        this.sizeImage();
-    }
-
-    changeZoom(direction) {
-        const current = this.imageScale();
+    zoom(direction) {
+        if (!this.viewport.ready) return;
+        const scale = this.viewport.scale;
         const steps = direction > 0 ? ZOOM_STEPS : [...ZOOM_STEPS].reverse();
-        this.zoom = steps.find(step => direction > 0 ? step > current + .001 : step < current - .001)
-            ?? (direction > 0 ? ZOOM_STEPS.at(-1) : ZOOM_STEPS[0]);
-        this.fit = 'manual';
-        this.sizeImage();
+        const next = steps.find(step => direction > 0 ? step > scale + .001 : step < scale - .001);
+        if (next != null) this.changeSize(String(next));
     }
 
-    imageScale() {
-        if (this.fit === 'manual') return this.zoom;
-        const width = this.image.naturalWidth || 1;
-        const height = this.image.naturalHeight || 1;
-        return this.fit === 'width' ? this.canvas.clientWidth / width
-            : Math.min(this.canvas.clientWidth / width, this.canvas.clientHeight / height);
-    }
-
-    sizeImage() {
-        const {naturalWidth: width, naturalHeight: height} = this.image;
-        if (!width || !height || this.container.hidden) return;
-        const scale = this.imageScale();
-        this.image.style.width = Math.max(1, Math.floor(width * scale)) + 'px';
-        this.image.style.height = Math.max(1, Math.floor(height * scale)) + 'px';
-        byId('viewer-zoom').value = this.fit === 'manual' ? String(this.zoom) : this.fit;
-        byId('viewer-zoom-out').disabled = scale <= ZOOM_STEPS[0];
-        byId('viewer-zoom-in').disabled = scale >= ZOOM_STEPS.at(-1);
+    setSizeMenu(open, restoreFocus = true) {
+        const wasOpen = !byId('size-menu').hidden;
+        byId('size-menu').hidden = !open;
+        byId('viewer-zoom').setAttribute('aria-expanded', String(open));
+        if (!open && wasOpen && restoreFocus) byId('viewer-zoom').focus({preventScroll: true});
     }
 
     toggleThumbnails() {
+        const point = this.viewport.point();
         this.thumbnailsVisible = !this.thumbnailsVisible;
-        this.strip.hidden = !this.thumbnailsVisible;
-        byId('viewer-thumbnails').checked = this.thumbnailsVisible;
-    }
-
-    toggleControls() {
-        this.controlsHidden = !this.controlsHidden;
-        this.container.classList.toggle('controls-hidden', this.controlsHidden);
-        byId('viewer-show-controls').hidden = !this.controlsHidden;
-        byId('viewer-options').open = false;
-        (this.controlsHidden ? byId('viewer-show-controls') : this.closeButton).focus();
+        sessionStorage.setItem('thumbnails', String(this.thumbnailsVisible));
+        this.renderStrip();
+        this.viewport.resize(point);
     }
 
     setRootName(name) {
@@ -127,200 +87,298 @@ export class ImageViewer {
     }
 
     updateCollectionLabel() {
-        this.collectionLabel.textContent = (this.state.collection || this.rootName) + ' · all subfolders';
+        const path = byId('viewer-path');
+        const focusedPath = path.contains(document.activeElement) ? document.activeElement.getAttribute('href') : null;
+        path.replaceChildren();
+        const folder = this.state.image ? parentPath(this.state.image) : this.state.collection;
+        const parts = [{path: '', name: this.rootName}];
+        let current = '';
+        for (const name of folder.split('/').filter(Boolean)) {
+            current = joinPath(current, name);
+            parts.push({path: current, name});
+        }
+        for (const [index, part] of parts.entries()) {
+            if (index) path.append(element('span', '', '/'));
+            const link = this.folderLink(part.path, part.name);
+            if (part.path === this.state.collection) {
+                link.classList.add('collection-link');
+                link.title = 'Viewing this folder and its subfolders';
+            }
+            path.append(link);
+            if (focusedPath === link.getAttribute('href')) link.focus({preventScroll: true});
+        }
+    }
+
+    updateControls() {
+        const hasImage = Boolean(this.state.image);
+        this.previousButton.disabled = !hasImage || this.singleImage || Boolean(this.moveScope);
+        this.nextButton.disabled = this.previousButton.disabled;
+        // The displayed image remains usable while its replacement loads.
+        const sizing = this.viewport.ready;
+        byId('viewer-zoom').disabled = !sizing;
+        const label = this.state.size === 'page' ? 'Fit' : this.state.size === 'width' ? 'Width' : Math.round(Number(this.state.size) * 100) + '%';
+        if (byId('viewer-zoom').dataset.size !== this.state.size) {
+            byId('viewer-zoom').textContent = label + ' ▾';
+        }
+        byId('viewer-zoom').dataset.size = this.state.size;
+        byId('zoom-value').textContent = Math.round(this.viewport.scale * 100) + '%';
+        for (const button of document.querySelectorAll('[data-size]')) {
+            button.setAttribute('aria-pressed', String(button.dataset.size === this.state.size));
+            button.disabled = !sizing;
+        }
+        byId('viewer-zoom-out').disabled = !sizing || this.viewport.scale <= ZOOM_STEPS[0];
+        byId('viewer-zoom-in').disabled = !sizing || this.viewport.scale >= ZOOM_STEPS.at(-1);
+        for (const [button, reverse] of [[this.previousButton, true], [this.nextButton, false]]) {
+            const wrap = this.boundaryDirection === reverse;
+            button.querySelector('.nav-label').textContent = wrap ? (reverse ? 'Go to last image' : 'Go to first image')
+                : (reverse ? 'Prev' : 'Next');
+            button.setAttribute('aria-label', wrap ? (reverse ? 'Go to last image' : 'Go to first image')
+                : (reverse ? 'Previous image' : 'Next image'));
+            button.classList.toggle('wrap', wrap);
+        }
+        this.container.setAttribute('aria-busy', String(this.loadingImage || Boolean(this.moveScope)));
     }
 
     clearBoundary() {
         this.boundaryDirection = null;
-        this.wrapButton.hidden = true;
         this.status.textContent = '';
+        byId('viewer-retry').hidden = true;
     }
 
-    clearNeighbors() {
-        this.nearbyImages = [];
-        this.nearbyCollection = null;
-    }
-
-    show(state, force = false) {
+    show(state, force = false, entry = 'top') {
         this.state = state;
+        this.viewport.setSize(state.size);
         const key = JSON.stringify([state.viewing, state.collection, state.image]);
-        if (!force && key === this.key) return;
+        if (!force && key === this.key) {
+            this.updateControls();
+            return;
+        }
         this.key = key;
         this.scope?.dispose();
         this.moveScope?.dispose();
         this.moveScope = null;
         this.scope = new TaskScope();
-        this.strip.replaceChildren();
+        this.loadingImage = false;
+        this.singleImage = false;
         this.clearBoundary();
-        this.container.setAttribute('aria-busy', 'false');
-        if (force) this.clearNeighbors();
         const wasOpen = !this.container.hidden;
         this.container.hidden = !state.viewing;
         if (!state.viewing) {
-            this.clearNeighbors();
-            this.image.removeAttribute('src');
-            if (wasOpen && this.previousFocus?.isConnected) this.previousFocus.focus({preventScroll: true});
+            this.nearbyImages = [];
+            this.nearbyCollection = null;
+            this.viewport.clear();
+            this.filmstrip.stop();
+            this.setSizeMenu(false, false);
+            if (wasOpen) {
+                const target = this.opener?.isConnected && this.opener !== document.body && this.opener.getClientRects().length
+                    ? this.opener : byId('grid-viewport');
+                target.focus({preventScroll: true});
+            }
             return;
         }
         if (!wasOpen) {
-            if (this.controlsHidden) this.toggleControls();
-            this.previousFocus = document.activeElement;
-            this.closeButton.focus();
+            this.opener = this.openingFocus || document.activeElement;
+            this.openingFocus = null;
+            this.canvas.focus({preventScroll: true});
         }
+        if (force || this.nearbyCollection !== state.collection) this.nearbyImages = [];
         this.updateCollectionLabel();
-        this.nameLabel.textContent = filename(state.image || '');
-        this.nameLabel.title = state.image || '';
-        byId('viewer-chapter').textContent = parentPath(state.image || '');
-        this.canvas.scrollTo(0, 0);
+        this.renderStrip(force);
+        this.updateControls();
         if (state.image) {
-            // A bookmarked image loads directly, independent of neighbor discovery.
-            const scope = this.scope;
-            this.image.alt = filename(state.image);
-            this.image.src = imageUrl(state.image);
-            this.image.onerror = () => {
-                if (!scope.signal.aborted) this.status.textContent = 'Image unavailable. You can still navigate to another image.';
-            };
-            this.loadStrip(state.image, state.collection, scope);
+            this.loadImage(state.image, this.scope, entry, force);
+            this.loadNeighbors(state.image, state.collection, this.scope);
         } else {
-            this.image.removeAttribute('src');
+            this.viewport.clear();
+            this.updateControls();
+            byId('viewer-name').textContent = '';
             this.moveImage();
         }
     }
 
-    async loadStrip(image, collection, scope) {
-        const request = reverse => walkImages({root: collection, anchor: image, reverse, limit: NEARBY_COUNT}, scope.signal);
+    async loadImage(path, scope, entry, refresh) {
+        this.loadingImage = true;
+        this.updateControls();
+        let pending;
+        const timer = setTimeout(() => {
+            if (!scope.signal.aborted) this.status.textContent = 'Loading ' + filename(path) + '…';
+        }, LOADING_DELAY);
+        scope.onDispose(() => { clearTimeout(timer); if (pending) pending.src = ''; });
         try {
+            // Fetch allows cancellation; decode before replacing the displayed page.
+            const response = await fetch(imageUrl(path), {signal: scope.signal, cache: refresh ? 'reload' : 'default'});
+            if (!response.ok) throw new Error('Image unavailable');
+            const blob = await response.blob();
+            scope.signal.throwIfAborted();
+            pending = new Image();
+            pending.src = scope.objectUrl(blob);
+            await pending.decode();
+            scope.signal.throwIfAborted();
+            pending.alt = filename(path);
+            pending.dataset.path = path;
+            this.viewport.show(pending, this.state.size, entry);
+            pending = null;
+            byId('viewer-name').textContent = filename(path);
+            byId('viewer-name').title = path;
+            if (this.boundaryDirection === null && !this.moveScope) this.status.textContent = '';
+        } catch (error) {
+            if (error.name !== 'AbortError' && !scope.signal.aborted) {
+                this.viewport.clear();
+                byId('viewer-name').textContent = filename(path);
+                this.status.textContent = 'Unable to open ' + path + '. Retry or move to another image.';
+                byId('viewer-retry').hidden = false;
+            }
+        } finally {
+            clearTimeout(timer);
+            if (scope === this.scope) {
+                this.loadingImage = false;
+                this.updateControls();
+            }
+        }
+    }
+
+    async loadNeighbors(image, collection, scope) {
+        try {
+            const request = reverse => walkImages({root: collection, anchor: image, reverse, limit: NEARBY_COUNT}, scope.signal);
             const [before, after] = await Promise.all([request(true), request(false)]);
             scope.signal.throwIfAborted();
             this.nearbyImages = [...before.images.reverse(), image, ...after.images];
             this.nearbyCollection = collection;
-            for (const path of this.nearbyImages) {
-                const button = element('button', path === image ? 'selected' : '');
-                button.title = path;
-                button.setAttribute('aria-label', 'View ' + filename(path));
-                button.addEventListener('click', () => this.selectImage(path));
-                this.strip.append(button);
-                // An unavailable preview must not prevent selecting the image.
-                this.previews.image(button, path, scope).catch(() => {});
-            }
-            this.strip.querySelector('.selected')?.scrollIntoView({block: 'nearest', inline: 'center'});
+            this.singleImage = this.nearbyImages.length === 1 && !before.cursor && !after.cursor
+                && !before.warnings.length && !after.warnings.length;
+            this.updateControls();
         } catch (error) {
-            if (error.name !== 'AbortError') this.status.textContent = 'Nearby previews unavailable. ' + error.message;
+            // Neighbor previews are optional; the main navigation can retry discovery.
+            if (error.name !== 'AbortError' && !scope.signal.aborted) this.nearbyImages = [];
         }
     }
 
-    requestMove(reverse, freshGesture = true) {
-        if (this.moveScope || !this.state.viewing) return;
+    renderStrip(force = false) {
+        byId('viewer-thumbnails').setAttribute('aria-expanded', String(this.thumbnailsVisible));
+        this.filmstrip.show(this.state.collection, this.state.image, this.thumbnailsVisible, force);
+    }
+
+    requestMove(reverse, fresh = true, source = 'explicit') {
+        if (!this.state.viewing || this.moveScope || this.singleImage) return;
+        if (this.loadingImage && !fresh) return;
         const wrap = this.boundaryDirection === reverse;
-        if (wrap && !freshGesture) return;
+        if (wrap && !fresh) return;
         this.clearBoundary();
-        this.moveImage(reverse, wrap);
+        this.moveImage(reverse, wrap, source === 'wheel' && reverse ? 'bottom' : 'top');
     }
 
-    cachedNeighbor(reverse) {
-        if (this.nearbyCollection !== this.state.collection) return null;
-        const index = this.nearbyImages.indexOf(this.state.image);
-        return index < 0 ? null : this.nearbyImages[index + (reverse ? -1 : 1)];
-    }
-
-    async moveImage(reverse = false, wrap = false) {
-        if (this.moveScope || !this.state.viewing) return;
-        const neighbor = wrap ? null : this.cachedNeighbor(reverse);
+    async moveImage(reverse = false, wrap = false, entry = 'top') {
+        const index = this.nearbyCollection === this.state.collection ? this.nearbyImages.indexOf(this.state.image) : -1;
+        const neighbor = !wrap && index >= 0 ? this.nearbyImages[index + (reverse ? -1 : 1)] : null;
         if (neighbor) {
-            this.selectImage(neighbor);
+            this.selectImage(neighbor, entry);
             return;
         }
         const scope = this.moveScope = new TaskScope();
-        this.container.setAttribute('aria-busy', 'true');
-        this.clearBoundary();
-        scope.delay(() => { this.status.textContent = 'Loading…'; }, LOADING_DELAY);
-        const root = this.state.collection;
-        const anchor = wrap ? null : this.state.image;
+        this.updateControls();
+        scope.delay(() => { this.status.textContent = 'Finding the next image…'; }, LOADING_DELAY);
         let cursor = null;
         let warning = false;
         try {
             do {
-                const page = await walkImages({root, anchor, reverse, cursor, limit: 1}, scope.signal);
+                const result = await walkImages({root: this.state.collection,
+                    anchor: wrap ? null : this.state.image, reverse, cursor, limit: 1}, scope.signal);
                 scope.signal.throwIfAborted();
-                warning ||= page.warnings.length > 0;
-                if (page.images.length) {
-                    this.status.textContent = '';
-                    this.selectImage(page.images[0]);
+                warning ||= result.warnings.length > 0;
+                if (result.images.length) {
+                    if (wrap && result.images[0] === this.state.image) {
+                        this.singleImage = true;
+                        this.status.textContent = 'This is the only image in the collection.';
+                    } else this.selectImage(result.images[0], entry);
                     return;
                 }
-                cursor = page.cursor;
+                cursor = result.cursor;
             } while (cursor !== null);
-            this.showBoundary(reverse, warning);
+            if (!this.state.image) {
+                this.status.textContent = warning ? 'No accessible images found. Some folders could not be read.'
+                    : 'No images in this collection. Close to return to the folder.';
+            } else {
+                this.boundaryDirection = reverse;
+                this.status.textContent = (reverse ? 'Beginning' : 'End') + ' of collection.'
+                    + (warning ? ' Some folders could not be read.' : '');
+            }
         } catch (error) {
-            if (error.name !== 'AbortError') this.status.textContent = error.message;
+            if (error.name !== 'AbortError') {
+                this.status.textContent = error.message;
+                byId('viewer-retry').hidden = false;
+            }
         } finally {
             scope.dispose();
             if (this.moveScope === scope) {
                 this.moveScope = null;
-                this.container.setAttribute('aria-busy', 'false');
+                this.updateControls();
             }
         }
-    }
-
-    showBoundary(reverse, warning) {
-        if (!this.state.image) {
-            this.status.textContent = warning
-                ? 'No accessible images found; some folders could not be read.'
-                : 'No images in this folder.';
-            return;
-        }
-        this.status.textContent = (reverse ? 'Beginning of folder.' : 'End of folder.')
-            + ' Press again or start a new scroll to wrap.'
-            + (warning ? ' Some folders could not be read.' : '');
-        this.boundaryDirection = reverse;
-        this.wrapButton.textContent = reverse ? 'Go to last image' : 'Go to first image';
-        this.wrapButton.hidden = false;
     }
 
     onKey(event) {
-        if (!this.state?.viewing) return;
-        if (event.ctrlKey || event.metaKey || event.altKey) return;
+        if (!this.state?.viewing || event.ctrlKey || event.metaKey || event.altKey) return;
         if (event.key === 'Escape') {
-            if (byId('viewer-options').open) {
-                byId('viewer-options').open = false;
-                byId('viewer-options').querySelector('summary').focus();
-            } else this.close();
+            event.preventDefault();
+            if (!byId('size-menu').hidden) this.setSizeMenu(false);
+            else this.close();
+            return;
         }
-        else if (event.target instanceof Element && event.target.matches('select, input') && event.key !== 'Tab') return;
-        else if (['+', '='].includes(event.key)) this.changeZoom(1);
-        else if (event.key === '-') this.changeZoom(-1);
-        else if (event.key.toLowerCase() === 'f') this.setFit('page');
-        else if (event.key.toLowerCase() === 'w') this.setFit('width');
+        if (event.key === 'Tab') {
+            const controls = [...this.container.querySelectorAll('a[href], button, select, [tabindex="0"]')]
+                .filter(node => node.getClientRects().length && !node.disabled);
+            const index = controls.indexOf(document.activeElement);
+            const next = (index + (event.shiftKey ? -1 : 1) + controls.length) % controls.length;
+            event.preventDefault();
+            controls[next]?.focus();
+            return;
+        }
+        if (event.target instanceof Element && event.target.matches('select, input, textarea')) return;
+        if (!byId('size-menu').hidden || this.strip.contains(event.target)) return;
+        const vertical = ['ArrowUp', 'ArrowDown'].includes(event.key);
+        if (vertical && this.canvas.scrollHeight > this.canvas.clientHeight + 2) {
+            event.preventDefault();
+            this.viewport.scroll(event.key === 'ArrowUp' ? -80 : 80);
+        } else if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(event.key)) {
+            event.preventDefault();
+            this.requestMove(['ArrowLeft', 'ArrowUp'].includes(event.key), !event.repeat);
+        } else if (['+', '=', '-'].includes(event.key)) {
+            event.preventDefault();
+            this.zoom(event.key === '-' ? -1 : 1);
+        } else if (event.key.toLowerCase() === 'f') this.changeSize('page');
+        else if (event.key.toLowerCase() === 'w') this.changeSize('width');
         else if (event.key.toLowerCase() === 't') this.toggleThumbnails();
-        else if (event.key.toLowerCase() === 'h') this.toggleControls();
-        else if (PREVIOUS_KEYS.includes(event.key) || NEXT_KEYS.includes(event.key)) {
-            if ((this.fit !== 'page' || this.zoom !== 1) && ['ArrowUp', 'ArrowDown'].includes(event.key)) {
-                event.preventDefault();
-                this.canvas.scrollBy({top: event.key === 'ArrowUp' ? -80 : 80});
-                return;
-            }
-            event.preventDefault();
-            this.requestMove(PREVIOUS_KEYS.includes(event.key), !event.repeat);
-        } else if (event.key === 'Tab') {
-            const buttons = [...this.container.querySelectorAll('button, select, input, summary')]
-                .filter(node => node.getClientRects().length && !node.disabled && (!node.closest('details') || node.matches('summary') || node.closest('details').open));
-            const index = buttons.indexOf(document.activeElement);
-            const next = (index + (event.shiftKey ? -1 : 1) + buttons.length) % buttons.length;
-            event.preventDefault();
-            buttons[next]?.focus();
-        }
     }
 
     onWheel(event) {
-        if (event.ctrlKey || event.metaKey || event.altKey || event.shiftKey) return;
-        if (this.fit !== 'page' || this.zoom !== 1) return;
-        if (!this.state?.viewing || event.target.closest('.viewer-strip, .viewer-tools') || !event.deltaY) return;
-        event.preventDefault();
+        if (!this.state?.viewing || event.ctrlKey || event.metaKey || event.altKey || event.shiftKey
+            || !event.deltaY || Math.abs(event.deltaX) > Math.abs(event.deltaY)) return;
         const now = performance.now();
-        const freshGesture = now - this.lastWheelEvent > WHEEL_GESTURE_GAP;
-        this.lastWheelEvent = now;
-        if (now - this.lastWheel < WHEEL_INTERVAL) return;
-        this.lastWheel = now;
-        this.requestMove(event.deltaY < 0, freshGesture);
+        const fresh = this.wheel.update(event.deltaY, now);
+        const reverse = event.deltaY < 0;
+        const overflow = this.viewport.overflows();
+        if (this.loadingImage || this.moveScope) { event.preventDefault(); return; }
+        if (fresh) { this.scrollingGesture = false; this.edgeTurn = false; }
+        if (this.edgeTurn && !fresh) { event.preventDefault(); return; }
+        if (overflow) {
+            if (this.scrollingGesture) return;
+            if (this.wheel.consumed) { event.preventDefault(); return; }
+            if (this.viewport.canScroll(reverse)) {
+                // Native scrolling owns movement; reaching an edge consumes this gesture.
+                this.wheel.consume();
+                // Allow the rest of the gesture to scroll, but not to turn a page.
+                this.scrollingGesture = true;
+                return;
+            }
+            if (!fresh) { event.preventDefault(); return; }
+        } else if (!fresh && now - this.lastWheelTurn < 350) {
+            event.preventDefault(); return;
+        }
+        event.preventDefault();
+        if (this.boundaryDirection === reverse && !fresh) return;
+        this.wheel.consume();
+        this.lastWheelTurn = now;
+        this.edgeTurn = overflow;
+        this.requestMove(reverse, fresh, 'wheel');
     }
 }

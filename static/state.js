@@ -3,6 +3,9 @@ export const joinPath = (parent, name) => parent ? parent + '/' + name : name;
 export const parentPath = path => path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : '';
 export const filename = path => path.split('/').pop();
 
+export const IMAGE_SIZES = ['page', 'width', '0.1', '0.25', '0.5', '0.75', '1', '1.25', '1.5', '2', '3', '4', '6', '8'];
+export const imageSize = value => IMAGE_SIZES.includes(String(value)) ? String(value) : 'page';
+
 export function readState(search = location.search) {
     const query = new URLSearchParams(search);
     const legacyFolder = query.get('category') ?? query.get('m');
@@ -14,6 +17,7 @@ export function readState(search = location.search) {
     }
     return {
         folder,
+        size: imageSize(query.get('size')),
         recursive: query.get('recursive') === '1',
         compact: query.get('compact') === '1',
         filter: query.get('filter') || '',
@@ -29,6 +33,7 @@ export function stateUrl(next) {
     if (next.compact) query.set('compact', '1');
     if (next.filter) query.set('filter', next.filter);
     if (next.viewing) {
+        if (imageSize(next.size) !== 'page') query.set('size', imageSize(next.size));
         if (next.collection !== next.folder) query.set('collection', next.collection);
         if (next.image != null) query.set('image', next.image);
         else query.set('viewer', '1');

@@ -14,7 +14,7 @@ from urllib.request import Request, urlopen
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from PIL import Image
+from PIL import Image, ImageDraw
 
 from image_browser.server import GalleryHandler, GalleryServer
 
@@ -34,12 +34,22 @@ def make_collection(root):
     root.mkdir()
     paths = [f'root{number}.jpg' for number in range(160)] + [
         'Album/Chapter 1/page2.jpg', 'Album/Chapter 1/page10.jpg',
-        'Album/Chapter 2/deep/page1.jpg', 'Odd & #/a ?#%.jpg',
+        'Album/Chapter 2/deep/page1.jpg', 'Odd & #/a ?#%.jpg', 'Single/only.jpg',
     ]
     for name in paths:
         file = root / name
         file.parent.mkdir(parents=True, exist_ok=True)
-        Image.new('RGB', (120, 180), 'steelblue').save(file)
+        tall = name.startswith('Album/')
+        image = Image.new('RGB', (1000, 1800) if tall else (320, 240), '#faf5e9' if tall else 'steelblue')
+        draw = ImageDraw.Draw(image)
+        draw.text((12, 12), name, fill='black')
+        if tall:
+            for panel in range(5):
+                y = 80 + panel * 330
+                draw.rectangle((40, y, 960, y + 290), outline='black', width=4)
+                draw.ellipse((90, y + 30, 280, y + 250), fill='#647b83')
+                draw.text((340, y + 80), f'Panel {panel + 1}: sample reading text', fill='black')
+        image.save(file)
     (root / 'Empty').mkdir()
     long_name = 'A very long collection title with many descriptive words and publisher details ' * 2
     (root / 'Names' / (long_name + '- Chapter 123')).mkdir(parents=True)
