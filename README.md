@@ -65,12 +65,42 @@ filesystem read already in progress cannot be interrupted. Recursive browsing
 retains discovered paths in memory, while image data and rendered elements are
 bounded. This prototype still needs performance measurements against a large collection.
 
-`imgbrowse.py` serves the app and filesystem API; `template.html`, `gallery.js`, and
-`gallery.css` contain the interface. The expanded folder-preview layout is deferred.
+The expanded folder-preview layout is deferred.
+
+## Code map
+
+There is no frontend build step. The browser loads native JavaScript modules.
+
+| File | Responsibility |
+| --- | --- |
+| `imgbrowse.py` | Command-line arguments and server startup |
+| `image_browser/catalog.py` | Safe paths, folder listings, previews, incremental traversal |
+| `image_browser/thumbnails.py` | Thumbnail generation and bounded memory cache |
+| `image_browser/server.py` | HTTP routes, request validation, response headers |
+| `gallery.js` | App setup and navigation between views |
+| `static/state.js`, `static/api.js` | URL state and filesystem API client |
+| `static/folder-grid.js`, `static/grid-layout.js` | Folder discovery, virtual rows, label sizing |
+| `static/image-viewer.js` | Lightbox navigation, gestures, and neighbor discovery |
+| `static/preview-loader.js`, `static/dom.js` | Preview scheduling and resource cleanup |
+| `template.html`, `gallery.css` | Markup, component styles, theme and layout variables |
+
+Each view owns its request lifetimes. Disposing a task scope aborts pending requests
+and releases blob URLs. The URL defines navigation state; view modules retain only
+the transient data needed for rendering and browsing.
 
 ## Check
 
 ```sh
 python3 -B -m unittest discover -s tests -v
-node --check gallery.js
+node --test tests/*.test.js
 ```
+
+Optional end-to-end checks require Chrome/Chromium and Node 22+:
+
+```sh
+python3 -B tests/browser_smoke.py
+```
+
+Set `CHROME_BIN` if Chrome is not in a standard location. The smoke test starts a
+temporary server and browser profile with generated images, then removes them.
+Use `--screenshots /tmp/imgbrowse-check` to retain screenshots.

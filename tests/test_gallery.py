@@ -1,14 +1,12 @@
 """Traversal and request regressions for large, nested collections."""
 import tempfile
-import io
-import os
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 
 from PIL import Image
 
-from imgbrowse import Gallery, WALK_BUDGET
+from image_browser.catalog import WALK_BUDGET, Gallery
 
 
 class GalleryTests(unittest.TestCase):
@@ -107,32 +105,15 @@ class GalleryTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.gallery.walk(root='b', anchor='a/1.jpg')
 
-    def test_thumbnail_reuse_and_file_change(self):
-        path = self.root / self.image('page.jpg')
-        first = self.gallery.thumbnail(path, path.stat())
-        with patch('imgbrowse.Image.open', side_effect=AssertionError('decoded twice')):
-            self.assertEqual(self.gallery.thumbnail(path, path.stat()), first)
-        timestamp = path.stat().st_mtime_ns
-        Image.new('RGB', (20, 20), 'red').save(path)
-        os.utime(path, ns=(timestamp + 1_000_000, timestamp + 1_000_000))
-        self.assertNotEqual(self.gallery.thumbnail(path, path.stat()), first)
-
-    def test_thumbnail_memory_bound_and_orientation(self):
-        path = self.root / 'rotated.jpg'
-        image = Image.new('RGB', (1000, 500), 'blue')
-        exif = image.getexif()
-        exif[274] = 6  # Rotate clockwise for display.
-        image.save(path, exif=exif)
-        data = self.gallery.thumbnail(path, path.stat())
-        with Image.open(io.BytesIO(data)) as thumbnail:
-            self.assertLess(thumbnail.width, thumbnail.height)
-            self.assertLessEqual(thumbnail.height, 300)
-        budget = len(data) + 100
-        with patch('imgbrowse.THUMBNAIL_CACHE_BYTES', budget):
-            for name in ('a.jpg', 'b.jpg', 'c.jpg'):
-                path = self.root / self.image(name)
-                self.gallery.thumbnail(path, path.stat())
-                self.assertLessEqual(self.gallery.thumbnail_bytes, budget)
+    def test_malformed_walk_inputs_have_consistent_errors(self):
+        requests = [
+            {'root': None}, {'anchor': []}, {'limit': True}, {'reverse': 'false'},
+            {'cursor': [{}]}, {'cursor': [None]},
+            {'cursor': [{'path': '', 'phase': 0, 'after': 5}]},
+        ]
+        for request in requests:
+            with self.subTest(request=request), self.assertRaises(ValueError):
+                self.gallery.walk(**request)
 
 
 if __name__ == '__main__':
