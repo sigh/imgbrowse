@@ -115,13 +115,91 @@ await waitFor("!document.getElementById('recursive').checked && document.querySe
 await open('/?' + new URLSearchParams({folder: 'Odd & #', image: 'Odd & #/a ?#%.jpg'}));
 await waitFor("document.getElementById('viewer-image').naturalWidth > 0");
 await open('/?' + new URLSearchParams({category: 'Album', image: 'Album/Chapter%201/page2.jpg'}));
-await waitFor("document.getElementById('viewer-name').textContent === 'Album/Chapter 1/page2.jpg'");
+await waitFor("document.getElementById('viewer-name').textContent === 'page2.jpg'");
 await open('/?folder=Names');
 await waitFor("document.querySelector('.card-caption a')?.textContent.endsWith('Chapter 123')");
 assert.ok(await evaluate("document.querySelector('.card-caption').getBoundingClientRect().bottom <= document.querySelector('.card').getBoundingClientRect().bottom"));
 await screenshot('long-names');
 await open('/?folder=Empty&viewer=1');
 await waitFor("document.getElementById('viewer-status').textContent.includes('No images')");
+
+// Leaving a scrolled folder and returning via Back restores its location.
+await open('/');
+await waitFor("document.querySelector('.folder-card a')");
+await evaluate("window.folderToOpen = [...document.querySelectorAll('.folder-card a')].find(a => a.textContent === 'Album')");
+await evaluate("document.getElementById('grid-viewport').scrollTop = 1800");
+await waitFor("history.state?.gridTop === 1800");
+await evaluate('window.folderToOpen.click()');
+await waitFor("new URLSearchParams(location.search).get('folder') === 'Album'");
+await evaluate('history.back()');
+await waitFor("document.getElementById('grid-viewport').scrollTop === 1800");
+
+// Reading controls preserve image selection and provide usable scrolling.
+await open('/?' + new URLSearchParams({folder: 'Album', image: 'Album/Chapter 1/page2.jpg'}));
+await waitFor("document.getElementById('viewer-image').naturalWidth > 0");
+await new Promise(resolve => setTimeout(resolve, 350));
+await evaluate("document.getElementById('viewer').dispatchEvent(new WheelEvent('wheel', {deltaY:100, ctrlKey:true, cancelable:true}))");
+assert.ok(await evaluate(imageIs('Album/Chapter 1/page2.jpg')));
+await key('w');
+await waitFor("document.getElementById('viewer-canvas').scrollHeight > document.getElementById('viewer-canvas').clientHeight");
+await key('ArrowDown');
+assert.ok(await evaluate("document.getElementById('viewer-canvas').scrollTop > 0"));
+assert.ok(await evaluate(imageIs('Album/Chapter 1/page2.jpg')));
+await click('viewer-zoom-in');
+assert.ok(await evaluate("[.1,.25,.5,.75,1,1.25,1.5,2,3,4,6,8].includes(Number(document.getElementById('viewer-zoom').value))"));
+await evaluate("{ const zoom = document.getElementById('viewer-zoom'); zoom.value = '1'; zoom.dispatchEvent(new Event('change')); }");
+await click('viewer-zoom-in');
+assert.equal(await evaluate("document.getElementById('viewer-zoom').value"), '1.25');
+await click('viewer-zoom-out');
+assert.equal(await evaluate("document.getElementById('viewer-zoom').value"), '1');
+await click('viewer-zoom-out');
+assert.equal(await evaluate("document.getElementById('viewer-zoom').value"), '0.75');
+await click('viewer-zoom-out');
+assert.equal(await evaluate("document.getElementById('viewer-zoom').value"), '0.5');
+await click('viewer-zoom-in');
+assert.equal(await evaluate("document.getElementById('viewer-zoom').value"), '0.75');
+await screenshot('zoom');
+await key('f');
+await key('t');
+assert.ok(await evaluate("document.getElementById('viewer-strip').hidden"));
+await key('h');
+assert.equal(await evaluate('document.activeElement.id'), 'viewer-show-controls');
+await key('Tab');
+assert.ok(await evaluate("document.activeElement.getClientRects().length > 0"));
+await click('viewer-show-controls');
+await evaluate("document.querySelector('#viewer-options summary').click()");
+assert.ok(await evaluate("document.getElementById('viewer-options').open"));
+await click('viewer-close');
+
+// Recursive headings are real folder links; compact layout is bookmarkable.
+await open('/?folder=Album&recursive=1');
+await waitFor("document.querySelector('.folder-heading a')");
+await evaluate("document.querySelector('.folder-heading a').click()");
+await waitFor("new URLSearchParams(location.search).get('folder') === 'Album/Chapter 1'");
+await click('compact');
+await waitFor("document.getElementById('grid-viewport').classList.contains('compact')");
+assert.equal(await evaluate("new URLSearchParams(location.search).get('compact')"), '1');
+assert.equal(await evaluate("document.querySelectorAll('#grid img').length"), 0);
+assert.ok(await evaluate("document.querySelector('.list-item').getBoundingClientRect().height <= 44"));
+await screenshot('compact');
+
+// Each history entry restores its own position, including a recursive grid.
+for (const path of ['/', '/?recursive=1']) {
+    await open(path);
+    await waitFor("document.querySelectorAll('.card').length > 0");
+    await evaluate("document.getElementById('grid-viewport').scrollTop = 800");
+    await waitFor("history.state?.gridTop === 800");
+    await click('compact');
+    await waitFor("document.getElementById('compact').checked");
+    await evaluate('history.back()');
+    await waitFor("document.getElementById('grid-viewport').scrollTop === 800");
+}
+await call('Emulation.setDeviceMetricsOverride', {width:390, height:844, deviceScaleFactor:1, mobile:true});
+await open('/?' + new URLSearchParams({folder:'Album', image:'Album/Chapter 1/page2.jpg'}));
+await waitFor("document.getElementById('viewer-image').naturalWidth > 0");
+await screenshot('mobile-viewer');
+assert.ok(await evaluate('document.documentElement.scrollWidth <= innerWidth'));
+
 assert.equal(exceptions.length, 0, JSON.stringify(exceptions));
-console.log('Browser smoke passed: virtual grid, recursive viewer, natural order, gesture wrapping, history, URLs, long names, empty folders.');
+console.log('Browser smoke passed: virtual grid, recursive viewer, natural order, gesture wrapping, history, URLs, long names, empty folders, scroll restoration, zoom, reading controls, compact layout, chapter links.');
 socket.close();

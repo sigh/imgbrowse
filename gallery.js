@@ -20,11 +20,16 @@ class GalleryApp {
             selectImage: image => this.navigate({image}, true),
             close: () => this.navigate({viewing: false, image: null}),
         });
+        history.scrollRestoration = 'manual';
         this.bindControls();
         this.render();
     }
 
     bindControls() {
+        byId('compact').addEventListener('change', event => this.navigate({compact: event.target.checked}));
+        this.grid.viewport.addEventListener('scroll', () => {
+            if (this.grid.restoreTop == null) this.savePosition();
+        });
         byId('recursive').addEventListener('change', event => this.navigate({recursive: event.target.checked}));
         byId('filter').addEventListener('input', event => {
             const filter = event.target.value;
@@ -38,10 +43,18 @@ class GalleryApp {
         window.addEventListener('popstate', () => this.render());
     }
 
+    savePosition() {
+        history.replaceState({...history.state, gridTop: this.grid.viewport.scrollTop}, '');
+    }
+
     navigate(changes, replace = false) {
         clearTimeout(this.filterTimer);
-        const url = stateUrl({...this.state, ...changes});
-        history[replace ? 'replaceState' : 'pushState'](null, '', url);
+        this.savePosition();
+        const next = {...this.state, ...changes};
+        const sameGrid = ['folder', 'recursive', 'filter', 'compact'].every(key => next[key] === this.state[key]);
+        const position = sameGrid ? history.state : {gridTop: 0};
+        const url = stateUrl(next);
+        history[replace ? 'replaceState' : 'pushState'](position, '', url);
         this.render();
     }
 
@@ -77,6 +90,7 @@ class GalleryApp {
     render(force = false) {
         clearTimeout(this.filterTimer);
         this.state = readState();
+        byId('compact').checked = this.state.compact;
         byId('recursive').checked = this.state.recursive;
         const filter = byId('filter');
         filter.value = this.state.filter;
@@ -87,7 +101,7 @@ class GalleryApp {
         document.querySelector('.app-header').inert = this.state.viewing;
         this.renderBreadcrumbs();
         this.previews.setViewerOpen(this.state.viewing);
-        this.grid.show(this.state, force);
+        this.grid.show(this.state, force, history.state?.gridTop || 0);
         this.viewer.show(this.state, force);
     }
 }

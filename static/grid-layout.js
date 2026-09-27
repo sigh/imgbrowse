@@ -26,7 +26,8 @@ export class GridLayout {
         this.rowPadding = number('--grid-row-padding');
         this.actionHeight = number('--card-action-height');
         this.fontFamily = style.fontFamily;
-        this.columns = Math.max(1, Math.floor(this.width / number('--grid-min-column-width')));
+        this.compact = this.viewport.classList.contains('compact');
+        this.columns = this.compact ? 1 : Math.max(1, Math.floor(this.width / number('--grid-min-column-width')));
         this.recursive = recursive;
         this.rootName = rootName;
         this.rows = [];
@@ -68,7 +69,7 @@ export class GridLayout {
                 current = null;
                 const label = folder || this.rootName;
                 const height = Math.max(42, this.labelHeight(label, this.contentWidth, this.headingFont) + 16);
-                this.rows.push({top: this.height, height, label});
+                this.rows.push({top: this.height, height, label, path: folder});
                 this.height += height;
                 previousFolder = folder;
             }
@@ -78,8 +79,10 @@ export class GridLayout {
                 this.height += current.height;
             }
             current.items.push(item);
-            const labelWidth = cardWidth - this.captionPadding * 2 - 2; // Card borders.
-            const contentHeight = this.imageHeight + this.captionPadding * 2 + 2 + this.rowPadding * 2
+            const labelWidth = cardWidth - (this.compact ? 138 : this.captionPadding * 2 + 2); // Card borders.
+            const contentHeight = this.compact
+                ? this.labelHeight(filename(item.path), labelWidth, this.cardFont) + 16
+                : this.imageHeight + this.captionPadding * 2 + 2 + this.rowPadding * 2
                 + this.labelHeight(filename(item.path), labelWidth, this.cardFont)
                 + (item.type === 'folder' ? this.actionHeight : 0);
             const newHeight = Math.max(current.height, contentHeight);

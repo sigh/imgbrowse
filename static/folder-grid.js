@@ -37,12 +37,14 @@ export class FolderGrid {
         this.resizeObserver.observe(this.viewport);
     }
 
-    show(state, force = false) {
+    show(state, force = false, restoreTop = 0) {
         this.state = state;
         this.viewport.inert = state.viewing;
-        const key = JSON.stringify([state.folder, state.recursive, state.filter]);
+        const key = JSON.stringify([state.folder, state.recursive, state.filter, state.compact]);
         if (force || key !== this.key) {
             this.key = key;
+            this.restoreTop = restoreTop;
+            this.viewport.classList.toggle('compact', state.compact);
             this.loadFolder();
         } else {
             this.scheduleRender();
@@ -87,7 +89,27 @@ export class FolderGrid {
         this.renderRows();
     }
 
+    createListItem(item) {
+        const folder = item.type === 'folder';
+        const node = element('article', 'card list-item');
+        const name = folder ? this.folderLink(item.path, filename(item.path))
+            : element('button', 'list-name', filename(item.path));
+        name.classList.add('list-name');
+        name.title = item.path;
+        if (!folder) name.addEventListener('click', () => this.openViewer(item.path, this.state.folder));
+        const kind = element('span', 'list-kind', folder ? 'Folder' : 'Image');
+        node.append(kind, name);
+        if (folder) {
+            const read = element('button', 'list-read', 'Read');
+            read.setAttribute('aria-label', 'Read ' + filename(item.path));
+            read.addEventListener('click', () => this.openViewer(null, item.path));
+            node.append(read);
+        }
+        return node;
+    }
+
     createCard(item, scope) {
+        if (this.state.compact) return this.createListItem(item);
         const node = element('article', 'card');
         const isFolder = item.type === 'folder';
         const picture = isFolder ? this.folderLink(item.path, 'Folder') : element('button', '', 'Loading…');
@@ -96,9 +118,10 @@ export class FolderGrid {
         const caption = element('div', 'card-caption');
         let preview;
         if (isFolder) {
-            const read = element('button', '', 'View ▶');
+            const read = element('button', '', 'Open viewer');
             read.title = 'View all images in ' + filename(item.path);
             read.addEventListener('click', () => this.openViewer(null, item.path));
+            node.classList.add('folder-card');
             caption.append(this.folderLink(item.path, filename(item.path)), read);
             preview = this.previews.folder(picture, item.path, scope);
         } else {
@@ -122,12 +145,21 @@ export class FolderGrid {
         node.style.gridTemplateColumns = row.items ? `repeat(${this.layout.columns}, minmax(0, 1fr))` : '1fr';
         const scope = new TaskScope();
         if (row.items) row.items.forEach(item => node.append(this.createCard(item, scope)));
-        else node.append(element('h2', 'folder-heading', row.label));
+        else {
+            const heading = element('h2', 'folder-heading');
+            heading.append(this.folderLink(row.path, row.label));
+            node.append(heading);
+        }
         this.container.append(node);
         this.rowNodes.set(index, {node, scope});
     }
 
     renderRows() {
+        // Recursive history entries may need more pages before this offset exists.
+        if (this.restoreTop != null && this.items.length) {
+            this.viewport.scrollTop = this.restoreTop;
+            if (this.done || this.viewport.scrollTop >= this.restoreTop) this.restoreTop = null;
+        }
         const start = Math.max(0, this.viewport.scrollTop - OVERSCAN);
         const end = this.viewport.scrollTop + this.viewport.clientHeight + OVERSCAN;
         const [first, last] = this.layout.visibleRange(start, end);
@@ -138,7 +170,7 @@ export class FolderGrid {
             if (!this.rowNodes.has(index)) this.createRow(index);
         }
         this.previews.schedule();
-        const needsMore = end >= this.layout.height - DISCOVERY_MARGIN;
+        const needsMore = this.restoreTop != null || end >= this.layout.height - DISCOVERY_MARGIN;
         if (needsMore && !this.done && !this.loading && !this.failed && !this.state.viewing) this.loadPage();
     }
 
@@ -183,6 +215,7 @@ export class FolderGrid {
             ...listing.images.map(name => ({type: 'image', path: joinPath(this.state.folder, name)})),
         ].filter(item => filename(item.path).toLocaleLowerCase().includes(filter));
         this.relayout();
+        this.restoreTop = null;
         this.status.textContent = this.items.length ? '' : (filter
             ? 'No matching names.' : 'This folder is empty of visible folders and supported images.');
         this.summary.textContent = `${listing.folders.length} folders · ${listing.images.length} direct images`
@@ -205,6 +238,7 @@ export class FolderGrid {
             this.done = result.cursor === null;
             if (result.warnings.length) this.warning = 'Some folders could not be read.';
             this.appendRows(added);
+            if (this.done) this.restoreTop = null;
             this.summary.textContent = this.items.length + (this.done ? ' images' : ' images discovered')
                 + (this.warning ? ' · ' + this.warning : '');
             this.status.textContent = this.done ? (this.items.length ? 'End of folder' : 'No images found.') : '';

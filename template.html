@@ -15,6 +15,7 @@
     </header>
     <div class="toolbar">
         <label><input id="recursive" type="checkbox"> Include subfolders in grid</label>
+        <label><input id="compact" type="checkbox"> List view</label>
         <input id="filter" type="search" placeholder="Filter this folder by name" aria-label="Filter this folder by name">
         <button id="read-folder">View all images</button>
     </div>
@@ -27,12 +28,38 @@
 
     <section id="viewer" class="viewer" role="dialog" aria-modal="true" aria-label="Image viewer" hidden>
         <header class="viewer-header">
-            <div><div id="viewer-collection"></div><div id="viewer-name"></div></div>
-            <button id="viewer-close" aria-label="Close viewer (Escape)">Close ×</button>
+            <div><div id="viewer-collection"></div><div id="viewer-chapter"></div><div id="viewer-name"></div></div>
+            <div class="viewer-tools" aria-label="Reading controls">
+                <div class="zoom-controls">
+                    <button id="viewer-zoom-out" aria-label="Zoom out" title="Zoom out (−)">−</button>
+                    <select id="viewer-zoom" aria-label="Image size">
+                        <option value="page">Fit page</option>
+                        <option value="width">Fit width</option>
+                        <option value="0.1">10%</option><option value="0.25">25%</option>
+                        <option value="0.5">50%</option><option value="0.75">75%</option>
+                        <option value="1">100%</option><option value="1.25">125%</option>
+                        <option value="1.5">150%</option><option value="2">200%</option>
+                        <option value="3">300%</option><option value="4">400%</option>
+                        <option value="6">600%</option><option value="8">800%</option>
+                    </select>
+                    <button id="viewer-zoom-in" aria-label="Zoom in" title="Zoom in (+)">+</button>
+                </div>
+                <details id="viewer-options">
+                    <summary aria-label="Viewer options" title="Viewer options">•••</summary>
+                    <div class="viewer-options-panel">
+                        <label><input id="viewer-thumbnails" type="checkbox" checked> Show filmstrip</label>
+                        <button id="viewer-controls">Reading mode <small>H</small></button>
+                        <p>← / → &nbsp; Previous / next<br>+ / − &nbsp; Zoom<br>F / W &nbsp; Fit page / width<br>T &nbsp; Toggle filmstrip<br>H &nbsp; Toggle reading mode<br>Esc &nbsp; Close viewer</p>
+                        <p>Scroll turns pages in Fit page mode; otherwise it scrolls the image.</p>
+                    </div>
+                </details>
+                <button id="viewer-close" aria-label="Close viewer (Escape)">Close ×</button>
+            </div>
         </header>
+        <button id="viewer-show-controls" hidden>Show controls</button>
         <div class="viewer-stage">
             <button id="viewer-prev" class="viewer-nav" aria-label="Previous image">❮</button>
-            <img id="viewer-image" alt="">
+            <div id="viewer-canvas" tabindex="0" aria-label="Image; scroll when enlarged"><img id="viewer-image" alt=""></div>
             <button id="viewer-next" class="viewer-nav" aria-label="Next image">❯</button>
         </div>
         <div class="viewer-feedback">

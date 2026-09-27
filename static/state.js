@@ -15,6 +15,7 @@ export function readState(search = location.search) {
     return {
         folder,
         recursive: query.get('recursive') === '1',
+        compact: query.get('compact') === '1',
         filter: query.get('filter') || '',
         image,
         collection: query.get('collection') ?? folder,
@@ -25,6 +26,7 @@ export function readState(search = location.search) {
 export function stateUrl(next) {
     const query = new URLSearchParams({folder: next.folder, sort: 'natural'});
     if (next.recursive) query.set('recursive', '1');
+    if (next.compact) query.set('compact', '1');
     if (next.filter) query.set('filter', next.filter);
     if (next.viewing) {
         if (next.collection !== next.folder) query.set('collection', next.collection);

@@ -1,7 +1,8 @@
 import {imageUrl, walkImages} from './api.js';
 import {byId, element, TaskScope} from './dom.js';
-import {filename} from './state.js';
+import {filename, parentPath} from './state.js';
 
+const ZOOM_STEPS = [.1, .25, .5, .75, 1, 1.25, 1.5, 2, 3, 4, 6, 8];
 const NEARBY_COUNT = 4;
 const LOADING_DELAY = 700;
 const WHEEL_INTERVAL = 220;
@@ -17,6 +18,11 @@ export class ImageViewer {
         this.close = close;
         this.container = byId('viewer');
         this.image = byId('viewer-image');
+        this.canvas = byId('viewer-canvas');
+        this.fit = 'page';
+        this.zoom = 1;
+        this.controlsHidden = false;
+        this.thumbnailsVisible = true;
         this.strip = byId('viewer-strip');
         this.status = byId('viewer-status');
         this.collectionLabel = byId('viewer-collection');
@@ -31,9 +37,28 @@ export class ImageViewer {
         this.lastWheel = 0;
         this.lastWheelEvent = -Infinity;
         this.bindControls();
+        new ResizeObserver(() => this.sizeImage()).observe(this.canvas);
+        this.image.addEventListener('load', () => this.sizeImage());
     }
 
     bindControls() {
+        byId('viewer-zoom').addEventListener('change', event => {
+            const value = event.target.value;
+            if (value === 'page' || value === 'width') this.setFit(value);
+            else {
+                this.fit = 'manual';
+                this.zoom = Number(value);
+                this.sizeImage();
+            }
+        });
+        byId('viewer-zoom-in').addEventListener('click', () => this.changeZoom(1));
+        byId('viewer-zoom-out').addEventListener('click', () => this.changeZoom(-1));
+        byId('viewer-thumbnails').addEventListener('change', () => this.toggleThumbnails());
+        byId('viewer-controls').addEventListener('click', () => this.toggleControls());
+        byId('viewer-show-controls').addEventListener('click', () => this.toggleControls());
+        this.container.addEventListener('click', event => {
+            if (!event.target.closest('#viewer-options')) byId('viewer-options').open = false;
+        });
         this.closeButton.addEventListener('click', this.close);
         byId('viewer-prev').addEventListener('click', () => this.requestMove(true));
         byId('viewer-next').addEventListener('click', () => this.requestMove(false));
@@ -45,6 +70,55 @@ export class ImageViewer {
         });
         document.addEventListener('keydown', event => this.onKey(event));
         this.container.addEventListener('wheel', event => this.onWheel(event), {passive: false});
+    }
+
+    setFit(fit) {
+        this.fit = fit;
+        this.zoom = 1;
+        this.canvas.scrollTo(0, 0);
+        this.sizeImage();
+    }
+
+    changeZoom(direction) {
+        const current = this.imageScale();
+        const steps = direction > 0 ? ZOOM_STEPS : [...ZOOM_STEPS].reverse();
+        this.zoom = steps.find(step => direction > 0 ? step > current + .001 : step < current - .001)
+            ?? (direction > 0 ? ZOOM_STEPS.at(-1) : ZOOM_STEPS[0]);
+        this.fit = 'manual';
+        this.sizeImage();
+    }
+
+    imageScale() {
+        if (this.fit === 'manual') return this.zoom;
+        const width = this.image.naturalWidth || 1;
+        const height = this.image.naturalHeight || 1;
+        return this.fit === 'width' ? this.canvas.clientWidth / width
+            : Math.min(this.canvas.clientWidth / width, this.canvas.clientHeight / height);
+    }
+
+    sizeImage() {
+        const {naturalWidth: width, naturalHeight: height} = this.image;
+        if (!width || !height || this.container.hidden) return;
+        const scale = this.imageScale();
+        this.image.style.width = Math.max(1, Math.floor(width * scale)) + 'px';
+        this.image.style.height = Math.max(1, Math.floor(height * scale)) + 'px';
+        byId('viewer-zoom').value = this.fit === 'manual' ? String(this.zoom) : this.fit;
+        byId('viewer-zoom-out').disabled = scale <= ZOOM_STEPS[0];
+        byId('viewer-zoom-in').disabled = scale >= ZOOM_STEPS.at(-1);
+    }
+
+    toggleThumbnails() {
+        this.thumbnailsVisible = !this.thumbnailsVisible;
+        this.strip.hidden = !this.thumbnailsVisible;
+        byId('viewer-thumbnails').checked = this.thumbnailsVisible;
+    }
+
+    toggleControls() {
+        this.controlsHidden = !this.controlsHidden;
+        this.container.classList.toggle('controls-hidden', this.controlsHidden);
+        byId('viewer-show-controls').hidden = !this.controlsHidden;
+        byId('viewer-options').open = false;
+        (this.controlsHidden ? byId('viewer-show-controls') : this.closeButton).focus();
     }
 
     setRootName(name) {
@@ -89,11 +163,15 @@ export class ImageViewer {
             return;
         }
         if (!wasOpen) {
+            if (this.controlsHidden) this.toggleControls();
             this.previousFocus = document.activeElement;
             this.closeButton.focus();
         }
         this.updateCollectionLabel();
-        this.nameLabel.textContent = state.image || '';
+        this.nameLabel.textContent = filename(state.image || '');
+        this.nameLabel.title = state.image || '';
+        byId('viewer-chapter').textContent = parentPath(state.image || '');
+        this.canvas.scrollTo(0, 0);
         if (state.image) {
             // A bookmarked image loads directly, independent of neighbor discovery.
             const scope = this.scope;
@@ -201,13 +279,31 @@ export class ImageViewer {
 
     onKey(event) {
         if (!this.state?.viewing) return;
-        if (event.key === 'Escape') this.close();
+        if (event.ctrlKey || event.metaKey || event.altKey) return;
+        if (event.key === 'Escape') {
+            if (byId('viewer-options').open) {
+                byId('viewer-options').open = false;
+                byId('viewer-options').querySelector('summary').focus();
+            } else this.close();
+        }
+        else if (event.target instanceof Element && event.target.matches('select, input') && event.key !== 'Tab') return;
+        else if (['+', '='].includes(event.key)) this.changeZoom(1);
+        else if (event.key === '-') this.changeZoom(-1);
+        else if (event.key.toLowerCase() === 'f') this.setFit('page');
+        else if (event.key.toLowerCase() === 'w') this.setFit('width');
+        else if (event.key.toLowerCase() === 't') this.toggleThumbnails();
+        else if (event.key.toLowerCase() === 'h') this.toggleControls();
         else if (PREVIOUS_KEYS.includes(event.key) || NEXT_KEYS.includes(event.key)) {
+            if ((this.fit !== 'page' || this.zoom !== 1) && ['ArrowUp', 'ArrowDown'].includes(event.key)) {
+                event.preventDefault();
+                this.canvas.scrollBy({top: event.key === 'ArrowUp' ? -80 : 80});
+                return;
+            }
             event.preventDefault();
             this.requestMove(PREVIOUS_KEYS.includes(event.key), !event.repeat);
         } else if (event.key === 'Tab') {
-            const buttons = [...this.container.querySelectorAll('button')]
-                .filter(node => !node.hidden && !node.disabled);
+            const buttons = [...this.container.querySelectorAll('button, select, input, summary')]
+                .filter(node => node.getClientRects().length && !node.disabled && (!node.closest('details') || node.matches('summary') || node.closest('details').open));
             const index = buttons.indexOf(document.activeElement);
             const next = (index + (event.shiftKey ? -1 : 1) + buttons.length) % buttons.length;
             event.preventDefault();
@@ -216,7 +312,9 @@ export class ImageViewer {
     }
 
     onWheel(event) {
-        if (!this.state?.viewing || event.target.closest('.viewer-strip') || !event.deltaY) return;
+        if (event.ctrlKey || event.metaKey || event.altKey || event.shiftKey) return;
+        if (this.fit !== 'page' || this.zoom !== 1) return;
+        if (!this.state?.viewing || event.target.closest('.viewer-strip, .viewer-tools') || !event.deltaY) return;
         event.preventDefault();
         const now = performance.now();
         const freshGesture = now - this.lastWheelEvent > WHEEL_GESTURE_GAP;

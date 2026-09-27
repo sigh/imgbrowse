@@ -6,7 +6,7 @@ import {PreviewLoader} from '../static/preview-loader.js';
 
 test('image URLs retain independent grid and viewer contexts', () => {
     const state = {
-        folder: 'Album & photos', recursive: false, filter: 'chapter',
+        folder: 'Album & photos', recursive: false, compact: true, filter: 'chapter',
         viewing: true, collection: 'Album & photos/Chapter 2',
         image: 'Album & photos/Chapter 2/page #1%.jpg',
     };
