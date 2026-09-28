@@ -98,6 +98,7 @@ class GalleryTests(unittest.TestCase):
         self.image('3.jpg')
         self.assertEqual(self.gallery.walk(anchor='2.jpg', limit=1)['images'], ['3.jpg'])
         self.image('2.jpg')
+        self.gallery.invalidate('')
         self.assertEqual(self.gallery.listing('')['images'], ['1.jpg', '2.jpg', '3.jpg'])
 
     def test_anchor_cannot_escape_collection(self):

@@ -1,19 +1,32 @@
-import {getFolder, walkImages} from './api.js';
+import {getFolder, walkImages, sequence} from './api.js';
 import {byId, element, TaskScope} from './dom.js';
 import {icon} from './icons.js';
 import {GridLayout} from './grid-layout.js';
-import {filename, joinPath} from './state.js';
+import {filename, joinPath, parentPath} from './state.js';
 
 const OVERSCAN = 230;
 const DISCOVERY_MARGIN = 400;
+const MAX_RECURSIVE_IMAGES = 2000;
 
 /** Owns folder loading, incremental discovery, and the lifetime of visible rows. */
 export class FolderGrid {
-    constructor(previews, {folderLink, openViewer, folderLoaded}) {
+    constructor(previews, {folderLink, openViewer, folderLoaded, refresh}) {
         this.previews = previews;
         this.folderLink = folderLink;
-        this.openViewer = openViewer;
+        this.openViewer = (image, collection, opener) => {
+            if (image && parentPath(image) === this.directory?.path && collection === this.directory.path) {
+                const {images, folders} = this.directory.listing;
+                const index = images.indexOf(filename(image));
+                if (index >= 0) {
+                    const start = Math.max(0, index - 32), end = Math.min(images.length, index + 33);
+                    sequence.seed(collection, images.slice(start, end).map(name => joinPath(collection, name)),
+                        {start: start === 0, end: end === images.length && !folders.length});
+                }
+            }
+            openViewer(image, collection, opener);
+        };
         this.folderLoaded = folderLoaded;
+        this.refresh = refresh;
         this.viewport = byId('grid-viewport');
         this.container = byId('grid');
         this.status = byId('grid-status');
@@ -30,7 +43,7 @@ export class FolderGrid {
         this.restorePosition = null;
         this.scrollScheduled = false;
         this.viewport.addEventListener('scroll', () => this.scheduleRender());
-        this.moreButton.addEventListener('click', () => this.loadPage());
+        this.moreButton.addEventListener('click', () => this.refresh());
         this.resizeObserver = new ResizeObserver(() => {
             if (!this.state) return;
             if (this.viewport.clientWidth !== this.layout.width) this.relayout();
@@ -43,9 +56,10 @@ export class FolderGrid {
         const previous = this.state;
         this.state = state;
         this.viewport.inert = state.viewing;
+        if (state.viewing) return;
         if (position) this.restorePosition = position;
         this.viewport.classList.toggle('compact', state.compact);
-        if (force || previous?.folder !== state.folder) {
+        if (force || previous?.folder !== state.folder || this.directory?.path !== state.folder) {
             this.loadFolder(force);
         } else if (this.directory && !this.loadingFolder
             && ['recursive', 'compact', 'filter'].some(key => previous[key] !== state[key])) {
@@ -54,7 +68,8 @@ export class FolderGrid {
     }
 
     position() {
-        const row = this.layout.rows.find(row => row.top + row.height > this.viewport.scrollTop);
+        const [index] = this.layout.visibleRange(this.viewport.scrollTop + 1, this.viewport.scrollTop + 1);
+        const row = this.layout.rows[index];
         return row ? {path: row.items?.[0].path ?? row.path, heading: !row.items,
             offset: this.viewport.scrollTop - row.top, rowHeight: row.height} : null;
     }
@@ -62,8 +77,7 @@ export class FolderGrid {
     restore() {
         if (!this.restorePosition || this.loadingFolder) return;
         const {path, heading, offset, rowHeight} = this.restorePosition;
-        const row = this.layout.rows.find(row => heading ? !row.items && row.path === path
-            : row.items?.some(item => item.path === path));
+        const row = this.layout.byPath.get((heading ? 'heading:' : 'item:') + path);
         // Restoring a view must not initiate a traversal to find an old anchor.
         this.viewport.scrollTop = row ? Math.max(0, row.top + offset * row.height / (rowHeight || row.height)) : 0;
         this.restorePosition = null;
@@ -92,7 +106,6 @@ export class FolderGrid {
     }
 
     relayout() {
-        this.clearRows();
         this.layout.reset(this.items, this.state.recursive, this.rootName);
         this.container.style.height = this.layout.height + 'px';
         this.renderRows();
@@ -175,7 +188,11 @@ export class FolderGrid {
             node.append(heading);
         }
         this.container.append(node);
-        this.rowNodes.set(index, {node, scope});
+        this.rowNodes.set(index, {node, scope, signature: this.rowSignature(row)});
+    }
+
+    rowSignature(row) {
+        return JSON.stringify([this.state.compact, row.items?.map(item => item.path) ?? row.path]);
     }
 
     renderRows() {
@@ -184,12 +201,20 @@ export class FolderGrid {
         const end = this.viewport.scrollTop + this.viewport.clientHeight + OVERSCAN;
         const [first, last] = this.layout.visibleRange(start, end);
         for (const index of this.rowNodes.keys()) {
-            if (index < first || index >= last) this.removeRow(index);
+            const row = this.layout.rows[index];
+            if (index < first || index >= last || !row || this.rowNodes.get(index).signature !== this.rowSignature(row)) this.removeRow(index);
+            else {
+                const node = this.rowNodes.get(index).node;
+                node.style.top = row.top + 'px'; node.style.height = row.height + 'px';
+                node.style.gridTemplateColumns = row.items ? `repeat(${this.layout.columns}, minmax(0, 1fr))` : '1fr';
+            }
         }
         for (let index = first; index < last; index++) {
             if (!this.rowNodes.has(index)) this.createRow(index);
         }
         this.previews.schedule();
+        if (this.state.recursive && this.directory?.trimmedBefore && this.viewport.scrollTop < DISCOVERY_MARGIN
+            && !this.loadingPage && !this.loadingFolder && !this.state.viewing) { this.loadPage(true); return; }
         const needsMore = end >= this.layout.height - DISCOVERY_MARGIN;
         if (needsMore && this.state.recursive && !this.directory?.done && !this.loadingFolder
             && !this.loadingPage && !this.directory?.failed && !this.state.viewing) this.loadPage();
@@ -234,6 +259,9 @@ export class FolderGrid {
             }
             this.rootName = this.directory.listing.root_name || 'Collection';
             this.folderLoaded(this.rootName);
+            const {listing} = this.directory;
+            sequence.seed(path, listing.images.slice(0, 2048).map(name => joinPath(path, name)),
+                {start: true, end: listing.images.length <= 2048 && !listing.folders.length});
             this.loadingFolder = false;
             this.displayFolder();
         } catch (error) {
@@ -266,7 +294,8 @@ export class FolderGrid {
     updateSummary() {
         const directory = this.directory;
         if (this.state.recursive) {
-            this.summary.textContent = directory.images.length + (directory.done ? ' images' : ' images discovered')
+            this.summary.textContent = (directory.windowed ? 'Images'
+                : directory.images.length + (directory.done ? ' images' : ' images discovered'))
                 + (directory.warning ? ' · ' + directory.warning : '');
             this.status.textContent = directory.done ? (this.items.length ? 'End of folder' : 'No images found.') : '';
         } else {
@@ -279,24 +308,45 @@ export class FolderGrid {
         this.moreButton.hidden = !directory.failed;
     }
 
-    async loadPage() {
+    async loadPage(reverse = false) {
         if (!this.directory) { this.loadFolder(true); return; }
-        if (this.loadingPage || this.directory.done || !this.state.recursive) return;
+        if (this.loadingPage || (!reverse && this.directory.done) || !this.state.recursive) return;
         this.loadingPage = true;
         const directory = this.directory;
         directory.failed = false;
         this.moreButton.hidden = true;
         const scope = this.scope;
         try {
-            const result = await walkImages({root: directory.path, cursor: directory.cursor}, scope.signal);
+            const result = await walkImages({root: directory.path, reverse,
+                anchor: reverse ? directory.images[0]?.path : null, cursor: reverse ? null : directory.cursor}, scope.signal);
             scope.signal.throwIfAborted();
             const added = result.images.map(path => ({type: 'image', path}));
-            directory.images.push(...added);
-            directory.cursor = result.cursor;
-            directory.done = result.cursor === null;
+            const position = this.position();
+            if (reverse) {
+                directory.images.unshift(...added.reverse());
+                directory.trimmedBefore = result.cursor !== null;
+            } else {
+                directory.images.push(...added);
+                directory.cursor = result.cursor;
+                directory.done = result.cursor === null;
+            }
+            const overflow = directory.images.length > MAX_RECURSIVE_IMAGES;
+            if (overflow) {
+                directory.windowed = true;
+                if (reverse) {
+                    directory.images.splice(MAX_RECURSIVE_IMAGES);
+                    directory.done = false;
+                    directory.cursor = {anchor: directory.images.at(-1).path, server: null};
+                } else {
+                    directory.images.splice(0, directory.images.length - MAX_RECURSIVE_IMAGES);
+                    directory.trimmedBefore = true;
+                }
+            }
             if (result.warnings.length) directory.warning = 'Some folders could not be read.';
             if (this.state.recursive) {
-                this.appendRows(added);
+                if (reverse || overflow) {
+                    this.items = directory.images; this.restorePosition = position; this.relayout();
+                } else this.appendRows(added);
                 this.updateSummary();
             }
         } catch (error) {

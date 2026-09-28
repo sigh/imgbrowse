@@ -518,3 +518,5 @@ input:disabled {
 .icon svg { width: 100%; height: 100%; }
 .card-caption a .icon { margin-right: 6px; }
 .list-read { width: 52px; }
+
+.strip-spacer { flex: 0 0 auto; height: 1px; }

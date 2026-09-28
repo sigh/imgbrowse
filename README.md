@@ -30,7 +30,8 @@ Supports JPG, JPEG, PNG, GIF, WebP, and BMP, including images inside ZIP and CBZ
 archives. Archives appear as folders; their contents are read on demand without
 extraction. Hidden files and symlinks are ignored.
 The app is read-only, with no index or persistent cache. Folder discovery is
-incremental; thumbnails use a bounded memory cache.
+incremental; bounded memory caches reuse listings, previews, and nearby images.
+Refresh reloads the current scope from disk.
 
 ## Development
 
@@ -47,7 +48,7 @@ node --test tests/*.test.js
 Optional end-to-end checks require Chrome/Chromium and Node 22+:
 
 ```sh
-python3 -B tests/browser_smoke.py
+python3 -B tests/browser_smoke.py --performance
 ```
 
 Set `CHROME_BIN` if Chrome is not in a standard location. The smoke test starts a

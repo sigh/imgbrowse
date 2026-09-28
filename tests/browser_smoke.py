@@ -81,6 +81,7 @@ def check_http(base):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--screenshots', type=Path, help='optional screenshot output directory')
+    parser.add_argument('--performance', action='store_true', help='also exercise bounded windows with 2,400 images')
     args = parser.parse_args()
     chrome = chrome_executable()
     if args.screenshots:
@@ -111,6 +112,15 @@ def main():
             if args.screenshots:
                 command.append(str(args.screenshots.resolve()))
             subprocess.run(command, check=True, timeout=60)
+            if args.performance:
+                large = root / 'Large'
+                large.mkdir()
+                data = (root / 'root2.jpg').read_bytes()
+                for number in range(2400):
+                    (large / f'page{number}.jpg').write_bytes(data)
+                server.gallery.invalidate('')
+                subprocess.run(['node', str(Path(__file__).with_name('browser_performance.mjs')),
+                                debug_port, base], check=True, timeout=60)
         finally:
             if browser is not None:
                 browser.terminate()

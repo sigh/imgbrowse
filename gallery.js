@@ -1,3 +1,5 @@
+import {getInfo, refreshScope} from './static/api.js';
+import {originals} from './static/media-cache.js';
 import {byId, element} from './static/dom.js';
 import {FolderGrid} from './static/folder-grid.js';
 import {ImageViewer} from './static/image-viewer.js';
@@ -16,16 +18,19 @@ class GalleryApp {
             folderLink: (path, label) => this.folderLink(path, label),
             openViewer: (image, collection, opener) => this.openViewer(image, collection, opener),
             folderLoaded: name => this.folderLoaded(name),
+            refresh: () => this.refresh(),
         });
         this.viewer = new ImageViewer(this.previews, {
             selectImage: (image, entry) => this.navigate({image}, true, entry),
             changeSize: size => this.navigate({size}, true),
             close: () => this.closeViewer(),
+            refresh: () => this.refresh(),
             folderLink: (path, label) => this.folderLink(path, label),
         });
         history.scrollRestoration = 'manual';
         this.bindControls();
         this.render(false, true);
+        getInfo().then(info => this.folderLoaded(info.root_name)).catch(() => {});
     }
 
     bindControls() {
@@ -34,21 +39,40 @@ class GalleryApp {
         }
         byId('scope-all').addEventListener('click', () => this.navigate({recursive: !this.state.recursive}));
         this.grid.viewport.addEventListener('scroll', () => {
-            if (this.scrollScheduled) return;
-            this.scrollScheduled = true;
-            requestAnimationFrame(() => { this.scrollScheduled = false; this.savePosition(); });
+            clearTimeout(this.positionTimer);
+            this.positionTimer = setTimeout(() => this.savePosition(), 120);
         });
         byId('filter').addEventListener('input', event => {
             const filter = event.target.value;
             clearTimeout(this.filterTimer);
             this.filterTimer = setTimeout(() => this.navigate({filter}, true), FILTER_DELAY);
         });
-        byId('refresh').addEventListener('click', () => { this.savePosition(); this.render(true, true); });
+        byId('refresh').addEventListener('click', () => this.refresh());
         byId('read-folder').addEventListener('click', event => this.openViewer(null, this.state.folder, event.currentTarget));
         window.addEventListener('popstate', () => this.render(false, true));
     }
 
+    async refresh() {
+        if (this.refreshing) return;
+        this.refreshing = true;
+        byId('refresh').disabled = true;
+        this.savePosition();
+        try {
+            await refreshScope(this.state.viewing ? this.state.collection : this.state.folder);
+            originals.clear();
+            this.grid.cache.clear();
+            if (this.state.viewing) this.viewer.show(this.state, true);
+            else this.render(true, true);
+        } catch (error) {
+            (this.state.viewing ? this.viewer.status : this.grid.status).textContent = error.message;
+        } finally {
+            this.refreshing = false;
+            if (!this.grid.loadingFolder) byId('refresh').disabled = false;
+        }
+    }
+
     savePosition() {
+        clearTimeout(this.positionTimer);
         if (this.grid.loadingFolder || this.grid.restorePosition || !this.state) return;
         history.replaceState({...history.state, position: this.grid.position()}, '');
     }
@@ -88,7 +112,12 @@ class GalleryApp {
             openedFromGrid: opening || (next.viewing && Boolean(history.state?.openedFromGrid)),
         };
         history[replace ? 'replaceState' : 'pushState'](metadata, '', stateUrl(next));
-        this.render(false, true, entry);
+        if (this.state.viewing && next.viewing && sameFolder
+            && next.recursive === this.state.recursive && next.compact === this.state.compact) {
+            this.state = next;
+            this.readingSize = next.size;
+            this.viewer.show(next, false, entry);
+        } else this.render(false, true, entry);
     }
 
     folderLink(path, label) {
@@ -149,4 +178,4 @@ class GalleryApp {
     }
 }
 
-new GalleryApp();
+export const app = new GalleryApp();

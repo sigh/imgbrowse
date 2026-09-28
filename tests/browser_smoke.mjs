@@ -93,7 +93,7 @@ assert.ok(await evaluate("document.getElementById('summary').textContent.include
 await evaluate("{ const input=document.getElementById('filter'); input.value=''; input.dispatchEvent(new Event('input')); }");
 await waitFor("!new URLSearchParams(location.search).has('filter')");
 await evaluate("document.getElementById('grid-viewport').scrollTop = 1800");
-await pause(100);
+await pause(160);
 const anchor = await evaluate('history.state.position.path');
 await click('layout-list');
 await waitFor("document.querySelector('.list-item')");
@@ -134,7 +134,7 @@ for (let page=0; page<5; page++) {
 }
 await waitFor("document.getElementById('summary').textContent === '168 images'");
 await evaluate("document.getElementById('grid-viewport').scrollTop = 1800");
-await pause(100);
+await pause(160);
 const recursiveAnchor = await evaluate('history.state.position.path');
 await click('layout-list');
 await pause(100);
@@ -237,6 +237,7 @@ await open(viewerUrl(first));
 await readyImage(first);
 await call('Fetch.enable', {patterns:[{urlPattern:'*/image?*'},{urlPattern:'*/api/walk'}]});
 pauseImages = true;
+await evaluate("import('/static/media-cache.js').then(module => module.originals.clear())");
 await click('viewer-next');
 await waitImage(second);
 await waitFor("document.getElementById('viewer-status').textContent.includes('Loading')");
@@ -286,16 +287,16 @@ assert.ok(await evaluate("Number(new URLSearchParams(location.search).get('image
 
 // A visible strip retains buttons and their order as pages turn; discovery is demand driven.
 await click('viewer-thumbnails');
-await waitFor("document.querySelectorAll('#viewer-strip button').length >= 32");
+await waitFor("document.querySelectorAll('#viewer-strip button').length >= 16");
 await evaluate("window.retainedThumbnail=document.querySelector('#viewer-strip button')");
 const stripPaths = await evaluate("Array.from(document.querySelectorAll('#viewer-strip button'),button=>button.dataset.path)");
 await click('viewer-next');
 await pause(200);
 assert.ok(await evaluate('window.retainedThumbnail.isConnected'));
-assert.deepEqual(await evaluate("Array.from(document.querySelectorAll('#viewer-strip button'),button=>button.dataset.path)"),stripPaths);
+assert.deepEqual((await evaluate("Array.from(document.querySelectorAll('#viewer-strip button'),button=>button.dataset.path)")).slice(0,stripPaths.length),stripPaths);
 await evaluate("document.getElementById('viewer-strip').scrollLeft=100000");
-await waitFor(`document.querySelectorAll('#viewer-strip button').length > ${stripPaths.length}`);
-assert.ok(await evaluate("document.querySelectorAll('#viewer-strip button').length < 165"));
+await waitFor("document.querySelector('#viewer-strip button').dataset.path !== window.retainedThumbnail.dataset.path");
+assert.ok(await evaluate("document.querySelectorAll('#viewer-strip button').length < 40"));
 await screenshot('thumbnails');
 await click('viewer-zoom');
 assert.equal(await evaluate("document.querySelectorAll('#size-menu > button').length"),3);

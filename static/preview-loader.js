@@ -13,31 +13,35 @@ export class PreviewLoader {
         this.jobs = [];
         this.running = 0;
         this.scheduled = false;
+        this.active = new Set();
     }
 
     setViewerOpen(open) {
         this.viewerOpen = open;
+        for (const job of this.active) {
+            if (open && !this.viewer.contains(job.target)) job.controller.abort();
+        }
         this.schedule();
     }
 
     image(target, path, scope) {
-        return this.enqueue(() => this.attachImage(target, path, scope), target, scope.signal);
+        return this.enqueue(signal => this.attachImage(target, path, scope, signal), target, scope.signal);
     }
 
     folder(target, path, scope) {
-        return this.enqueue(async () => {
+        return this.enqueue(async signal => {
             let result;
             do {
-                result = await getPreview(path, scope.signal);
+                result = await getPreview(path, signal);
                 path = result.continue;
             } while (path !== undefined);
-            if (result.image) await this.attachImage(target, result.image, scope);
+            if (result.image) await this.attachImage(target, result.image, scope, signal);
             else target.textContent = 'Folder';
         }, target, scope.signal);
     }
 
-    async attachImage(target, path, scope) {
-        const blob = await getThumbnail(path, scope.signal);
+    async attachImage(target, path, scope, signal) {
+        const blob = await getThumbnail(path, signal);
         const image = element('img');
         image.alt = '';
         image.src = scope.objectUrl(blob);
@@ -90,10 +94,19 @@ export class PreviewLoader {
             if (!Number.isFinite(this.jobs[0].priority)) break;
             const job = this.jobs.shift();
             this.running++;
+            job.controller = new AbortController();
+            const abort = () => job.controller.abort();
+            job.signal.addEventListener('abort', abort, {once: true});
+            this.active.add(job);
             Promise.resolve().then(() => {
                 job.signal.throwIfAborted();
-                return job.work();
-            }).then(job.resolve, job.reject).finally(() => {
+                return job.work(job.controller.signal);
+            }).then(job.resolve, error => {
+                if (error.name === 'AbortError' && !job.signal.aborted) this.jobs.push(job);
+                else job.reject(error);
+            }).finally(() => {
+                job.signal.removeEventListener('abort', abort);
+                this.active.delete(job);
                 this.running--;
                 this.schedule();
             });

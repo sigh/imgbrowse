@@ -6,6 +6,8 @@ export class GridLayout {
         this.viewport = viewport;
         this.measure = document.createElement('canvas').getContext('2d');
         this.rows = [];
+        this.byPath = new Map();
+        this.measurements = new Map();
         this.height = 0;
         this.width = 0;
         this.columns = 1;
@@ -30,11 +32,14 @@ export class GridLayout {
         this.recursive = recursive;
         this.rootName = rootName;
         this.rows = [];
+        this.byPath.clear();
         this.height = 0;
         this.append(items);
     }
 
     labelHeight(text, width, fontSize) {
+        const key = JSON.stringify([text, Math.floor(width), fontSize, this.fontFamily]);
+        if (this.measurements.has(key)) return this.measurements.get(key);
         this.measure.font = fontSize + 'px ' + this.fontFamily;
         width = Math.max(1, width);
         const space = this.measure.measureText(' ').width;
@@ -54,7 +59,10 @@ export class GridLayout {
             }
         }
         // One spare line accounts for differences between canvas and DOM wrapping.
-        return (lines > 1 ? lines + 1 : lines) * this.lineHeight;
+        const height = (lines > 1 ? lines + 1 : lines) * this.lineHeight;
+        this.measurements.set(key, height);
+        if (this.measurements.size > 10000) this.measurements.delete(this.measurements.keys().next().value);
+        return height;
     }
 
     append(items) {
@@ -68,7 +76,9 @@ export class GridLayout {
                 current = null;
                 const label = folder || this.rootName;
                 const height = Math.max(42, this.labelHeight(label, this.contentWidth, this.headingFont) + 16);
-                this.rows.push({top: this.height, height, label, path: folder});
+                const heading = {top: this.height, height, label, path: folder};
+                this.rows.push(heading);
+                this.byPath.set('heading:' + folder, heading);
                 this.height += height;
                 previousFolder = folder;
             }
@@ -78,6 +88,7 @@ export class GridLayout {
                 this.height += current.height;
             }
             current.items.push(item);
+            this.byPath.set('item:' + item.path, current);
             const isFolder = item.type === 'folder';
             const controlsWidth = this.compact ? (isFolder ? 108 : 48)
                 : this.captionPadding * 2 + 2 + (isFolder ? 80 : 0);

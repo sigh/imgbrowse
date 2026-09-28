@@ -1,4 +1,5 @@
-import {imageUrl, walkImages} from './api.js';
+import {loadOriginal} from './media-cache.js';
+import {walkImages} from './api.js';
 import {byId, element, TaskScope} from './dom.js';
 import {filename, parentPath, joinPath, IMAGE_SIZES} from './state.js';
 import {ViewerViewport} from './viewer-viewport.js';
@@ -7,14 +8,14 @@ import {WheelGesture} from './wheel-gesture.js';
 import {icon} from './icons.js';
 import {ThumbnailStrip} from './thumbnail-strip.js';
 
-const NEARBY_COUNT = 1;
+const NEARBY_COUNT = 16;
 const LOADING_DELAY = 700;
 const ZOOM_STEPS = IMAGE_SIZES.slice(2).map(Number);
 
 /** Owns image loading and collection navigation; geometry and gestures are separate. */
 export class ImageViewer {
-    constructor(previews, {selectImage, changeSize, close, folderLink}) {
-        Object.assign(this, {previews, selectImage, changeSize, close, folderLink});
+    constructor(previews, {selectImage, changeSize, close, folderLink, refresh}) {
+        Object.assign(this, {previews, selectImage, changeSize, close, folderLink, refresh});
         this.container = byId('viewer');
         this.canvas = byId('viewer-canvas');
         this.viewport = new ViewerViewport(this.canvas);
@@ -49,8 +50,8 @@ export class ImageViewer {
         byId('viewer-zoom-in').addEventListener('click', () => this.zoom(1));
         byId('viewer-zoom-out').addEventListener('click', () => this.zoom(-1));
         byId('viewer-thumbnails').addEventListener('click', () => this.toggleThumbnails());
-        byId('viewer-retry').addEventListener('click', () => this.show(this.state, true));
-        byId('viewer-refresh').addEventListener('click', () => this.show(this.state, true));
+        byId('viewer-retry').addEventListener('click', () => this.refresh());
+        byId('viewer-refresh').addEventListener('click', () => this.refresh());
         this.closeButton.addEventListener('click', this.close);
         this.previousButton.addEventListener('click', () => this.requestMove(true));
         this.nextButton.addEventListener('click', () => this.requestMove(false));
@@ -147,7 +148,7 @@ export class ImageViewer {
 
     show(state, force = false, entry = 'top') {
         this.state = state;
-        this.viewport.setSize(state.size);
+        if (this.viewport.size !== state.size) this.viewport.setSize(state.size);
         const key = JSON.stringify([state.viewing, state.collection, state.image]);
         if (!force && key === this.key) {
             this.updateControls();
@@ -164,6 +165,9 @@ export class ImageViewer {
         const wasOpen = !this.container.hidden;
         this.container.hidden = !state.viewing;
         if (!state.viewing) {
+            this.prefetchScope?.dispose();
+            this.prefetchScope = null;
+            this.prefetchPath = null;
             this.nearbyImages = [];
             this.nearbyCollection = null;
             this.viewport.clear();
@@ -183,11 +187,11 @@ export class ImageViewer {
         }
         if (force || this.nearbyCollection !== state.collection) this.nearbyImages = [];
         this.updateCollectionLabel();
-        this.renderStrip(force);
         this.updateControls();
         if (state.image) {
-            this.loadImage(state.image, this.scope, entry, force);
+            this.loadImage(state.image, this.scope, entry);
             this.loadNeighbors(state.image, state.collection, this.scope);
+            this.renderStrip(force);
         } else {
             this.viewport.clear();
             this.updateControls();
@@ -196,28 +200,17 @@ export class ImageViewer {
         }
     }
 
-    async loadImage(path, scope, entry, refresh) {
+    async loadImage(path, scope, entry) {
         this.loadingImage = true;
         this.updateControls();
-        let pending;
         const timer = setTimeout(() => {
             if (!scope.signal.aborted) this.status.textContent = 'Loading ' + filename(path) + '…';
         }, LOADING_DELAY);
-        scope.onDispose(() => { clearTimeout(timer); if (pending) pending.src = ''; });
+        scope.onDispose(() => clearTimeout(timer));
         try {
-            // Fetch allows cancellation; decode before replacing the displayed page.
-            const response = await fetch(imageUrl(path), {signal: scope.signal, cache: refresh ? 'reload' : 'default'});
-            if (!response.ok) throw new Error('Image unavailable');
-            const blob = await response.blob();
+            const {image} = await loadOriginal(path, scope.signal);
             scope.signal.throwIfAborted();
-            pending = new Image();
-            pending.src = scope.objectUrl(blob);
-            await pending.decode();
-            scope.signal.throwIfAborted();
-            pending.alt = filename(path);
-            pending.dataset.path = path;
-            this.viewport.show(pending, this.state.size, entry);
-            pending = null;
+            this.viewport.show(image, this.state.size, entry);
             byId('viewer-name').textContent = filename(path);
             byId('viewer-name').title = path;
             if (this.boundaryDirection === null && !this.moveScope) this.status.textContent = '';
@@ -233,24 +226,40 @@ export class ImageViewer {
             if (scope === this.scope) {
                 this.loadingImage = false;
                 this.updateControls();
+                this.prefetchNext();
             }
         }
     }
 
-    async loadNeighbors(image, collection, scope) {
-        try {
-            const request = reverse => walkImages({root: collection, anchor: image, reverse, limit: NEARBY_COUNT}, scope.signal);
-            const [before, after] = await Promise.all([request(true), request(false)]);
-            scope.signal.throwIfAborted();
-            this.nearbyImages = [...before.images.reverse(), image, ...after.images];
-            this.nearbyCollection = collection;
-            this.singleImage = this.nearbyImages.length === 1 && !before.cursor && !after.cursor
-                && !before.warnings.length && !after.warnings.length;
-            this.updateControls();
-        } catch (error) {
-            // Neighbor previews are optional; the main navigation can retry discovery.
-            if (error.name !== 'AbortError' && !scope.signal.aborted) this.nearbyImages = [];
+    loadNeighbors(image, collection, scope) {
+        const results = new Map();
+        for (const reverse of [true, false]) {
+            walkImages({root: collection, anchor: image, reverse, limit: NEARBY_COUNT}, scope.signal)
+                .then(result => {
+                    scope.signal.throwIfAborted();
+                    results.set(reverse, result);
+                    const before = results.get(true), after = results.get(false);
+                    this.nearbyImages = [...(before ? [...before.images].reverse() : []), image, ...(after?.images || [])];
+                    this.nearbyCollection = collection;
+                    this.singleImage = Boolean(before && after && this.nearbyImages.length === 1
+                        && !before.cursor && !after.cursor && !before.warnings.length && !after.warnings.length);
+                    this.updateControls();
+                    this.prefetchNext();
+                }).catch(() => {});
         }
+    }
+
+    prefetchNext() {
+        if (this.loadingImage || !this.state.viewing) return;
+        const index = this.nearbyImages.indexOf(this.state.image);
+        const next = index < 0 ? null : this.nearbyImages[index + (this.readingReverse ? -1 : 1)];
+        if (!next || this.prefetchPath === next) return;
+        this.prefetchScope?.dispose();
+        this.prefetchScope = new TaskScope();
+        this.prefetchPath = next;
+        loadOriginal(next, this.prefetchScope.signal, true).catch(() => {
+            if (this.prefetchPath === next) this.prefetchPath = null;
+        });
     }
 
     renderStrip(force = false) {
@@ -260,6 +269,7 @@ export class ImageViewer {
 
     requestMove(reverse, fresh = true, source = 'explicit') {
         if (!this.state.viewing || this.moveScope || this.singleImage) return;
+        this.readingReverse = reverse;
         if (this.loadingImage && !fresh) return;
         const wrap = this.boundaryDirection === reverse;
         if (wrap && !fresh) return;
