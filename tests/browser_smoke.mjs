@@ -132,7 +132,7 @@ for (let page=0; page<5; page++) {
     await evaluate("document.getElementById('grid-viewport').scrollTop = document.getElementById('grid-viewport').scrollHeight");
     await pause(100);
 }
-await waitFor("document.getElementById('summary').textContent === '165 images'");
+await waitFor("document.getElementById('summary').textContent === '168 images'");
 await evaluate("document.getElementById('grid-viewport').scrollTop = 1800");
 await pause(100);
 const recursiveAnchor = await evaluate('history.state.position.path');
@@ -311,6 +311,21 @@ await evaluate("document.querySelector('#viewer-path a:last-child').click()");
 await waitFor("document.getElementById('viewer').hidden && document.querySelectorAll('.card').length === 2");
 assert.equal(await evaluate("new URLSearchParams(location.search).get('folder')"),'Album/Chapter 1');
 assert.equal(await evaluate("document.querySelector('#breadcrumbs [aria-current]').tagName"),'SPAN');
+
+// ZIP/CBZ archives behave like folders, with direct links and natural page order.
+await open('/?folder=Packed.cbz');
+await waitFor("document.querySelectorAll('.card').length === 3");
+assert.equal(await evaluate("document.querySelector('#breadcrumbs [aria-current]').textContent"),'Packed.cbz');
+await click('read-folder');
+await readyImage('Packed.cbz/page2.jpg');
+await click('viewer-next');
+await readyImage('Packed.cbz/page10.jpg');
+await click('viewer-next');
+await readyImage('Packed.cbz/Chapter 3/page1.jpg');
+await open(viewerUrl('Packed.cbz/Chapter 3/page1.jpg', 'page', 'Packed.cbz'));
+await readyImage('Packed.cbz/Chapter 3/page1.jpg');
+await evaluate("document.querySelector('#viewer-path a:last-child').click()");
+await waitFor("document.getElementById('viewer').hidden && new URLSearchParams(location.search).get('folder') === 'Packed.cbz/Chapter 3'");
 
 // Special filenames and narrow screens retain controls, full names, and a visible focus target.
 await open(viewerUrl('Odd & #/a ?#%.jpg', 'page', 'Odd & #'));

@@ -3,6 +3,7 @@
 import json
 import mimetypes
 import shutil
+import zipfile
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
@@ -89,21 +90,43 @@ class GalleryHandler(BaseHTTPRequestHandler):
             self.send_json({'error': 'Not found'}, 404)
 
     def _serve_image(self, path, thumbnail=False):
-        file = self.gallery.resolve(path)
-        if file.suffix.lower() not in IMAGE_EXTENSIONS:
-            raise FileNotFoundError('Unsupported image')
+        file, member = self.gallery.image_source(path)
         stat = file.stat()
         etag = f'"{stat.st_mtime_ns}-{stat.st_size}"'
+        if member is not None:
+            etag = f'"{stat.st_mtime_ns}-{stat.st_size}-{member.CRC}-{member.file_size}"'
         if self.headers.get('If-None-Match') == etag:
             self.send_response(304)
             self.send_header('ETag', etag)
             self.end_headers()
             return
+        content_type = mimetypes.guess_type(path)[0] or 'application/octet-stream'
+        if member is not None:
+            def read_member():
+                try:
+                    with self.gallery.directory_work, zipfile.ZipFile(file) as archive:
+                        with archive.open(member) as source:
+                            data = source.read(member.file_size + 1)
+                except (zipfile.BadZipFile, RuntimeError, KeyError) as error:
+                    raise ValueError('Unable to read archive image') from error
+                if len(data) != member.file_size:
+                    raise ValueError('Archive image has an invalid size')
+                return data
+
+            if thumbnail:
+                key = (str(file), stat.st_mtime_ns, stat.st_size, member.filename,
+                       member.CRC, member.file_size)
+                data = self.thumbnails.get_archive(key, read_member)
+                self.send_content(data, 'image/jpeg', etag=etag)
+            elif self.command == 'HEAD':
+                self.send_headers(content_type, member.file_size, etag=etag)
+            else:
+                self.send_content(read_member(), content_type, etag=etag)
+            return
         if thumbnail:
             data = self.thumbnails.get(file, stat)
             self.send_content(data, 'image/jpeg', etag=etag)
             return
-        content_type = mimetypes.guess_type(file.name)[0] or 'application/octet-stream'
         with file.open('rb') as source:
             self.send_headers(content_type, stat.st_size, etag=etag)
             if self.command != 'HEAD':

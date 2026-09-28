@@ -7,6 +7,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import zipfile
 from pathlib import Path
 from threading import Thread
 from urllib.error import HTTPError
@@ -50,6 +51,9 @@ def make_collection(root):
                 draw.ellipse((90, y + 30, 280, y + 250), fill='#647b83')
                 draw.text((340, y + 80), f'Panel {panel + 1}: sample reading text', fill='black')
         image.save(file)
+    with zipfile.ZipFile(root / 'Packed.cbz', 'w') as archive:
+        for name in ('page10.jpg', 'page2.jpg', 'Chapter 3/page1.jpg'):
+            archive.writestr(name, (root / 'root2.jpg').read_bytes())
     (root / 'Empty').mkdir()
     long_name = 'A very long collection title with many descriptive words and publisher details ' * 2
     (root / 'Names' / (long_name + '- Chapter 123')).mkdir(parents=True)
@@ -58,7 +62,8 @@ def make_collection(root):
 def check_http(base):
     for route, content_type in [('/', 'text/html'), ('/gallery.css', 'text/css'),
                                 ('/gallery.js', 'javascript'), ('/api/folder', 'application/json'),
-                                ('/thumbnail?path=root2.jpg', 'image/jpeg')]:
+                                ('/thumbnail?path=root2.jpg', 'image/jpeg'),
+                                ('/thumbnail?path=Packed.cbz%2Fpage2.jpg', 'image/jpeg')]:
         with urlopen(base + route) as response:
             assert content_type in response.headers['Content-Type']
             if route.startswith('/thumbnail'):

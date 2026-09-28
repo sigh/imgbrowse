@@ -6,6 +6,8 @@ import threading
 from bisect import bisect_left, bisect_right
 from pathlib import Path, PurePosixPath
 
+from .archives import ARCHIVE_EXTENSIONS, ArchiveCache
+
 IMAGE_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp'}
 WALK_BUDGET = 24
 PAGE_SIZE = 60
@@ -24,6 +26,7 @@ class Gallery:
     def __init__(self, root):
         self.root = Path(root).resolve()
         self.directory_work = threading.BoundedSemaphore(8)
+        self.archives = ArchiveCache()
 
     def resolve(self, relative: str) -> Path:
         if not isinstance(relative, str) or '\x00' in relative:
@@ -38,15 +41,49 @@ class Gallery:
                 raise ValueError('Symbolic links are not included')
         return candidate
 
+    def archive_parts(self, relative):
+        """Return an archive file and its internal path, when the path enters one."""
+        if not isinstance(relative, str):
+            raise ValueError('Invalid path')
+        parts = PurePosixPath(relative).parts
+        for index, part in enumerate(parts):
+            if Path(part).suffix.lower() in ARCHIVE_EXTENSIONS:
+                archive = self.resolve('/'.join(parts[:index + 1]))
+                if not archive.is_file():
+                    raise FileNotFoundError('Archive not found')
+                return archive, '/'.join(parts[index + 1:])
+        return None
+
+    def image_source(self, relative):
+        """A loose image path, or a ZIP file and verified image member."""
+        parts = self.archive_parts(relative)
+        if parts:
+            archive, inner = parts
+            with self.directory_work:
+                info = self.archives.get(archive).image(inner)
+            return archive, info
+        file = self.resolve(relative)
+        if file.suffix.lower() not in IMAGE_EXTENSIONS or not file.is_file():
+            raise FileNotFoundError('Unsupported image')
+        return file, None
+
     def listing(self, relative: str) -> dict:
         """Read one directory; never inspect its descendants."""
+        archive = self.archive_parts(relative)
+        if archive:
+            file, inner = archive
+            with self.directory_work:
+                return self.archives.get(file).listing(inner, natural_key)
         directory = self.resolve(relative)
         folders, images = [], []
         with self.directory_work, os.scandir(directory) as entries:
             for entry in entries:
                 if entry.name.startswith('.') or entry.is_symlink():
                     continue
-                if entry.is_dir(follow_symlinks=False):
+                if entry.is_dir(follow_symlinks=False) or (
+                    Path(entry.name).suffix.lower() in ARCHIVE_EXTENSIONS
+                    and entry.is_file(follow_symlinks=False)
+                ):
                     folders.append(entry.name)
                 elif (
                     Path(entry.name).suffix.lower() in IMAGE_EXTENSIONS
@@ -76,7 +113,10 @@ class Gallery:
         never requires enumerating the earlier portion of the collection.
         Cursors hold names rather than array offsets and contain no server state.
         """
-        self.resolve(root)
+        if self.archive_parts(root):
+            self.listing(root)
+        else:
+            self.resolve(root)
         if type(limit) is not int or not 1 <= limit <= PAGE_SIZE:
             raise ValueError('Invalid page size')
         if type(reverse) is not bool:
@@ -125,7 +165,10 @@ class Gallery:
         if anchor is None:
             return [{'path': root, 'phase': 0, 'after': None}]
 
-        self.resolve(anchor)
+        if self.archive_parts(anchor):
+            self.image_source(anchor)
+        else:
+            self.resolve(anchor)
         relative = PurePosixPath(anchor).relative_to(root_path)
         if not relative.parts:
             raise ValueError('An image anchor must be inside the selected folder')
@@ -152,7 +195,10 @@ class Gallery:
         for frame in cursor:
             if not isinstance(frame, dict) or not {'path', 'phase', 'after'} <= frame.keys():
                 raise ValueError('Invalid continuation frame')
-            self.resolve(frame['path'])
+            if self.archive_parts(frame['path']):
+                self.listing(frame['path'])
+            else:
+                self.resolve(frame['path'])
             PurePosixPath(frame['path']).relative_to(root)
             if type(frame['phase']) is not int or frame['phase'] not in (0, 1, 2):
                 raise ValueError('Invalid continuation phase')

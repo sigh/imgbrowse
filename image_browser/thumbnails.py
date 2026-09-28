@@ -12,7 +12,7 @@ THUMBNAIL_SIZE = (400, 300)
 JPEG_QUALITY = 78
 
 
-def render_thumbnail(file: Path) -> bytes:
+def render_thumbnail(file) -> bytes:
     """Resize before orientation correction to avoid copying full-size pixels."""
     draft_edge = max(THUMBNAIL_SIZE)
     draft_size = (draft_edge, draft_edge)
@@ -47,6 +47,19 @@ class ThumbnailCache:
             if cached is not None:
                 return cached
             data = render_thumbnail(file)
+            self._store(key, data)
+            return data
+
+    def get_archive(self, key, read_member) -> bytes:
+        """Decode an archive member only when its version is absent from cache."""
+        cached = self._lookup(key)
+        if cached is not None:
+            return cached
+        with self._workers:
+            cached = self._lookup(key)
+            if cached is not None:
+                return cached
+            data = render_thumbnail(io.BytesIO(read_member()))
             self._store(key, data)
             return data
 

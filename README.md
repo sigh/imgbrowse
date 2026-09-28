@@ -26,7 +26,9 @@ Switch between previews and a name list; optionally include subfolders. Filterin
 matches names in the current folder. URLs can be bookmarked, and browser history
 restores grid positions. Refresh picks up filesystem changes.
 
-Supports JPG, JPEG, PNG, GIF, WebP, and BMP. Hidden files and symlinks are ignored.
+Supports JPG, JPEG, PNG, GIF, WebP, and BMP, including images inside ZIP and CBZ
+archives. Archives appear as folders; their contents are read on demand without
+extraction. Hidden files and symlinks are ignored.
 The app is read-only, with no index or persistent cache. Folder discovery is
 incremental; thumbnails use a bounded memory cache.
 
