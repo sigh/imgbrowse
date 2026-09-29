@@ -8,6 +8,8 @@ import {WheelGesture} from './wheel-gesture.js';
 
 import {icon} from './icons.js';
 import {ThumbnailStrip} from './thumbnail-strip.js';
+import {VideoPlayer} from './video-player.js';
+import {isVideo} from './media-kind.js';
 
 const NEARBY_COUNT = 16;
 const LOADING_DELAY = 700;
@@ -20,6 +22,7 @@ export class ImageViewer {
         this.container = byId('viewer');
         this.canvas = byId('viewer-canvas');
         this.viewport = new ViewerViewport(this.canvas);
+        this.video = new VideoPlayer(this.canvas);
         this.wheel = new WheelGesture();
         this.strip = byId('viewer-strip');
         this.status = byId('viewer-status');
@@ -93,6 +96,7 @@ export class ImageViewer {
     }
 
     updateControls() {
+        document.querySelector('.size-control').hidden = isVideo(this.state.image);
         const hasImage = Boolean(this.state.image);
         this.previousButton.disabled = !hasImage || this.singleImage || Boolean(this.moveScope);
         this.nextButton.disabled = this.previousButton.disabled;
@@ -113,10 +117,10 @@ export class ImageViewer {
         byId('viewer-zoom-in').disabled = !sizing || this.viewport.scale >= ZOOM_STEPS.at(-1);
         for (const [button, reverse] of [[this.previousButton, true], [this.nextButton, false]]) {
             const wrap = this.boundaryDirection === reverse;
-            button.querySelector('.nav-label').textContent = wrap ? (reverse ? 'Go to last image' : 'Go to first image')
+            button.querySelector('.nav-label').textContent = wrap ? (reverse ? 'Go to last item' : 'Go to first item')
                 : (reverse ? 'Prev' : 'Next');
-            button.setAttribute('aria-label', wrap ? (reverse ? 'Go to last image' : 'Go to first image')
-                : (reverse ? 'Previous image' : 'Next image'));
+            button.setAttribute('aria-label', wrap ? (reverse ? 'Go to last item' : 'Go to first item')
+                : (reverse ? 'Previous item' : 'Next item'));
             button.classList.toggle('wrap', wrap);
         }
         this.container.setAttribute('aria-busy', String(this.loadingImage || Boolean(this.moveScope)));
@@ -185,6 +189,18 @@ export class ImageViewer {
     }
 
     async loadImage(path, scope, entry) {
+        if (isVideo(path)) {
+            this.viewport.clear();
+            this.setSizeMenu(false, false);
+            byId('viewer-name').textContent = filename(path);
+            byId('viewer-name').title = path;
+            this.video.show(path, scope, () => {
+                this.status.textContent = 'Unable to play this video. Its format may not be supported by this browser.';
+                byId('viewer-retry').hidden = false;
+            });
+            this.updateControls();
+            return;
+        }
         this.loadingImage = true;
         this.updateControls();
         const timer = setTimeout(() => {
@@ -237,7 +253,7 @@ export class ImageViewer {
         if (this.loadingImage || !this.state.viewing) return;
         const index = this.nearbyImages.indexOf(this.state.image);
         const next = index < 0 ? null : this.nearbyImages[index + (this.readingReverse ? -1 : 1)];
-        if (!next || this.prefetchPath === next) return;
+        if (!next || isVideo(next) || this.prefetchPath === next) return;
         this.prefetchScope?.dispose();
         this.prefetchScope = new TaskScope();
         this.prefetchPath = next;
@@ -270,7 +286,7 @@ export class ImageViewer {
         }
         const scope = this.moveScope = new TaskScope();
         this.updateControls();
-        scope.delay(() => { this.status.textContent = 'Finding the next image…'; }, LOADING_DELAY);
+        scope.delay(() => { this.status.textContent = 'Finding the next item…'; }, LOADING_DELAY);
         let cursor = null;
         let warning = false;
         try {
@@ -282,15 +298,15 @@ export class ImageViewer {
                 if (result.images.length) {
                     if (wrap && result.images[0] === this.state.image) {
                         this.singleImage = true;
-                        this.status.textContent = 'This is the only image in the collection.';
+                        this.status.textContent = 'This is the only item in the collection.';
                     } else this.selectImage(result.images[0], entry);
                     return;
                 }
                 cursor = result.cursor;
             } while (cursor !== null);
             if (!this.state.image) {
-                this.status.textContent = warning ? 'No accessible images found. Some folders could not be read.'
-                    : 'No images in this collection. Close to return to the folder.';
+                this.status.textContent = warning ? 'No accessible media found. Some folders could not be read.'
+                    : 'No images or videos in this collection. Close to return to the folder.';
             } else {
                 this.boundaryDirection = reverse;
                 this.status.textContent = (reverse ? 'Beginning' : 'End') + ' of collection.'
@@ -312,12 +328,14 @@ export class ImageViewer {
 
     onKey(event) {
         if (!this.state?.viewing || event.ctrlKey || event.metaKey || event.altKey) return;
+        if (document.fullscreenElement) return;
         if (event.key === 'Escape') {
             event.preventDefault();
             if (!byId('size-menu').hidden) this.setSizeMenu(false);
             else this.close();
             return;
         }
+        if (event.composedPath().includes(this.video.element)) return;
         if (event.key === 'Tab') {
             const controls = [...this.container.querySelectorAll('a[href], button, select, [tabindex="0"]')]
                 .filter(node => node.getClientRects().length && !node.disabled);
@@ -345,6 +363,7 @@ export class ImageViewer {
     }
 
     onWheel(event) {
+        if (isVideo(this.state?.image)) return;
         if (!this.state?.viewing || event.ctrlKey || event.metaKey || event.altKey || event.shiftKey
             || !event.deltaY || Math.abs(event.deltaX) > Math.abs(event.deltaY)) return;
         const now = performance.now();

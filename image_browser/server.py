@@ -14,6 +14,8 @@ from PIL import Image
 from .catalog import PAGE_SIZE, Gallery
 from .work import Cancelled, WorkGate, check_cancelled, request_work
 from .thumbnails import ThumbnailCache
+from .sources import VIDEO_TYPES
+from .ranges import UnsatisfiableRange, byte_range
 
 APP_DIRECTORY = Path(__file__).resolve().parent.parent
 MAX_REQUEST_BYTES = 128 * 1024
@@ -25,7 +27,7 @@ STATIC_FILES = {
     **{f'/static/{name}.js': f'static/{name}.js' for name in (
         'api', 'dom', 'state', 'preview-loader', 'grid-layout', 'folder-grid', 'image-viewer',
         'viewer-viewport', 'wheel-gesture', 'icons', 'thumbnail-strip',
-        'resource-cache', 'sequence', 'media-cache', 'folder-path',
+        'resource-cache', 'sequence', 'media-cache', 'folder-path', 'video-player', 'media-kind',
     )},
 }
 
@@ -42,7 +44,7 @@ class GalleryHandler(BaseHTTPRequestHandler):
         self.thumbnails = server.thumbnails
         super().__init__(request, client_address, server)
 
-    def send_headers(self, content_type, length, status=200, etag=None):
+    def send_headers(self, content_type, length, status=200, etag=None, extra=None):
         self.response_started = True
         self.send_response(status)
         self.send_header('Content-Type', content_type)
@@ -51,6 +53,8 @@ class GalleryHandler(BaseHTTPRequestHandler):
         self.send_header('Cache-Control', 'private, max-age=300' if media else 'no-cache')
         if etag is not None:
             self.send_header('ETag', etag)
+        for name, value in (extra or {}).items():
+            self.send_header(name, value)
         self.end_headers()
 
     def send_content(self, data, content_type, status=200, etag=None):
@@ -74,7 +78,7 @@ class GalleryHandler(BaseHTTPRequestHandler):
         self.response_started = False
         try:
             path = urlsplit(self.path).path
-            priority = 0 if path == '/image' else 2 if path in ('/thumbnail', '/api/preview') else 1
+            priority = 0 if path == '/image' else 2 if path in ('/thumbnail', '/api/preview', '/api/video') else 1
             if parse_qs(urlsplit(self.path).query).get('prefetch') == ['1']:
                 priority = 3
             with request_work(priority, self.disconnected):
@@ -119,6 +123,11 @@ class GalleryHandler(BaseHTTPRequestHandler):
             self.send_content(file.read_bytes(), content_type + '; charset=utf-8')
         elif url.path == '/api/info':
             self.send_json({'root_name': gallery.root.name})
+        elif url.path == '/api/video':
+            source = gallery.source(path)
+            if source.kind != 'video':
+                raise ValueError('Not a video')
+            self.send_json(self.thumbnails.video_info(source))
         elif url.path == '/api/location':
             self.send_json(gallery.location(path))
         elif url.path == '/api/folder':
@@ -132,6 +141,20 @@ class GalleryHandler(BaseHTTPRequestHandler):
 
     def _serve_image(self, path, thumbnail=False):
         source = self.gallery.source(path)
+        if source.kind == 'video':
+            if thumbnail:
+                data = self.thumbnails.get_video(source)
+                try:
+                    duration = self.thumbnails.video_info(source).get('duration')
+                except (ValueError, OSError):
+                    duration = None
+                extra = {'X-Video-Duration': str(duration)} if duration is not None else {}
+                self.send_headers('image/jpeg', len(data), etag=source.etag, extra=extra)
+                if self.command != 'HEAD':
+                    self.wfile.write(data)
+            else:
+                self._serve_video(path, source)
+            return
         file, member, stat = source.file, source.member, source.stat
         etag = source.etag
         if self.headers.get('If-None-Match') == etag:
@@ -173,13 +196,41 @@ class GalleryHandler(BaseHTTPRequestHandler):
             if self.command != 'HEAD':
                 self.copy_image(stream)
 
-    def copy_image(self, source):
-        while True:
+    def _serve_video(self, path, source):
+        content_type = VIDEO_TYPES[source.file.suffix.lower()]
+        headers = {'Accept-Ranges': 'bytes'}
+        if self.headers.get('If-None-Match') == source.etag:
+            self.send_response(304)
+            self.send_header('ETag', source.etag)
+            self.end_headers()
+            return
+        selected = None
+        if self.command == 'GET' and self.headers.get('If-Range', source.etag) == source.etag:
+            try:
+                selected = byte_range(self.headers.get('Range'), source.size)
+            except UnsatisfiableRange:
+                headers['Content-Range'] = f'bytes */{source.size}'
+                self.send_headers(content_type, 0, 416, source.etag, headers)
+                return
+        start, end = selected if selected else (0, source.size - 1)
+        length = end - start + 1
+        if selected:
+            headers['Content-Range'] = f'bytes {start}-{end}/{source.size}'
+        with self.server.video_work, self.gallery.resolve(path).open('rb') as stream:
+            stream.seek(start)
+            self.send_headers(content_type, length, 206 if selected else 200, source.etag, headers)
+            if self.command != 'HEAD':
+                self.copy_image(stream, length)
+
+    def copy_image(self, source, remaining=None):
+        while remaining is None or remaining > 0:
             check_cancelled()
-            chunk = source.read(256 * 1024)
+            chunk = source.read(min(256 * 1024, remaining) if remaining is not None else 256 * 1024)
             if not chunk:
                 break
             self.wfile.write(chunk)
+            if remaining is not None:
+                remaining -= len(chunk)
 
     def _read_json(self):
         length = int(self.headers.get('Content-Length', '0'))
@@ -221,4 +272,5 @@ class GalleryServer(ThreadingHTTPServer):
         self.thumbnails = ThumbnailCache()
         self.archive_work = WorkGate(2, 1)
         self.image_work = WorkGate(4, 1)
+        self.video_work = WorkGate(2, 1)
         super().__init__(address, GalleryHandler)

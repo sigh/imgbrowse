@@ -7,6 +7,7 @@ from PIL import Image, ImageOps
 
 from .cache import SharedCache
 from .work import ByteBudget, WorkGate
+from .video_thumbnails import render_video_thumbnail, video_metadata
 
 DEFAULT_CACHE_BYTES = 64 * 1024 * 1024
 THUMBNAIL_SIZE = (400, 300)
@@ -37,6 +38,8 @@ class ThumbnailCache:
         self.max_bytes = max_bytes
         self.cache = SharedCache(max_bytes)
         self.workers = WorkGate(workers, max(1, workers - 1))
+        self.video_workers = WorkGate(1, 1)
+        self.metadata = SharedCache(1024 * 1024)
 
     @property
     def bytes_used(self):
@@ -49,6 +52,18 @@ class ThumbnailCache:
     def get_archive(self, key, read_member, size=0) -> bytes:
         return self._get(key, lambda: io.BytesIO(read_member()), size)
 
+    def get_video(self, source) -> bytes:
+        def load():
+            with self.video_workers:
+                return render_video_thumbnail(source.file, THUMBNAIL_SIZE)
+        return self.cache.get(source.cache_key, load, len)
+
+    def video_info(self, source):
+        def load():
+            with self.video_workers:
+                return video_metadata(source.file)
+        return self.metadata.get(source.cache_key, load, lambda _: 128)
+
     def _get(self, key, source, size=0):
         def load():
             with self.workers, ARCHIVE_BUFFER_BUDGET.reserve(size):
@@ -57,3 +72,4 @@ class ThumbnailCache:
 
     def invalidate(self):
         self.cache.invalidate()
+        self.metadata.invalidate()

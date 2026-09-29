@@ -17,6 +17,7 @@ async function request(url, signal, data) {
 
 let mediaVersion = Date.now();
 const thumbnails = new ResourceCache(32 * 1024 * 1024, 512);
+const videoInfo = new ResourceCache(1024 * 1024, 4096);
 const previews = new ResourceCache(1024 * 1024, 2048);
 const walks = new ResourceCache(4 * 1024 * 1024, 256);
 export const sequence = new Sequence((options, signal) => walks.get(JSON.stringify(options),
@@ -24,7 +25,7 @@ export const sequence = new Sequence((options, signal) => walks.get(JSON.stringi
 
 export async function refreshScope(path) {
     await request('/api/refresh', undefined, {path});
-    mediaVersion++; thumbnails.clear(); previews.clear(); walks.clear(); sequence.clear();
+    mediaVersion++; thumbnails.clear(); videoInfo.clear(); previews.clear(); walks.clear(); sequence.clear();
 }
 
 export const imageUrl = (path, thumbnail = false) =>
@@ -42,10 +43,17 @@ export const getPreview = (path, signal) =>
 
 export const walkImages = (options, signal) => sequence.walk(options, signal);
 
+export const cachedThumbnail = path => thumbnails.peek(path);
+export const getVideoInfo = (path, signal) => videoInfo.get(path,
+    shared => request('/api/video?' + new URLSearchParams({path}), shared), signal, () => 128);
+
 export function getThumbnail(path, signal) {
     return thumbnails.get(path, async shared => {
         const response = await fetch(imageUrl(path, true), {signal: shared, priority: 'low'});
         if (!response.ok) throw new Error('Preview unavailable');
-        return response.blob();
+        const blob = await response.blob();
+        const duration = response.headers.get('X-Video-Duration');
+        if (duration !== null) blob.duration = Number(duration);
+        return blob;
     }, signal, blob => blob.size);
 }

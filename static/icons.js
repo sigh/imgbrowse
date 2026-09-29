@@ -1,5 +1,6 @@
 /** Small, consistent outline icons. Accessible names belong to their controls. */
 const paths = {
+    video: '<rect x="3" y="3" width="18" height="18" rx="2"/><path d="m10 8 6 4-6 4Z"/>',
     copy: '<rect x="8" y="8" width="12" height="13" rx="2"/><path d="M16 8V3H3v13h5"/>',
     check: '<path d="m5 12 4 4L19 6"/>',
     folder: '<path d="M3 7V5h6l2 2h10v12H3Z"/>',

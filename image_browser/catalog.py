@@ -11,7 +11,7 @@ from .cache import SharedCache
 from .work import WorkGate, check_cancelled
 
 from .archives import ARCHIVE_EXTENSIONS, ArchiveCache
-from .sources import IMAGE_EXTENSIONS, ImageSource
+from .sources import MEDIA_EXTENSIONS, MediaSource
 
 WALK_BUDGET = 24
 PAGE_SIZE = 60
@@ -99,12 +99,12 @@ class Gallery:
                 file_stat = file.stat()
                 archive = self.archives.get(file, file_stat)
                 member = archive.image(inner)
-                return ImageSource(file, file_stat, member)
+                return MediaSource(file, file_stat, member)
             file = self.resolve(relative)
             file_stat = file.stat()
-            if file.suffix.lower() not in IMAGE_EXTENSIONS or not stat.S_ISREG(file_stat.st_mode):
-                raise FileNotFoundError('Unsupported image')
-            return ImageSource(file, file_stat)
+            if file.suffix.lower() not in MEDIA_EXTENSIONS or not stat.S_ISREG(file_stat.st_mode):
+                raise FileNotFoundError('Unsupported media file')
+            return MediaSource(file, file_stat)
 
     def listing(self, relative: str) -> dict:
         return self.snapshot(relative)['listing']
@@ -139,7 +139,7 @@ class Gallery:
                 ):
                     folders.append(entry.name)
                 elif (
-                    Path(entry.name).suffix.lower() in IMAGE_EXTENSIONS
+                    Path(entry.name).suffix.lower() in MEDIA_EXTENSIONS
                     and entry.is_file(follow_symlinks=False)
                 ):
                     images.append(entry.name)

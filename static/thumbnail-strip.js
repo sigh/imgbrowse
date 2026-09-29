@@ -1,3 +1,4 @@
+import {isVideo} from './media-kind.js';
 import {walkImages} from './api.js';
 import {element, TaskScope} from './dom.js';
 import {icon} from './icons.js';
@@ -94,9 +95,20 @@ export class ThumbnailStrip {
         return Math.max(48, Math.min(240, Math.floor(window.innerHeight * .35)));
     }
 
+    tileWidth(path) { return isVideo(path) ? Math.round(this.size * 16 / 9) : this.width; }
+
+    offsets() {
+        const offsets = [0];
+        for (const path of this.paths || []) offsets.push(offsets.at(-1) + this.tileWidth(path) + GAP);
+        return offsets;
+    }
+
     setSize(size) {
         const max = this.maxSize();
-        const position = Math.max(0, this.container.scrollLeft - 12) / this.stride;
+        const oldOffsets = this.offsets();
+        const left = Math.max(0, this.container.scrollLeft - 12);
+        const anchor = Math.max(0, oldOffsets.findIndex(offset => offset > left) - 1);
+        const fraction = (left - oldOffsets[anchor]) / ((oldOffsets[anchor + 1] - oldOffsets[anchor]) || 1);
         this.size = Math.round(Math.max(48, Math.min(max, size)));
         this.width = Math.round(this.size * 58 / 64);
         this.stride = this.width + GAP;
@@ -108,7 +120,12 @@ export class ThumbnailStrip {
         if (!this.scope) return;
         this.render();
         if (this.followImage) this.centerImage();
-        else { this.scrollTo(position * this.stride + 12); this.render(); }
+        else {
+            const offsets = this.offsets();
+            const width = (offsets[anchor + 1] - offsets[anchor]) || 1;
+            this.scrollTo(offsets[anchor] + fraction * width + 12);
+            this.render();
+        }
     }
 
     stop() {
@@ -149,7 +166,7 @@ export class ThumbnailStrip {
     centerImage() {
         const index = this.paths.indexOf(this.image);
         if (index < 0) return;
-        this.scrollTo(12 + index * this.stride + this.width / 2 - this.container.clientWidth / 2);
+        this.scrollTo(12 + this.offsets()[index] + this.tileWidth(this.image) / 2 - this.container.clientWidth / 2);
         this.render();
     }
 
@@ -166,8 +183,13 @@ export class ThumbnailStrip {
 
     render() {
         if (!this.visible || !this.scope) return;
-        const first = Math.max(0, Math.floor(this.container.scrollLeft / this.stride) - 3);
-        const last = Math.min(this.paths.length, Math.ceil((this.container.scrollLeft + this.container.clientWidth) / this.stride) + 3);
+        const offsets = this.offsets();
+        let first = 0;
+        while (first < this.paths.length && offsets[first + 1] < this.container.scrollLeft) first++;
+        let last = first;
+        while (last < this.paths.length && offsets[last] < this.container.scrollLeft + this.container.clientWidth) last++;
+        first = Math.max(0, first - 3);
+        last = Math.min(this.paths.length, last + 3);
         const visible = new Set(this.paths.slice(first, last));
         for (const [path, item] of this.nodes) {
             if (!visible.has(path)) { item.scope.dispose(); item.tile.remove(); this.nodes.delete(path); }
@@ -177,9 +199,9 @@ export class ThumbnailStrip {
             this.leading.setAttribute('aria-hidden', 'true'); this.trailing.setAttribute('aria-hidden', 'true');
             this.container.prepend(this.leading); this.container.append(this.trailing);
         }
-        this.leading.style.width = Math.max(0, first * this.stride - 6) + 'px';
+        this.leading.style.width = Math.max(0, offsets[first] - GAP) + 'px';
         this.leading.hidden = first === 0;
-        this.trailing.style.width = Math.max(0, (this.paths.length - last) * this.stride - 6) + 'px';
+        this.trailing.style.width = Math.max(0, offsets.at(-1) - offsets[last] - GAP) + 'px';
         this.trailing.hidden = last === this.paths.length;
         for (let index = first; index < last; index++) {
             const path = this.paths[index];
@@ -199,6 +221,7 @@ export class ThumbnailStrip {
                     button.title = 'Thumbnail unavailable: ' + path;
                 });
             }
+            item.tile.style.setProperty('--thumbnail-width', this.tileWidth(path) + 'px');
             item.button.classList.toggle('selected', path === this.image);
             if (path === this.image) item.button.setAttribute('aria-current', 'true');
             else item.button.removeAttribute('aria-current');
@@ -211,10 +234,10 @@ export class ThumbnailStrip {
             if (boundary) {
                 let end = index + 1;
                 while (end < this.paths.length && parentPath(this.paths[end]) === folder) end++;
-                const groupWidth = (end - index) * this.stride - GAP;
+                const groupWidth = offsets[end] - offsets[index] - GAP;
                 // The last heading can also use the empty space after its images.
                 const remainingWidth = end === this.paths.length
-                    ? this.container.clientWidth - 24 - index * this.stride + this.container.scrollLeft : 0;
+                    ? this.container.clientWidth - 24 - offsets[index] + this.container.scrollLeft : 0;
                 item.label.style.width = Math.max(groupWidth, remainingWidth) + 'px';
             }
             this.container.insertBefore(item.tile, this.trailing);
@@ -243,18 +266,20 @@ export class ThumbnailStrip {
             const known = new Set(this.paths);
             const added = result.images.filter(path => !known.has(path));
             const left = this.container.scrollLeft;
+            const oldFirst = this.paths[0];
+            let removedWidth = 0;
             if (edge.reverse) this.paths.unshift(...added.reverse());
             else this.paths.push(...added);
             const excess = Math.max(0, this.paths.length - MAX_PATHS);
             if (excess) {
                 if (edge.reverse) this.paths.splice(MAX_PATHS);
-                else this.paths.splice(0, excess);
+                else { removedWidth = this.offsets()[excess]; this.paths.splice(0, excess); }
                 const other = this.edges[edge.reverse ? 1 : 0];
                 other.done = false; other.cursor = null;
             }
             edge.cursor = result.cursor; edge.done = result.cursor === null;
             this.render();
-            this.scrollTo(Math.max(0, left + (edge.reverse ? added.length : -excess) * this.stride));
+            this.scrollTo(Math.max(0, left + (edge.reverse ? this.offsets()[Math.max(0, this.paths.indexOf(oldFirst))] : -removedWidth)));
             if (this.followImage) this.centerImage();
             else this.render();
         } catch (error) {

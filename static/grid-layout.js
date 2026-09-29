@@ -1,3 +1,4 @@
+import {isVideo} from './media-kind.js';
 import {filename, parentPath} from './state.js';
 
 /** Row metadata for a virtual grid. Appending a page only changes its last row. */
@@ -29,6 +30,12 @@ export class GridLayout {
         this.fontFamily = style.fontFamily;
         this.compact = this.viewport.classList.contains('compact');
         this.columns = this.compact ? 1 : Math.max(1, Math.floor(this.width / number('--grid-min-column-width')));
+        const media = items.filter(item => item.type !== 'folder');
+        if (!recursive && !this.compact && media.length && media.every(item => isVideo(item.path))) {
+            const cardWidth = (this.contentWidth - (this.columns - 1) * this.gap) / this.columns;
+            this.imageHeight = cardWidth * 9 / 16;
+            this.minHeight = 0;
+        }
         this.recursive = recursive;
         this.rootName = rootName;
         this.rows = [];
@@ -90,7 +97,7 @@ export class GridLayout {
             current.items.push(item);
             this.byPath.set('item:' + item.path, current);
             const isFolder = item.type === 'folder';
-            const controlsWidth = this.compact ? (isFolder ? 108 : 48)
+            const controlsWidth = this.compact ? (isFolder ? 108 : isVideo(item.path) ? 100 : 48)
                 : this.captionPadding * 2 + 2 + (isFolder ? 80 : 0);
             const labelWidth = cardWidth - controlsWidth;
             const contentHeight = this.compact

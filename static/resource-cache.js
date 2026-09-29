@@ -8,6 +8,8 @@ export class ResourceCache {
         this.generation = 0;
     }
 
+    peek(key) { return this.values.get(key)?.value; }
+
     async get(key, load, signal, weight = () => 1) {
         signal?.throwIfAborted();
         const cached = this.values.get(key);

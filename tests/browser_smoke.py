@@ -54,6 +54,12 @@ def make_collection(root):
     with zipfile.ZipFile(root / 'Packed.cbz', 'w') as archive:
         for name in ('page10.jpg', 'page2.jpg', 'Chapter 3/page1.jpg'):
             archive.writestr(name, (root / 'root2.jpg').read_bytes())
+    mixed = root / 'Mixed'
+    mixed.mkdir()
+    shutil.copyfile(root / 'root2.jpg', mixed / '1.jpg')
+    shutil.copyfile(Path(__file__).parent / 'fixtures' / 'sample.webm', mixed / '2.webm')
+    shutil.copyfile(root / 'root2.jpg', mixed / '3.jpg')
+    (mixed / '4.mp4').write_bytes(b'unsupported video')
     (root / 'Empty').mkdir()
     long_name = 'A very long collection title with many descriptive words and publisher details ' * 2
     (root / 'Names' / (long_name + '- Chapter 123')).mkdir(parents=True)

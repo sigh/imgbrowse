@@ -555,3 +555,19 @@ input:disabled {
     .app-header, .viewer-header { flex-wrap: wrap; justify-content: space-between; }
     #breadcrumbs, .viewer-location { order: 3; flex-basis: 100%; }
 }
+
+/* Videos use native sizing and controls, independently of image zoom. */
+#viewer-canvas.showing-video { display: flex; align-items: center; justify-content: center; overflow: hidden; }
+.showing-video .image-surface { display: none; }
+#viewer-video { width: 100%; height: 100%; min-width: 0; min-height: 0; object-fit: contain; }
+.video-placeholder { width: 40px; height: 40px; color: var(--color-muted); }
+
+.video-preview { position: relative; }
+.video-preview > .video-badge { position: absolute; right: 6px; bottom: 6px; width: 24px; height: 24px; padding: 3px; border-radius: 4px; background: #000b; color: white; pointer-events: none; }
+
+.video-duration { position: absolute; left: 6px; bottom: 6px; padding: 2px 4px; border-radius: 3px; background: #000b; color: white; font-size: 11px; pointer-events: none; }
+.video-duration:empty { display: none; }
+.list-duration { flex-shrink: 0; margin-left: auto; padding-right: 8px; color: var(--color-muted); font-variant-numeric: tabular-nums; }
+.viewer-strip .video-preview > .video-badge { width: 16px; height: 16px; padding: 1px; right: 3px; bottom: 3px; }
+.viewer-strip .video-duration { left: 3px; bottom: 3px; font-size: 10px; }
+#viewer-video { flex: none; }

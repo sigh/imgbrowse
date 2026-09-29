@@ -1,4 +1,4 @@
-"""Image identity distinguishes filesystem files from members inside archives."""
+"""Media identity distinguishes loose files from images inside archives."""
 
 from dataclasses import dataclass
 from os import stat_result
@@ -9,13 +9,22 @@ from zipfile import ZipInfo
 IMAGE_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp'}
 
 
+VIDEO_TYPES = {'.mp4': 'video/mp4', '.m4v': 'video/mp4', '.webm': 'video/webm',
+               '.ogv': 'video/ogg', '.mov': 'video/quicktime'}
+MEDIA_EXTENSIONS = IMAGE_EXTENSIONS | VIDEO_TYPES.keys()
+
+
 @dataclass(frozen=True)
-class ImageSource:
+class MediaSource:
     """A physical file version, optionally identifying an image within it."""
 
     file: Path
     stat: stat_result
     member: Optional[ZipInfo] = None
+
+    @property
+    def kind(self):
+        return 'video' if self.member is None and self.file.suffix.lower() in VIDEO_TYPES else 'image'
 
     @property
     def size(self):

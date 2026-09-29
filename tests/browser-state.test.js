@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {readState, stateUrl, relativePath, revealInBrowse} from '../static/state.js';
 import {TaskScope} from '../static/dom.js';
-import {PreviewLoader} from '../static/preview-loader.js';
+import {PreviewLoader, durationLabel} from '../static/preview-loader.js';
 
 test('strip paths use the browsing folder, including an empty current-folder label', () => {
     const state = readState('folder=Album&collection=Album/Chapter%202&image=Chapter%202/page.jpg');
@@ -122,4 +122,40 @@ test('returning to browse reveals the image without mutating shared state', () =
     assert.equal(revealInBrowse(state, 'Elsewhere/page.jpg').position, null);
     const recursive = {...state, recursive: true};
     assert.equal(revealInBrowse(recursive, 'Album/Chapter/page.jpg').position.path, 'Album/Chapter/page.jpg');
+});
+
+test('queued video extraction leaves capacity for image previews', async () => {
+    const loader = scheduler();
+    const scope = new TaskScope();
+    const order = [];
+    let release;
+    const held = new Promise(resolve => { release = resolve; });
+    const first = loader.enqueue(async () => { order.push('video1'); await held; }, target(0), scope.signal, true);
+    const second = loader.enqueue(() => order.push('video2'), target(10), scope.signal, true);
+    const image = loader.enqueue(() => order.push('image'), target(20), scope.signal);
+    await image;
+    assert.deepEqual(order, ['video1', 'image']);
+    release();
+    await Promise.all([first, second]);
+    assert.deepEqual(order, ['video1', 'image', 'video2']);
+});
+
+
+test('duration labels stay compact and omit missing metadata', () => {
+    assert.equal(durationLabel(undefined), '');
+    assert.equal(durationLabel(37.4), '0:37');
+    assert.equal(durationLabel(3605), '1:00:05');
+});
+
+test('cached preview jobs bypass a blocked video extraction', async () => {
+    const loader = scheduler();
+    const scope = new TaskScope();
+    let release;
+    const held = new Promise(resolve => { release = resolve; });
+    const first = loader.enqueue(() => held, target(0), scope.signal, true);
+    let cachedRan = false;
+    await loader.enqueue(() => { cachedRan = true; }, target(10), scope.signal, true, () => true);
+    assert.equal(cachedRan, true);
+    release();
+    await first;
 });

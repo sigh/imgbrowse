@@ -1,3 +1,4 @@
+import {isVideo} from './media-kind.js';
 import {getFolder, walkImages, sequence} from './api.js';
 import {byId, element, TaskScope} from './dom.js';
 import {icon} from './icons.js';
@@ -135,7 +136,7 @@ export class FolderGrid {
         this.renderRows();
     }
 
-    createListItem(item) {
+    createListItem(item, scope) {
         const folder = item.type === 'folder';
         const node = element('article', 'card list-item');
         node.dataset.path = item.path;
@@ -144,13 +145,18 @@ export class FolderGrid {
         name.classList.add('list-name');
         name.title = item.path;
         if (!folder) name.addEventListener('click', event => this.openViewer(item.path, this.state.folder, event.currentTarget));
-        const kind = icon(folder ? 'folder' : 'image');
+        const kind = icon(folder ? 'folder' : isVideo(item.path) ? 'video' : 'image');
         kind.classList.add('list-kind');
-        kind.setAttribute('aria-label', folder ? 'Folder' : 'Image');
+        kind.setAttribute('aria-label', folder ? 'Folder' : isVideo(item.path) ? 'Video' : 'Image');
         node.append(kind, name);
+        if (!folder && isVideo(item.path)) {
+            const duration = element('span', 'list-duration');
+            node.append(duration);
+            this.previews.duration(duration, item.path, scope);
+        }
         if (folder) {
             const read = element('button', 'list-read', 'View');
-            read.setAttribute('aria-label', 'View images in ' + filename(item.path));
+            read.setAttribute('aria-label', 'View items in ' + filename(item.path));
             read.addEventListener('click', event => this.openViewer(null, item.path, event.currentTarget));
             node.prepend(read);
         }
@@ -158,18 +164,18 @@ export class FolderGrid {
     }
 
     createCard(item, scope) {
-        if (this.state.compact) return this.createListItem(item);
+        if (this.state.compact) return this.createListItem(item, scope);
         const node = element('article', 'card');
         node.dataset.path = item.path;
         const isFolder = item.type === 'folder';
         const picture = isFolder ? this.folderLink(item.path, 'Folder') : element('button', '', 'Loading…');
         picture.className = 'picture';
-        picture.setAttribute('aria-label', (isFolder ? 'Open folder ' : 'View image ') + filename(item.path));
+        picture.setAttribute('aria-label', (isFolder ? 'Open folder ' : 'View ') + filename(item.path));
         const caption = element('div', 'card-caption');
         let preview;
         if (isFolder) {
             const read = element('button', '', 'View');
-            read.title = 'View all images in ' + filename(item.path);
+            read.title = 'View all items in ' + filename(item.path);
             read.addEventListener('click', event => this.openViewer(null, item.path, event.currentTarget));
             node.classList.add('folder-card');
             const name = this.folderLink(item.path, filename(item.path));
@@ -312,15 +318,15 @@ export class FolderGrid {
     updateSummary() {
         const directory = this.directory;
         if (this.state.recursive) {
-            this.summary.textContent = (directory.windowed ? 'Images'
-                : directory.images.length + (directory.done ? ' images' : ' images discovered'))
+            this.summary.textContent = (directory.windowed ? 'Media'
+                : directory.images.length + (directory.done ? ' items' : ' items discovered'))
                 + (directory.warning ? ' · ' + directory.warning : '');
-            this.status.textContent = directory.done ? (this.items.length ? 'End of folder' : 'No images found.') : '';
+            this.status.textContent = directory.done ? (this.items.length ? 'End of folder' : 'No images or videos found.') : '';
         } else {
             const {listing} = directory;
             this.status.textContent = this.items.length ? '' : (this.state.filter
-                ? 'No matching names.' : 'This folder has no visible folders or supported images.');
-            this.summary.textContent = `${listing.folders.length} folders · ${listing.images.length} direct images`
+                ? 'No matching names.' : 'This folder has no visible folders or supported images or videos.');
+            this.summary.textContent = `${listing.folders.length} folders · ${listing.images.length} direct items`
                 + (this.state.filter ? ` · ${this.items.length} matches` : '');
         }
         this.moreButton.hidden = !directory.failed;

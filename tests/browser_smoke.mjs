@@ -37,8 +37,8 @@ function call(method, params = {}) {
         socket.send(JSON.stringify({id: sequence, method, params}));
     });
 }
-async function evaluate(expression) {
-    const response = await call('Runtime.evaluate', {expression, returnByValue: true, awaitPromise: true});
+async function evaluate(expression, userGesture = false) {
+    const response = await call('Runtime.evaluate', {expression, returnByValue: true, awaitPromise: true, userGesture});
     if (response.exceptionDetails) throw new Error(JSON.stringify(response.exceptionDetails));
     return response.result.value;
 }
@@ -162,12 +162,12 @@ assert.equal(await evaluate('history.state.selection'), null);
 
 // Recursive paging and Back reuse discovered items without rebuilding the traversal.
 await open('/?recursive=1');
-await waitFor("document.getElementById('summary').textContent.includes('60 images')");
+await waitFor("document.getElementById('summary').textContent.includes('60 items')");
 for (let page=0; page<5; page++) {
     await evaluate("document.getElementById('grid-viewport').scrollTop = document.getElementById('grid-viewport').scrollHeight");
     await pause(100);
 }
-await waitFor("document.getElementById('summary').textContent === '168 images'");
+await waitFor("document.getElementById('summary').textContent === '172 items'");
 await evaluate("document.getElementById('grid-viewport').scrollTop = 1800");
 await pause(160);
 const recursiveAnchor = await evaluate('history.state.position.path');
@@ -199,7 +199,7 @@ await click('viewer-next');
 await readyImage(last);
 const heightAtEnd = await evaluate("document.getElementById('viewer-image').height");
 await click('viewer-next');
-await waitFor("document.getElementById('viewer-next').getAttribute('aria-label') === 'Go to first image'");
+await waitFor("document.getElementById('viewer-next').getAttribute('aria-label') === 'Go to first item'");
 assert.equal(await evaluate("document.getElementById('viewer-image').height"), heightAtEnd);
 await key('ArrowRight', true);
 assert.ok(await evaluate(imageIs(last)));
@@ -446,6 +446,54 @@ assert.ok(await evaluate("document.getElementById('viewer-path').scrollLeft > 0"
 assert.ok(await evaluate("document.getElementById('viewer-close').getBoundingClientRect().right <= innerWidth"));
 assert.ok(await evaluate("document.querySelector('.viewer-header').getBoundingClientRect().height < 150"));
 await screenshot('long-header');
+// Mixed media: placeholder previews, streaming, native controls, seeking, and cleanup.
+await call('Emulation.setDeviceMetricsOverride', {width:1440,height:900,deviceScaleFactor:1,mobile:false});
+await open('/?folder=Mixed');
+await waitFor(`document.querySelector('[data-path="Mixed/2.webm"] :is(.video-placeholder, .video-badge)')`);
+const videoPreviewAvailable = await evaluate("fetch('/thumbnail?path=Mixed/2.webm').then(response => response.ok)");
+if (videoPreviewAvailable) {
+    await waitFor(`document.querySelector('[data-path="Mixed/2.webm"] img')?.naturalWidth > 0`);
+    assert.ok(await evaluate(`Boolean(document.querySelector('[data-path="Mixed/2.webm"] .video-badge'))`));
+}
+await waitFor(`document.querySelector('[data-path="Mixed/4.mp4"] .video-placeholder')`);
+await evaluate(`document.querySelector('[data-path="Mixed/2.webm"] .picture').click()`);
+await waitFor("document.getElementById('viewer-video')?.readyState >= 2");
+assert.ok(await evaluate("document.activeElement === document.getElementById('viewer-video')"));
+if (videoPreviewAvailable) assert.ok(await evaluate("document.getElementById('viewer-video').poster.startsWith('blob:')"));
+if (await evaluate("document.getElementById('viewer-thumbnails').getAttribute('aria-expanded') === 'false'")) await click('viewer-thumbnails');
+await waitFor(`document.querySelector('#viewer-strip button[data-path="Mixed/1.jpg"]')`);
+assert.ok(await evaluate(`document.querySelector('#viewer-strip button[data-path="Mixed/2.webm"]').offsetWidth > document.querySelector('#viewer-strip button[data-path="Mixed/1.jpg"]').offsetWidth`));
+await call('Emulation.setDeviceMetricsOverride', {width:390,height:844,deviceScaleFactor:1,mobile:true});
+await pause(150);
+assert.ok(await evaluate("(()=>{const v=document.getElementById('viewer-video'), r=v.getBoundingClientRect(); return Math.abs(r.width/r.height-v.videoWidth/v.videoHeight)<.02 && r.right<=innerWidth})()"));
+await screenshot('video-mobile');
+await call('Emulation.setDeviceMetricsOverride', {width:1440,height:900,deviceScaleFactor:1,mobile:false});
+await open(viewerUrl('Mixed/1.jpg', 'page', 'Mixed'));
+await readyImage('Mixed/1.jpg');
+await click('viewer-next');
+await waitFor("document.getElementById('viewer-video')?.readyState >= 2");
+assert.ok(await evaluate("document.getElementById('viewer-video').paused && document.querySelector('.size-control').hidden"));
+await evaluate("window.testVideo=document.getElementById('viewer-video'); testVideo.focus(); testVideo.dispatchEvent(new KeyboardEvent('keydown', {key:'ArrowRight',bubbles:true})); testVideo.dispatchEvent(new WheelEvent('wheel', {deltaY:100,bubbles:true}));");
+await waitImage('Mixed/2.webm');
+await evaluate('testVideo.play()', true);
+await waitFor('testVideo.currentTime > 0');
+await evaluate('testVideo.pause(); testVideo.currentTime=1.5');
+await waitFor('!testVideo.seeking && testVideo.currentTime >= 1.4');
+await evaluate("testVideo.dispatchEvent(new Event('ended'))");
+await waitImage('Mixed/2.webm');
+await screenshot('video');
+await click('viewer-next');
+await readyImage('Mixed/3.jpg');
+assert.ok(await evaluate("testVideo.paused && !testVideo.hasAttribute('src') && !testVideo.isConnected && !document.querySelector('.size-control').hidden"));
+await click('viewer-prev');
+await waitFor("document.getElementById('viewer-video')?.readyState >= 2");
+await evaluate("window.testVideo=document.getElementById('viewer-video')");
+await click('viewer-close');
+assert.ok(await evaluate("testVideo.paused && !testVideo.hasAttribute('src') && !testVideo.isConnected"));
+await open(viewerUrl('Mixed/4.mp4', 'page', 'Mixed'));
+await waitFor("document.getElementById('viewer-status').textContent.includes('Unable to play')");
+await click('viewer-prev');
+await readyImage('Mixed/3.jpg');
 assert.equal(exceptions.length, 0, JSON.stringify(exceptions));
 console.log('Browser smoke passed: navigation, history, filtering, layout anchors, gesture edges, zoom anchors, slow loads, cancellation, filmstrip, URLs, empty/single images, responsive controls.');
 socket.close();
