@@ -75,5 +75,14 @@ assert.ok(strip.paths <= 2048,JSON.stringify(strip));
 assert.ok(strip.nodes < 40,JSON.stringify(strip));
 const media = await evaluate("import('/static/media-cache.js').then(module=>({bytes:module.originals.bytes,entries:module.originals.values.size}))");
 assert.ok(media.bytes <= 96*1024*1024 && media.entries <=4);
-console.log('Performance browser checks passed:',JSON.stringify({grid,strip,media}));
+// Return from an image outside the retained grid window without scanning from the start.
+await evaluate("testApp.openViewer('Large/page5.jpg', 'Large')");
+await wait("document.getElementById('viewer-image').dataset.path === 'Large/page5.jpg'");
+await evaluate("testApp.closeViewer()");
+await wait("document.activeElement.closest('.card')?.dataset.path === 'Large/page5.jpg'");
+assert.equal(await evaluate('history.state.selection'), 'Large/page5.jpg');
+assert.ok(await evaluate('testApp.grid.directory.images.length <= 2000'));
+await evaluate("document.getElementById('read-folder').click()");
+await wait("document.getElementById('viewer-image').dataset.path === 'Large/page5.jpg' && !document.getElementById('viewer-image').hidden");
+console.log('Performance browser checks passed:' ,JSON.stringify({grid,strip,media}));
 socket.close();

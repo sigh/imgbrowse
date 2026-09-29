@@ -5,7 +5,7 @@ import {TaskScope} from '../static/dom.js';
 import {PreviewLoader} from '../static/preview-loader.js';
 
 test('strip paths use the browsing folder, including an empty current-folder label', () => {
-    const state = readState('folder=Album&collection=Album/Chapter%202&image=Album/Chapter%202/page.jpg');
+    const state = readState('folder=Album&collection=Album/Chapter%202&image=Chapter%202/page.jpg');
     assert.equal(relativePath(state.folder, state.collection), 'Chapter 2');
     assert.equal(relativePath('Album', 'Album'), '');
     assert.equal(relativePath('', ''), '');
@@ -23,15 +23,13 @@ test('image URLs retain independent grid and viewer contexts', () => {
     assert.deepEqual(readState(new URL(stateUrl(state), 'http://localhost').search), state);
 });
 
-test('legacy links are decoded once; new literal percent filenames are preserved', () => {
-    const legacy = new URLSearchParams({category: 'Album', image: 'Album/Chapter%201/page2.jpg'});
-    assert.equal(readState(legacy.toString()).image, 'Album/Chapter 1/page2.jpg');
-    const current = new URLSearchParams({folder: 'Album', image: 'Album/literal%20.jpg'});
+test('literal percent filenames are preserved', () => {
+    const current = new URLSearchParams({folder: 'Album', image: 'literal%20.jpg'});
     assert.equal(readState(current.toString()).image, 'Album/literal%20.jpg');
 });
 
 test('closing a viewer drops its collection override and preserves grid settings', () => {
-    const state = readState('folder=parent&recursive=1&filter=page&collection=child&image=child/a.jpg');
+    const state = readState('folder=parent&recursive=1&filter=page&collection=child&image=../child/a.jpg');
     const restored = readState(new URL(stateUrl({...state, viewing: false}), 'http://localhost').search);
     assert.equal(restored.folder, 'parent');
     assert.equal(restored.recursive, true);
@@ -95,4 +93,21 @@ test('invalid image sizes fall back to Fit page and valid sizes survive URLs', (
         const state = {...readState(''), viewing: true, size};
         assert.equal(readState(new URL(stateUrl(state), 'http://localhost').search).size, size);
     }
+});
+
+
+test('URLs omit defaults and express images relative to their folder', () => {
+    assert.equal(stateUrl(readState('folder=&sort=natural&size=page')), '/');
+    const state = readState('folder=Album&image=Chapter/page.jpg');
+    assert.equal(stateUrl(state), '/?folder=Album&image=Chapter%2Fpage.jpg');
+    assert.deepEqual(readState(stateUrl(state).slice(1)), state);
+    assert.equal(stateUrl(readState('folder=Album&viewer=1')), '/?folder=Album&viewer=1');
+});
+
+test('relative image paths are unambiguous even with repeated folder names', () => {
+    for (const image of ['Album/page.jpg', '../Sibling/page.jpg', 'a ?#%.jpg', 'Book.cbz/chapter/page.jpg']) {
+        const state = readState(new URLSearchParams({folder: 'Album', image}));
+        assert.deepEqual(readState(new URL(stateUrl(state), 'http://localhost').search), state);
+    }
+    assert.equal(readState('folder=Album&image=Album/page.jpg').image, 'Album/Album/page.jpg');
 });

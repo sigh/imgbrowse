@@ -30,6 +30,7 @@ export class ViewerViewport {
         this.image = image;
         this.image.id = 'viewer-image';
         this.image.draggable = false;
+        this.image.hidden = false;
         this.ready = true;
         this.size = size;
         this.box = null;
@@ -41,8 +42,14 @@ export class ViewerViewport {
     clear() {
         this.ready = false;
         this.box = null;
-        this.image.removeAttribute('src');
-        this.image.hidden = true;
+        // The displayed element belongs to the decoded-image cache. Detach it
+        // intact so closing the viewer (or a failed load) cannot corrupt it.
+        const placeholder = document.createElement('img');
+        placeholder.id = 'viewer-image';
+        placeholder.alt = '';
+        placeholder.hidden = true;
+        this.image.replaceWith(placeholder);
+        this.image = placeholder;
     }
 
     resize(point = this.point()) {

@@ -9,18 +9,20 @@
 </head>
 <body>
     <header class="app-header">
-        <nav id="breadcrumbs" aria-label="Folder path"></nav>
+        <div class="choice-group mode-switch" role="group" aria-label="Mode">
+            <button aria-pressed="true" disabled>Browse</button>
+            <button id="read-folder" aria-pressed="false">View</button>
+        </div>
+        <nav id="breadcrumbs" class="breadcrumbs" aria-label="Folder path"></nav>
         <div class="browse-controls">
             <div class="choice-group" role="group" aria-label="Folder layout">
                 <button id="layout-previews" data-layout="previews" aria-pressed="true">Previews</button>
                 <button id="layout-list" data-layout="list" aria-pressed="false">List</button>
             </div>
             <button id="scope-all" aria-pressed="false">Include subfolders</button>
-            <button id="refresh" title="Reload this folder">Refresh</button>
         </div>
     </header>
     <div class="toolbar">
-        <button id="read-folder" title="View this folder and all its subfolders">View images</button>
         <span id="scope-note" hidden>Including subfolders</span>
         <input id="filter" type="search" placeholder="Filter this folder by name" aria-label="Filter this folder by name">
         <span id="filter-note" hidden>Name filtering is available in This folder.</span>
@@ -34,9 +36,12 @@
 
     <section id="viewer" class="viewer" role="dialog" aria-modal="true" aria-label="Image viewer" hidden>
         <header class="viewer-header">
-            <div class="viewer-location"><nav id="viewer-path" aria-label="Image folder path"></nav><div id="viewer-name"></div></div>
+            <div class="choice-group mode-switch" role="group" aria-label="Mode">
+                <button id="viewer-close" aria-pressed="false" title="Browse (Escape)">Browse</button>
+                <button aria-pressed="true" disabled>View</button>
+            </div>
+            <div class="viewer-location"><nav id="viewer-path" class="breadcrumbs" aria-label="Image folder path"></nav><div id="viewer-name"></div></div>
             <div class="viewer-tools" aria-label="Reading controls">
-                <button id="viewer-refresh" aria-label="Refresh image" title="Reload the current image and its neighbors"></button>
                 <button id="viewer-thumbnails" aria-label="Thumbnails" aria-expanded="false" aria-controls="viewer-strip" title="Thumbnails (T)"></button>
                 <div class="size-control">
                     <button id="viewer-zoom" aria-expanded="false" aria-controls="size-menu">Fit ▾</button>
@@ -51,7 +56,6 @@
                         </div>
                     </div>
                 </div>
-                <button id="viewer-close" aria-label="Close viewer (Escape)" title="Close (Escape)">×</button>
             </div>
         </header>
         <div id="viewer-stage" class="viewer-stage">

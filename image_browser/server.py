@@ -118,7 +118,7 @@ class GalleryHandler(BaseHTTPRequestHandler):
             content_type = mimetypes.guess_type(file.name)[0] or 'text/plain'
             self.send_content(file.read_bytes(), content_type + '; charset=utf-8')
         elif url.path == '/api/info':
-            self.send_json({'root_name': gallery.root.name})
+            self.send_json({'root_name': gallery.root.name, 'root_path': str(gallery.root)})
         elif url.path == '/api/folder':
             self.send_json({'path': path, 'root_name': gallery.root.name, **gallery.listing(path)})
         elif url.path == '/api/preview':

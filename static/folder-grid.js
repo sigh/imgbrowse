@@ -77,8 +77,20 @@ export class FolderGrid {
     restore() {
         if (!this.restorePosition || this.loadingFolder) return;
         const {path, heading, offset, rowHeight} = this.restorePosition;
-        const row = this.layout.byPath.get((heading ? 'heading:' : 'item:') + path);
-        // Restoring a view must not initiate a traversal to find an old anchor.
+        let row = this.layout.byPath.get((heading ? 'heading:' : 'item:') + path);
+        if (!row && this.restorePosition.reveal && this.state.recursive && this.directory) {
+            // Start a bounded window at the known image, rather than scanning from the root.
+            this.scope?.dispose(); this.scope = new TaskScope(); this.loadingPage = false;
+            Object.assign(this.directory, {images: [{type: 'image', path}],
+                cursor: {anchor: path, server: null}, done: false, failed: false,
+                trimmedBefore: true, windowed: true});
+            this.items = this.directory.images;
+            this.layout.reset(this.items, true, this.rootName);
+            this.container.style.height = this.layout.height + 'px';
+            row = this.layout.byPath.get('item:' + path);
+        }
+        if (this.restorePosition.reveal) this.focusPath = path;
+        // Restoring ordinary history never initiates a traversal.
         this.viewport.scrollTop = row ? Math.max(0, row.top + offset * row.height / (rowHeight || row.height)) : 0;
         this.restorePosition = null;
     }
@@ -95,6 +107,9 @@ export class FolderGrid {
     removeRow(index) {
         const entry = this.rowNodes.get(index);
         if (!entry) return;
+        if (entry.node.contains(document.activeElement)) {
+            this.focusPath = document.activeElement.closest('.card')?.dataset.path;
+        }
         entry.scope.dispose();
         entry.node.remove();
         this.rowNodes.delete(index);
@@ -123,6 +138,7 @@ export class FolderGrid {
     createListItem(item) {
         const folder = item.type === 'folder';
         const node = element('article', 'card list-item');
+        node.dataset.path = item.path;
         const name = folder ? this.folderLink(item.path, filename(item.path))
             : element('button', 'list-name', filename(item.path));
         name.classList.add('list-name');
@@ -144,6 +160,7 @@ export class FolderGrid {
     createCard(item, scope) {
         if (this.state.compact) return this.createListItem(item);
         const node = element('article', 'card');
+        node.dataset.path = item.path;
         const isFolder = item.type === 'folder';
         const picture = isFolder ? this.folderLink(item.path, 'Folder') : element('button', '', 'Loading…');
         picture.className = 'picture';
@@ -212,6 +229,11 @@ export class FolderGrid {
         for (let index = first; index < last; index++) {
             if (!this.rowNodes.has(index)) this.createRow(index);
         }
+        if (this.focusPath && !this.state.viewing) {
+            const item = [...this.container.querySelectorAll('.card')].find(node => node.dataset.path === this.focusPath);
+            item?.querySelector('.list-name, .card-caption a, .image-name, button')?.focus({preventScroll: true});
+            this.focusPath = null;
+        }
         this.previews.schedule();
         if (this.state.recursive && this.directory?.trimmedBefore && this.viewport.scrollTop < DISCOVERY_MARGIN
             && !this.loadingPage && !this.loadingFolder && !this.state.viewing) { this.loadPage(true); return; }
@@ -246,8 +268,6 @@ export class FolderGrid {
         this.status.textContent = 'Opening folder…';
         this.summary.textContent = '';
         this.moreButton.hidden = true;
-        byId('refresh').disabled = true;
-        byId('refresh').textContent = 'Refreshing…';
         this.viewport.setAttribute('aria-busy', 'true');
         const path = this.state.folder;
         try {
@@ -273,8 +293,6 @@ export class FolderGrid {
         } finally {
             if (scope === this.scope) {
                 this.loadingFolder = false;
-                byId('refresh').disabled = false;
-                byId('refresh').textContent = 'Refresh';
                 this.viewport.setAttribute('aria-busy', 'false');
             }
         }

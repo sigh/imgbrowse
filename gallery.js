@@ -1,10 +1,10 @@
 import {getInfo, refreshScope} from './static/api.js';
 import {originals} from './static/media-cache.js';
-import {byId, element} from './static/dom.js';
+import {byId, element, renderFolderPath} from './static/dom.js';
 import {FolderGrid} from './static/folder-grid.js';
 import {ImageViewer} from './static/image-viewer.js';
 import {PreviewLoader} from './static/preview-loader.js';
-import {filename, joinPath, readState, stateUrl} from './static/state.js';
+import {filename, browseAnchor, readState, stateUrl} from './static/state.js';
 
 const FILTER_DELAY = 150;
 
@@ -35,9 +35,9 @@ class GalleryApp {
 
     bindControls() {
         for (const button of document.querySelectorAll('[data-layout]')) {
-            button.addEventListener('click', () => this.navigate({compact: button.dataset.layout === 'list'}));
+            button.addEventListener('click', () => this.navigate({compact: button.dataset.layout === 'list'}, true));
         }
-        byId('scope-all').addEventListener('click', () => this.navigate({recursive: !this.state.recursive}));
+        byId('scope-all').addEventListener('click', () => this.navigate({recursive: !this.state.recursive}, true));
         this.grid.viewport.addEventListener('scroll', () => {
             clearTimeout(this.positionTimer);
             this.positionTimer = setTimeout(() => this.savePosition(), 120);
@@ -47,15 +47,13 @@ class GalleryApp {
             clearTimeout(this.filterTimer);
             this.filterTimer = setTimeout(() => this.navigate({filter}, true), FILTER_DELAY);
         });
-        byId('refresh').addEventListener('click', () => this.refresh());
-        byId('read-folder').addEventListener('click', event => this.openViewer(null, this.state.folder, event.currentTarget));
+        byId('read-folder').addEventListener('click', event => this.openViewer(history.state?.selection || null, this.state.folder, event.currentTarget));
         window.addEventListener('popstate', () => this.render(false, true));
     }
 
     async refresh() {
         if (this.refreshing) return;
         this.refreshing = true;
-        byId('refresh').disabled = true;
         this.savePosition();
         try {
             await refreshScope(this.state.viewing ? this.state.collection : this.state.folder);
@@ -67,31 +65,32 @@ class GalleryApp {
             (this.state.viewing ? this.viewer.status : this.grid.status).textContent = error.message;
         } finally {
             this.refreshing = false;
-            if (!this.grid.loadingFolder) byId('refresh').disabled = false;
         }
     }
 
     savePosition() {
         clearTimeout(this.positionTimer);
-        if (this.grid.loadingFolder || this.grid.restorePosition || !this.state) return;
+        if (this.grid.loadingFolder || this.grid.restorePosition || !this.state || this.state.viewing) return;
         history.replaceState({...history.state, position: this.grid.position()}, '');
     }
 
     openViewer(image, collection, opener) {
         this.viewer.openingFocus = opener || document.activeElement;
-        this.navigate({viewing: true, image, collection, size: this.readingSize});
+        const changes = {viewing: true, image, collection, folder: collection, size: this.readingSize};
+        if (collection !== this.state.folder) changes.filter = '';
+        this.navigate(changes);
     }
 
     closeViewer() {
-        if (!this.state.viewing || this.closing) return;
-        clearTimeout(this.filterTimer);
-        if (history.state?.openedFromGrid) {
-            this.closing = true;
-            history.back();
-        } else {
-            // A direct viewer URL has no app-owned grid entry to go back to.
-            this.navigate({viewing: false, image: null}, true);
-        }
+        if (this.state.viewing) this.navigate({viewing: false, image: null});
+    }
+
+    browsingPosition(next, image) {
+        const path = browseAnchor(next.folder, image, next.recursive);
+        if (!path) return null;
+        // A filter must not hide the item that the mode switch reveals.
+        if (!next.recursive && !filename(path).toLocaleLowerCase().includes(next.filter.toLocaleLowerCase())) next.filter = '';
+        return {path, offset: 0, reveal: true};
     }
 
     navigate(changes, replace = false, entry = 'top') {
@@ -99,18 +98,12 @@ class GalleryApp {
         this.savePosition();
         const next = {...this.state, ...changes};
         if (!replace && stateUrl(next) === stateUrl(this.state)) return;
-        const opening = next.viewing && !this.state.viewing;
         const sameFolder = next.folder === this.state.folder;
         let position = sameFolder ? this.grid.position() : null;
-        if (this.state.viewing && !next.viewing && this.state.image) {
-            const relative = this.state.image.slice(next.folder ? next.folder.length + 1 : 0);
-            const path = next.recursive ? this.state.image : joinPath(next.folder, relative.split('/')[0]);
-            position = {path, offset: 0};
-        }
-        const metadata = {
-            position,
-            openedFromGrid: opening || (next.viewing && Boolean(history.state?.openedFromGrid)),
-        };
+        const selection = next.viewing ? next.image : sameFolder
+            ? this.state.image || history.state?.selection || null : null;
+        if (this.state.viewing && !next.viewing) position = this.browsingPosition(next, this.state.image);
+        const metadata = {position, selection};
         history[replace ? 'replaceState' : 'pushState'](metadata, '', stateUrl(next));
         if (this.state.viewing && next.viewing && sameFolder
             && next.recursive === this.state.recursive && next.compact === this.state.compact) {
@@ -121,7 +114,7 @@ class GalleryApp {
     }
 
     folderLink(path, label) {
-        const changes = {folder: path, viewing: false, image: null, filter: ''};
+        const changes = {folder: path, collection: path, viewing: false, image: null, filter: ''};
         const link = element('a', '', label);
         link.href = stateUrl({...this.state, ...changes});
         link.addEventListener('click', event => {
@@ -140,26 +133,18 @@ class GalleryApp {
     }
 
     renderBreadcrumbs() {
-        const breadcrumbs = byId('breadcrumbs');
-        breadcrumbs.replaceChildren();
-        const parts = [{path: '', name: this.rootName}];
-        let path = '';
-        for (const name of this.state.folder.split('/').filter(Boolean)) {
-            path = joinPath(path, name);
-            parts.push({path, name});
-        }
-        parts.forEach((part, index) => {
-            if (index) breadcrumbs.append(element('span', '', '/'));
-            const node = index === parts.length - 1 ? element('span', '', part.name) : this.folderLink(part.path, part.name);
-            if (index === parts.length - 1) node.setAttribute('aria-current', 'page');
-            breadcrumbs.append(node);
-        });
+        renderFolderPath(byId('breadcrumbs'), this.state.folder, this.rootName,
+            (path, name) => this.folderLink(path, name));
     }
 
     render(force = false, restore = false, entry = 'top') {
         clearTimeout(this.filterTimer);
-        this.closing = false;
+        const previous = this.state;
         this.state = readState();
+        if (previous?.viewing && !this.state.viewing && previous.folder === this.state.folder) {
+            const position = this.browsingPosition(this.state, previous.image);
+            history.replaceState({...history.state, position, selection: previous.image}, '', stateUrl(this.state));
+        }
         if (this.state.viewing) this.readingSize = this.state.size;
         for (const button of document.querySelectorAll('[data-layout]')) {
             button.setAttribute('aria-pressed', String((button.dataset.layout === 'list') === this.state.compact));
@@ -178,4 +163,12 @@ class GalleryApp {
     }
 }
 
+// A browser reload must refresh server snapshots as well as browser resources.
+let reloadError;
+if (performance.getEntriesByType('navigation')[0]?.type === 'reload') {
+    const state = readState();
+    try { await refreshScope(state.viewing ? state.collection : state.folder); }
+    catch (error) { reloadError = error; }
+}
 export const app = new GalleryApp();
+if (reloadError) (app.state.viewing ? app.viewer.status : app.grid.status).textContent = reloadError.message;

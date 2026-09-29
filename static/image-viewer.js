@@ -1,7 +1,7 @@
 import {loadOriginal} from './media-cache.js';
 import {walkImages} from './api.js';
-import {byId, element, TaskScope} from './dom.js';
-import {filename, parentPath, joinPath, IMAGE_SIZES} from './state.js';
+import {byId, renderFolderPath, TaskScope} from './dom.js';
+import {filename, parentPath, IMAGE_SIZES} from './state.js';
 import {ViewerViewport} from './viewer-viewport.js';
 import {WheelGesture} from './wheel-gesture.js';
 
@@ -39,7 +39,6 @@ export class ImageViewer {
 
     bindControls() {
         byId('viewer-thumbnails').append(icon('thumbnails'));
-        byId('viewer-refresh').append(icon('refresh'));
         byId('viewer-zoom').addEventListener('click', () => this.setSizeMenu(byId('size-menu').hidden));
         for (const button of document.querySelectorAll('[data-size]')) {
             button.addEventListener('click', () => { this.changeSize(button.dataset.size); this.setSizeMenu(false); });
@@ -51,7 +50,6 @@ export class ImageViewer {
         byId('viewer-zoom-out').addEventListener('click', () => this.zoom(-1));
         byId('viewer-thumbnails').addEventListener('click', () => this.toggleThumbnails());
         byId('viewer-retry').addEventListener('click', () => this.refresh());
-        byId('viewer-refresh').addEventListener('click', () => this.refresh());
         this.closeButton.addEventListener('click', this.close);
         this.previousButton.addEventListener('click', () => this.requestMove(true));
         this.nextButton.addEventListener('click', () => this.requestMove(false));
@@ -88,26 +86,9 @@ export class ImageViewer {
     }
 
     updateCollectionLabel() {
-        const path = byId('viewer-path');
-        const focusedPath = path.contains(document.activeElement) ? document.activeElement.getAttribute('href') : null;
-        path.replaceChildren();
         const folder = this.state.image ? parentPath(this.state.image) : this.state.collection;
-        const parts = [{path: '', name: this.rootName}];
-        let current = '';
-        for (const name of folder.split('/').filter(Boolean)) {
-            current = joinPath(current, name);
-            parts.push({path: current, name});
-        }
-        for (const [index, part] of parts.entries()) {
-            if (index) path.append(element('span', '', '/'));
-            const link = this.folderLink(part.path, part.name);
-            if (part.path === this.state.collection) {
-                link.classList.add('collection-link');
-                link.title = 'Viewing this folder and its subfolders';
-            }
-            path.append(link);
-            if (focusedPath === link.getAttribute('href')) link.focus({preventScroll: true});
-        }
+        renderFolderPath(byId('viewer-path'), folder, this.rootName, this.folderLink,
+            {currentLink: true, browseFolder: this.state.folder});
     }
 
     updateControls() {
@@ -153,7 +134,7 @@ export class ImageViewer {
         const key = JSON.stringify([state.viewing, state.collection, state.image]);
         if (!force && key === this.key) {
             this.updateControls();
-            if (state.viewing && folderChanged) this.renderStrip();
+            if (state.viewing && folderChanged) { this.updateCollectionLabel(); this.renderStrip(); }
             return;
         }
         this.key = key;

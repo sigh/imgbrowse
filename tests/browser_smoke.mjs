@@ -2,6 +2,7 @@
 import assert from 'node:assert/strict';
 import {writeFileSync} from 'node:fs';
 import {join} from 'node:path';
+import {readState, stateUrl} from '../static/state.js';
 
 const [debugPort, base, screenshots] = process.argv.slice(2);
 const targets = await (await fetch(`http://127.0.0.1:${debugPort}/json/list`)).json();
@@ -55,7 +56,7 @@ async function open(path) {
     await waitFor("!window.__leavingPage && document.readyState === 'complete'");
 }
 const click = id => evaluate(`{ const button=document.getElementById(${JSON.stringify(id)}); button.focus(); button.click(); }`);
-const imageIs = path => `new URLSearchParams(location.search).get('image') === ${JSON.stringify(path)}`;
+const imageIs = path => `import('/static/state.js').then(({readState}) => readState().image === ${JSON.stringify(path)})`;
 const waitImage = path => waitFor(imageIs(path));
 const key = (key, repeat = false) => evaluate(`document.dispatchEvent(new KeyboardEvent('keydown', ${JSON.stringify({key, repeat})}))`);
 const wheel = async deltaY => { await call('Input.dispatchMouseEvent', {type:'mouseWheel', x:700, y:350, deltaX:0, deltaY}); await new Promise(resolve => setTimeout(resolve, 70)); };
@@ -64,10 +65,10 @@ async function screenshot(name) {
 }
 
 
-const readyImage = path => waitFor(`document.getElementById('viewer-image').dataset.path === ${JSON.stringify(path)} && !document.getElementById('viewer-zoom').disabled`);
+const readyImage = path => waitFor(`(() => { const image = document.getElementById('viewer-image'); return image?.dataset.path === ${JSON.stringify(path)} && !image.hidden && image.naturalWidth > 0 && image.getBoundingClientRect().width > 0 && !document.getElementById('viewer-zoom').disabled; })()`);
 const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
 const position = () => evaluate("({top:document.getElementById('viewer-canvas').scrollTop,max:document.getElementById('viewer-canvas').scrollHeight-document.getElementById('viewer-canvas').clientHeight})");
-const viewerUrl = (image, size = 'page', folder = 'Album') => '/?' + new URLSearchParams({folder, image, size});
+const viewerUrl = (image, size = 'page', folder = 'Album') => stateUrl({...readState(''), folder, collection: folder, viewing: true, image, size});
 const first = 'Album/Chapter 1/page2.jpg';
 const second = 'Album/Chapter 1/page10.jpg';
 const last = 'Album/Chapter 2/deep/page1.jpg';
@@ -79,6 +80,11 @@ await open('/');
 await waitFor("document.querySelectorAll('.card').length > 5");
 assert.ok(await evaluate("document.querySelectorAll('.card').length < 50"));
 await screenshot('grid');
+await evaluate("Object.defineProperty(navigator, 'clipboard', {configurable:true, value:{writeText:async text => { window.copiedPath=text; }}}); document.querySelector('#breadcrumbs .copy-path').click()");
+await waitFor("window.copiedPath");
+const absoluteRoot = await evaluate('window.copiedPath');
+assert.ok(absoluteRoot.startsWith('/'));
+
 
 // Filtering is immediate and makes no directory request. Both presentations preserve an item.
 const folderRequests = () => requests.filter(url => url.includes('/api/folder')).length;
@@ -86,8 +92,8 @@ const countBeforeFilter = folderRequests();
 await evaluate("{ const input=document.getElementById('filter'); input.value='root12'; input.dispatchEvent(new Event('input')); }");
 await waitFor("document.getElementById('summary').textContent.includes('11 matches')");
 assert.equal(folderRequests(), countBeforeFilter);
-await click('refresh');
-await waitFor("!document.getElementById('refresh').disabled");
+await call('Page.reload');
+await waitFor("document.getElementById('summary')?.textContent.includes('11 matches')");
 assert.equal(folderRequests(), countBeforeFilter + 1);
 assert.ok(await evaluate("document.getElementById('summary').textContent.includes('11 matches')"));
 await evaluate("{ const input=document.getElementById('filter'); input.value=''; input.dispatchEvent(new Event('input')); }");
@@ -95,8 +101,10 @@ await waitFor("!new URLSearchParams(location.search).has('filter')");
 await evaluate("document.getElementById('grid-viewport').scrollTop = 1800");
 await pause(160);
 const anchor = await evaluate('history.state.position.path');
+const beforeLayout = await evaluate('history.length');
 await click('layout-list');
 await waitFor("document.querySelector('.list-item')");
+assert.equal(await evaluate('history.length'), beforeLayout);
 assert.equal(await evaluate('history.state.position.path'), anchor);
 assert.ok(await evaluate("[...document.querySelectorAll('.list-name')].some(node=>node.textContent=== " + JSON.stringify(anchor) + ")"));
 assert.equal(await evaluate("document.querySelectorAll('#grid img').length"), 0);
@@ -105,25 +113,52 @@ const historyBeforeSameLayout = await evaluate('history.length');
 await click('layout-list');
 assert.equal(await evaluate('history.length'), historyBeforeSameLayout);
 
-// Back preserves folder position; close uses the opener entry and Forward reopens the viewer.
+// Mode switching reveals the current item and resumes it; Back retraces mode changes.
 await open('/?folder=Album');
 await waitFor("document.querySelectorAll('.card').length === 2");
 await click('read-folder');
 await readyImage(first);
+assert.ok(await evaluate(`(() => {
+    const browse = getComputedStyle(document.getElementById('breadcrumbs'));
+    const viewer = getComputedStyle(document.getElementById('viewer-path'));
+    return ['fontSize', 'lineHeight', 'gap', 'color'].every(key => browse[key] === viewer[key]);
+})()`));
+assert.ok(await evaluate("!document.getElementById('refresh') && !document.getElementById('viewer-refresh')"));
 await click('viewer-next');
 await readyImage(second);
 await click('viewer-close');
 await waitFor("document.getElementById('viewer').hidden");
-assert.equal(await evaluate('document.activeElement.id'), 'read-folder');
-await evaluate('history.forward()');
+await waitFor("document.activeElement.closest('.card')?.dataset.path === 'Album/Chapter 1'");
+await click('read-folder');
 await readyImage(second);
+assert.ok(await evaluate("(() => { const image = document.getElementById('viewer-image'); return !image.hidden && image.naturalWidth > 0 && image.getBoundingClientRect().width > 0; })()"), 'Reopening a cached image must display decoded pixels');
 await evaluate('history.back()');
 await waitFor("document.getElementById('viewer').hidden");
+const beforeScope = await evaluate('history.length');
 await click('scope-all');
 await waitFor("document.querySelectorAll('.folder-heading a').length === 2");
+assert.equal(await evaluate('history.length'), beforeScope);
 await evaluate("document.querySelector('.folder-heading a').click()");
 await waitFor("new URLSearchParams(location.search).get('folder') === 'Album/Chapter 1'");
 assert.equal(await evaluate("document.getElementById('scope-all').getAttribute('aria-pressed')"), 'true');
+
+// A folder's View action establishes the same scope for both modes.
+await open('/?folder=Album&compact=1');
+await waitFor("document.querySelector('.list-read')");
+await evaluate("document.querySelector('.list-read').click()");
+await readyImage(first);
+assert.equal(await evaluate("new URLSearchParams(location.search).get('folder')"), 'Album/Chapter 1');
+await click('viewer-next');
+await readyImage(second);
+await click('viewer-close');
+await waitFor("document.activeElement.closest('.card')?.dataset.path === 'Album/Chapter 1/page10.jpg'");
+await call('Page.reload');
+await waitFor("document.querySelector('.list-name')");
+await click('read-folder');
+await readyImage(second);
+await evaluate("document.querySelector('#viewer-path a').click()");
+await waitFor("document.getElementById('viewer').hidden");
+assert.equal(await evaluate('history.state.selection'), null);
 
 // Recursive paging and Back reuse discovered items without rebuilding the traversal.
 await open('/?recursive=1');
@@ -139,7 +174,7 @@ const recursiveAnchor = await evaluate('history.state.position.path');
 await click('layout-list');
 await pause(100);
 assert.equal(await evaluate('history.state.position.path'),recursiveAnchor);
-await evaluate('history.back()');
+await click('layout-previews');
 await waitFor("document.getElementById('layout-previews').getAttribute('aria-pressed') === 'true'");
 assert.equal(await evaluate('history.state.position.path'),recursiveAnchor);
 
@@ -150,6 +185,12 @@ assert.ok(await evaluate("document.getElementById('viewer-image').width <= 320")
 await call('Input.dispatchMouseEvent', {type:'mouseWheel', x:700,y:350,deltaX:0,deltaY:120});
 await readyImage('root3.jpg');
 await open(viewerUrl(first));
+await readyImage(first);
+await evaluate("Object.defineProperty(navigator, 'clipboard', {configurable:true, value:undefined}); window.originalExecCommand=document.execCommand; document.execCommand=command => { if(command==='copy') { window.copiedPath=document.querySelector('.clipboard-input').value; return true; } return false; }; document.querySelector('#viewer-path .copy-path').click()");
+await waitFor("window.copiedPath");
+assert.equal(await evaluate('window.copiedPath'), absoluteRoot + '/Album/Chapter 1');
+await evaluate('document.execCommand=window.originalExecCommand');
+
 await readyImage(first);
 await screenshot('viewer');
 await click('viewer-next');
@@ -293,7 +334,8 @@ await waitFor("!document.getElementById('viewer-retry').hidden");
 assert.ok(await evaluate("!document.getElementById('viewer-next').disabled"));
 await click('viewer-next');
 await readyImage(first);
-await click('viewer-refresh');
+await call('Page.reload');
+await waitFor("document.getElementById('viewer-image')?.dataset.path === 'Album/Chapter 1/page2.jpg'");
 await readyImage(first);
 
 // Continued wheel input advances fitted pages without requiring a pause after every image.
@@ -351,7 +393,7 @@ await click('viewer-thumbnails');
 // Breadcrumbs leave the reader for the image's actual folder, preserving the grid layout.
 await open(viewerUrl(first));
 await readyImage(first);
-await evaluate("document.querySelector('#viewer-path a:last-child').click()");
+await evaluate("document.querySelector('#viewer-path a[aria-current]').click()");
 await waitFor("document.getElementById('viewer').hidden && document.querySelectorAll('.card').length === 2");
 assert.equal(await evaluate("new URLSearchParams(location.search).get('folder')"),'Album/Chapter 1');
 assert.equal(await evaluate("document.querySelector('#breadcrumbs [aria-current]').tagName"),'SPAN');
@@ -368,7 +410,7 @@ await click('viewer-next');
 await readyImage('Packed.cbz/Chapter 3/page1.jpg');
 await open(viewerUrl('Packed.cbz/Chapter 3/page1.jpg', 'page', 'Packed.cbz'));
 await readyImage('Packed.cbz/Chapter 3/page1.jpg');
-await evaluate("document.querySelector('#viewer-path a:last-child').click()");
+await evaluate("document.querySelector('#viewer-path a[aria-current]').click()");
 await waitFor("document.getElementById('viewer').hidden && new URLSearchParams(location.search).get('folder') === 'Packed.cbz/Chapter 3'");
 
 // Special filenames and narrow screens retain controls, full names, and a visible focus target.
@@ -378,6 +420,11 @@ await call('Emulation.setDeviceMetricsOverride', {width:390,height:844,deviceSca
 await open(viewerUrl(first,'width'));
 await readyImage(first);
 assert.ok(await evaluate('document.documentElement.scrollWidth <= innerWidth'));
+assert.equal(await evaluate("document.querySelector('#viewer-path .browsing-folder').textContent"), 'Album');
+assert.ok(await evaluate("getComputedStyle(document.querySelector('#viewer-path [aria-current]')).textDecorationLine.includes('underline')"));
+assert.ok(await evaluate("document.getElementById('viewer-close').getBoundingClientRect().right <= innerWidth"));
+assert.ok(await evaluate("document.querySelector('.viewer-header').getBoundingClientRect().height < 150"));
+assert.ok(await evaluate("document.getElementById('viewer-close').scrollWidth <= document.getElementById('viewer-close').clientWidth"));
 await screenshot('mobile-viewer');
 await key('Tab');
 assert.ok(await evaluate("document.activeElement.getClientRects().length > 0"));
@@ -387,6 +434,14 @@ assert.ok(await evaluate("document.querySelector('.list-name').getBoundingClient
 assert.ok(await evaluate("document.querySelector('.list-read').getBoundingClientRect().right < document.querySelector('.list-name').getBoundingClientRect().left"));
 assert.equal(await evaluate("document.querySelector('.list-item').firstElementChild.className"),'list-read');
 await screenshot('long-names');
+await evaluate("document.querySelector('.list-name').click()");
+await waitFor("document.querySelector('#breadcrumbs [aria-current]').textContent.includes('Chapter 123')");
+await click('read-folder');
+await waitFor("document.querySelector('#viewer-path [aria-current]')?.textContent.includes('Chapter 123')");
+assert.ok(await evaluate("document.getElementById('viewer-path').scrollLeft > 0"));
+assert.ok(await evaluate("document.getElementById('viewer-close').getBoundingClientRect().right <= innerWidth"));
+assert.ok(await evaluate("document.querySelector('.viewer-header').getBoundingClientRect().height < 150"));
+await screenshot('long-header');
 assert.equal(exceptions.length, 0, JSON.stringify(exceptions));
 console.log('Browser smoke passed: navigation, history, filtering, layout anchors, gesture edges, zoom anchors, slow loads, cancellation, filmstrip, URLs, empty/single images, responsive controls.');
 socket.close();

@@ -15,37 +15,49 @@ export function relativePath(base, path) {
 export const IMAGE_SIZES = ['page', 'width', '0.1', '0.25', '0.5', '0.75', '1', '1.25', '1.5', '2', '3', '4', '6', '8'];
 export const imageSize = value => IMAGE_SIZES.includes(String(value)) ? String(value) : 'page';
 
+function resolveImage(folder, image) {
+    const parts = [];
+    for (const part of joinPath(folder, image).split('/')) {
+        if (part === '..') parts.pop();
+        else if (part && part !== '.') parts.push(part);
+    }
+    return parts.join('/');
+}
+
 export function readState(search = location.search) {
     const query = new URLSearchParams(search);
-    const legacyFolder = query.get('category') ?? query.get('m');
-    const folder = query.get('folder') ?? legacyFolder ?? '';
-    let image = query.get('image') ?? query.get('img');
-    if (legacyFolder !== null && !query.has('folder') && image !== null) {
-        // Older versions stored an already URL-encoded image path in the query.
-        try { image = decodeURIComponent(image); } catch { /* Leave malformed links readable. */ }
-    }
+    const folder = query.get('folder') ?? '';
+    const image = query.get('image');
     return {
         folder,
         size: imageSize(query.get('size')),
         recursive: query.get('recursive') === '1',
         compact: query.get('compact') === '1',
         filter: query.get('filter') || '',
-        image,
+        image: image === null ? null : resolveImage(folder, image),
         collection: query.get('collection') ?? folder,
         viewing: image !== null || query.get('viewer') === '1',
     };
 }
 
 export function stateUrl(next) {
-    const query = new URLSearchParams({folder: next.folder, sort: 'natural'});
+    const query = new URLSearchParams();
+    if (next.folder) query.set('folder', next.folder);
     if (next.recursive) query.set('recursive', '1');
     if (next.compact) query.set('compact', '1');
     if (next.filter) query.set('filter', next.filter);
     if (next.viewing) {
         if (imageSize(next.size) !== 'page') query.set('size', imageSize(next.size));
         if (next.collection !== next.folder) query.set('collection', next.collection);
-        if (next.image != null) query.set('image', next.image);
+        if (next.image != null) query.set('image', relativePath(next.folder, next.image));
         else query.set('viewer', '1');
     }
-    return '/?' + query;
+    return query.size ? '/?' + query : '/';
+}
+
+/** The item representing an image in the chosen browsing scope. */
+export function browseAnchor(folder, image, recursive) {
+    if (!image || (folder && !image.startsWith(folder + '/'))) return null;
+    const relative = folder ? image.slice(folder.length + 1) : image;
+    return recursive ? image : joinPath(folder, relative.split('/')[0]);
 }
