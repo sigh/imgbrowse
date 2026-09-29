@@ -29,7 +29,7 @@ export class ImageViewer {
         this.key = null;
         this.boundaryDirection = null;
         this.nearbyImages = [];
-        this.thumbnailsVisible = sessionStorage.getItem('thumbnails') === 'true';
+        this.thumbnailsVisible = sessionStorage.getItem('thumbnails') !== 'false';
         this.filmstrip = new ThumbnailStrip(this.strip, previews, selectImage);
         this.lastWheelTurn = -Infinity;
         this.loadingImage = false;
@@ -147,11 +147,13 @@ export class ImageViewer {
     }
 
     show(state, force = false, entry = 'top') {
+        const folderChanged = this.state?.folder !== state.folder;
         this.state = state;
         if (this.viewport.size !== state.size) this.viewport.setSize(state.size);
         const key = JSON.stringify([state.viewing, state.collection, state.image]);
         if (!force && key === this.key) {
             this.updateControls();
+            if (state.viewing && folderChanged) this.renderStrip();
             return;
         }
         this.key = key;
@@ -264,7 +266,7 @@ export class ImageViewer {
 
     renderStrip(force = false) {
         byId('viewer-thumbnails').setAttribute('aria-expanded', String(this.thumbnailsVisible));
-        this.filmstrip.show(this.state.collection, this.state.image, this.thumbnailsVisible, force);
+        this.filmstrip.show(this.state, this.thumbnailsVisible, force);
     }
 
     requestMove(reverse, fresh = true, source = 'explicit') {
@@ -344,7 +346,7 @@ export class ImageViewer {
             return;
         }
         if (event.target instanceof Element && event.target.matches('select, input, textarea')) return;
-        if (!byId('size-menu').hidden || this.strip.contains(event.target)) return;
+        if (!byId('size-menu').hidden) return;
         const vertical = ['ArrowUp', 'ArrowDown'].includes(event.key);
         if (vertical && this.canvas.scrollHeight > this.canvas.clientHeight + 2) {
             event.preventDefault();

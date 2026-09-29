@@ -215,8 +215,26 @@ assert.equal(await evaluate("document.getElementById('viewer-zoom').dataset.size
 await evaluate("document.getElementById('viewer-stage').dispatchEvent(new WheelEvent('wheel',{deltaY:100,ctrlKey:true,cancelable:true}))");
 assert.ok(await evaluate(imageIs(second)));
 
-await click('viewer-thumbnails');
+assert.equal(await evaluate("document.getElementById('viewer-thumbnails').getAttribute('aria-expanded')"), 'true');
 await waitFor("document.querySelectorAll('#viewer-strip button').length === 3");
+assert.deepEqual(await evaluate("Array.from(document.querySelectorAll('#viewer-strip .folder-start .strip-folder'), node=>node.textContent)"), ['Chapter 1', 'Chapter 2/deep']);
+// Resize through the actual pointer handle, then the keyboard, without changing image.
+const resizePoint = await evaluate(`(() => { const r=document.querySelector('.strip-resizer').getBoundingClientRect(); return {x:r.x+r.width/2,y:r.y+r.height/2}; })()`);
+const thumbHeight = await evaluate("document.querySelector('#viewer-strip button').getBoundingClientRect().height");
+await call('Input.dispatchMouseEvent', {type:'mousePressed', button:'left', clickCount:1, ...resizePoint});
+await call('Input.dispatchMouseEvent', {type:'mouseMoved', button:'left', buttons:1, x:resizePoint.x, y:resizePoint.y-80});
+await call('Input.dispatchMouseEvent', {type:'mouseReleased', button:'left', clickCount:1, x:resizePoint.x, y:resizePoint.y-80});
+await waitFor(`document.querySelector('#viewer-strip button').getBoundingClientRect().height > ${thumbHeight + 70}`);
+await screenshot('strip-resized-chapters');
+await evaluate("document.querySelector('.strip-resizer').focus()");
+await call('Input.dispatchKeyEvent', {type:'keyDown', key:'ArrowDown', code:'ArrowDown', windowsVirtualKeyCode:40});
+await call('Input.dispatchKeyEvent', {type:'keyUp', key:'ArrowDown', code:'ArrowDown', windowsVirtualKeyCode:40});
+assert.equal(await evaluate("Number(document.querySelector('.strip-resizer').getAttribute('aria-valuenow'))"), thumbHeight + 64);
+assert.ok(await evaluate(imageIs(second)));
+assert.equal(await evaluate("sessionStorage.getItem('thumbnailSize')"), String(thumbHeight + 64));
+await evaluate("import('/gallery.js').then(({app})=>app.viewer.filmstrip.setSize(64))");
+await evaluate("sessionStorage.setItem('thumbnailSize','64'); document.getElementById('viewer-canvas').focus()");
+await waitFor("import('/gallery.js').then(({app})=>app.viewer.viewport.box.height === document.getElementById('viewer-canvas').clientHeight)");
 // Hidden filmstrip cancels preview work and does not request thumbnails on later pages.
 await evaluate("document.getElementById('viewer-canvas').scrollTop = 450");
 const beforeStrip = await sourcePoint();
@@ -294,6 +312,31 @@ await click('viewer-next');
 await pause(200);
 assert.ok(await evaluate('window.retainedThumbnail.isConnected'));
 assert.deepEqual((await evaluate("Array.from(document.querySelectorAll('#viewer-strip button'),button=>button.dataset.path)")).slice(0,stripPaths.length),stripPaths);
+// A middle image stays centered as adjacent batches arrive; real ends have no fade.
+await open(viewerUrl('root40.jpg', 'page', ''));
+await readyImage('root40.jpg');
+await waitFor(`(() => {
+    const strip = document.getElementById('viewer-strip');
+    const selected = strip.querySelector('[aria-current]');
+    if (!selected) return false;
+    const a = strip.getBoundingClientRect(), b = selected.getBoundingClientRect();
+    return Math.abs((a.left+a.right-b.left-b.right)/2) < 2 && strip.classList.contains('more-before') && strip.classList.contains('more-after');
+})()`);
+const thumbPoint = await evaluate(`(() => {const r=document.querySelector('#viewer-strip [aria-current]').getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2};})()`);
+await call('Input.dispatchMouseEvent', {type:'mousePressed', button:'left', clickCount:1, ...thumbPoint});
+await call('Input.dispatchMouseEvent', {type:'mouseReleased', button:'left', clickCount:1, ...thumbPoint});
+const stripFocused = await evaluate("document.getElementById('viewer-strip').contains(document.activeElement)");
+await call('Input.dispatchKeyEvent', {type:'keyDown', key:'ArrowRight', code:'ArrowRight', windowsVirtualKeyCode:39});
+await call('Input.dispatchKeyEvent', {type:'keyUp', key:'ArrowRight', code:'ArrowRight', windowsVirtualKeyCode:39});
+assert.ok(stripFocused);
+await readyImage('root41.jpg');
+await screenshot('strip-centered');
+await evaluate("document.getElementById('viewer-strip').scrollLeft=0");
+await waitFor("import('/gallery.js').then(({app})=>app.viewer.filmstrip.edges[0].done)");
+await evaluate("document.getElementById('viewer-strip').scrollLeft=0");
+await waitFor("!document.getElementById('viewer-strip').classList.contains('more-before')");
+assert.ok(await evaluate("document.getElementById('viewer-strip').classList.contains('more-after')"));
+await evaluate("window.retainedThumbnail=document.querySelector('#viewer-strip button')");
 await evaluate("document.getElementById('viewer-strip').scrollLeft=100000");
 await waitFor("document.querySelector('#viewer-strip button').dataset.path !== window.retainedThumbnail.dataset.path");
 assert.ok(await evaluate("document.querySelectorAll('#viewer-strip button').length < 40"));

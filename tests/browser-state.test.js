@@ -1,8 +1,18 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import {readState, stateUrl} from '../static/state.js';
+import {readState, stateUrl, relativePath} from '../static/state.js';
 import {TaskScope} from '../static/dom.js';
 import {PreviewLoader} from '../static/preview-loader.js';
+
+test('strip paths use the browsing folder, including an empty current-folder label', () => {
+    const state = readState('folder=Album&collection=Album/Chapter%202&image=Album/Chapter%202/page.jpg');
+    assert.equal(relativePath(state.folder, state.collection), 'Chapter 2');
+    assert.equal(relativePath('Album', 'Album'), '');
+    assert.equal(relativePath('', ''), '');
+    assert.equal(relativePath('', 'Album/Chapter 2'), 'Album/Chapter 2');
+    assert.equal(relativePath('Album', 'Album/Chapter 2/deep'), 'Chapter 2/deep');
+    assert.equal(relativePath('Album', 'Album Extra'), '../Album Extra');
+});
 
 test('image URLs retain independent grid and viewer contexts', () => {
     const state = {

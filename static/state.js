@@ -3,6 +3,15 @@ export const joinPath = (parent, name) => parent ? parent + '/' + name : name;
 export const parentPath = path => path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : '';
 export const filename = path => path.split('/').pop();
 
+/** Display a path relative to its browsing folder; that folder itself is empty. */
+export function relativePath(base, path) {
+    const from = base.split('/').filter(Boolean);
+    const to = path.split('/').filter(Boolean);
+    let shared = 0;
+    while (shared < from.length && shared < to.length && from[shared] === to[shared]) shared++;
+    return [...from.slice(shared).map(() => '..'), ...to.slice(shared)].join('/');
+}
+
 export const IMAGE_SIZES = ['page', 'width', '0.1', '0.25', '0.5', '0.75', '1', '1.25', '1.5', '2', '3', '4', '6', '8'];
 export const imageSize = value => IMAGE_SIZES.includes(String(value)) ? String(value) : 'page';
 
@@ -40,4 +49,3 @@ export function stateUrl(next) {
     }
     return '/?' + query;
 }
-

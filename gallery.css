@@ -445,7 +445,16 @@ input:disabled {
     padding: 6px 9px;
     font-size: .8rem;
 }
+.strip-frame { position: relative; flex-shrink: 0; min-width: 0; }
+.strip-frame[hidden] { display: none; }
+.strip-error { position: absolute; top: 12px; width: 40px; height: 44px; }
+.strip-error.before { left: 8px; }
+.strip-error.after { right: 8px; }
 .viewer-strip {
+    --fade-before: 0px;
+    --fade-after: 0px;
+    scrollbar-width: none;
+    mask-image: linear-gradient(to right, transparent, black var(--fade-before), black calc(100% - var(--fade-after)), transparent);
     display: flex;
     gap: 6px;
     overflow-x: scroll;
@@ -454,11 +463,11 @@ input:disabled {
     padding: 4px 12px 12px;
     width: 100%;
     max-width: 100%;
-    height: 86px;
+    height: calc(var(--thumbnail-height, 64px) + 36px);
 }
 .viewer-strip button {
-    width: 58px;
-    height: 64px;
+    width: var(--thumbnail-width, 58px);
+    height: var(--thumbnail-height, 64px);
     flex-shrink: 0;
     padding: 0;
     border: 2px solid transparent;
@@ -520,3 +529,15 @@ input:disabled {
 .list-read { width: 52px; }
 
 .strip-spacer { flex: 0 0 auto; height: 1px; }
+
+.viewer-strip::-webkit-scrollbar { display: none; }
+.viewer-strip.more-before { --fade-before: 32px; }
+.viewer-strip.more-after { --fade-after: 32px; }
+.viewer-strip button > .icon { width: 24px; height: 24px; margin: auto; }
+
+.strip-resizer { height: 12px; cursor: ns-resize; touch-action: none; display: flex; align-items: center; justify-content: center; }
+.strip-resizer::after { content: ''; width: 40px; height: 3px; border-radius: 2px; background: var(--color-viewer-text); opacity: .35; }
+.strip-resizer:hover::after, .strip-resizer:focus-visible::after { opacity: .8; }
+.strip-tile { position: relative; flex: 0 0 var(--thumbnail-width, 58px); min-width: 0; padding-top: 20px; }
+.strip-folder { position: absolute; top: 0; left: 0; height: 20px; font-size: 11px; line-height: 18px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--color-viewer-text); }
+.strip-tile.folder-start::before { content: ''; position: absolute; left: -4px; top: 0; bottom: 0; border-left: 1px solid var(--color-viewer-text); opacity: .4; }

@@ -1,24 +1,114 @@
 import {walkImages} from './api.js';
 import {element, TaskScope} from './dom.js';
-import {filename} from './state.js';
+import {icon} from './icons.js';
+import {filename, parentPath, relativePath} from './state.js';
 
 const PAGE_SIZE = 32;
 const MAX_PATHS = 2048;
-const STRIDE = 64; // 58px button plus 6px gap in gallery.css.
+const GAP = 6;
+const DEFAULT_SIZE = 64;
 
 /** Stable native scroller with a bounded path window and virtual button elements. */
 export class ThumbnailStrip {
     constructor(container, previews, selectImage) {
         Object.assign(this, {container, previews, selectImage});
+        this.frame = element('div', 'strip-frame');
+        container.before(this.frame); this.frame.append(container);
+        this.createResizer();
+        this.failures = [true, false].map(reverse => {
+            const button = element('button', 'strip-error ' + (reverse ? 'before' : 'after'));
+            button.append(icon('brokenImage')); button.hidden = true;
+            button.title = 'Could not load more thumbnails. Retry';
+            button.setAttribute('aria-label', button.title);
+            button.addEventListener('click', () => {
+                const edge = this.edges[reverse ? 0 : 1];
+                edge.failed = false; this.discover(edge);
+            });
+            this.frame.append(button); return button;
+        });
+        container.addEventListener('pointerdown', () => { this.followImage = false; });
+        container.addEventListener('wheel', event => {
+            this.followImage = false;
+            if (event.ctrlKey || event.metaKey || event.deltaX || !event.deltaY) return;
+            event.preventDefault();
+            container.scrollLeft += event.deltaY * (event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? container.clientWidth : 1);
+        }, {passive: false});
+        container.addEventListener('keydown', () => { this.followImage = false; });
         this.paths = [];
         this.nodes = new Map();
         container.addEventListener('scroll', () => {
+            if (Math.abs(container.scrollLeft - (this.followScroll || 0)) > 1) this.followImage = false;
             if (this.scheduled) return;
             this.scheduled = true;
             requestAnimationFrame(() => {
                 this.scheduled = false; this.render(); this.discoverEdges();
             });
         });
+        this.resizeObserver = new ResizeObserver(() => {
+            if (!this.visible || !this.scope) return;
+            if (this.size > this.maxSize()) this.setSize(this.size);
+            else if (this.followImage) this.centerImage();
+            else this.render();
+            this.discoverEdges();
+        });
+        this.resizeObserver.observe(container);
+    }
+
+    createResizer() {
+        this.size = DEFAULT_SIZE;
+        this.width = this.size - GAP;
+        this.stride = this.size;
+        const handle = element('div', 'strip-resizer');
+        this.handle = handle;
+        handle.tabIndex = 0;
+        handle.setAttribute('role', 'separator');
+        handle.setAttribute('aria-label', 'Thumbnail size');
+        handle.setAttribute('aria-orientation', 'horizontal');
+        handle.title = 'Drag to resize thumbnails';
+        this.frame.prepend(handle);
+        handle.addEventListener('pointerdown', event => {
+            if (event.button !== 0) return;
+            event.preventDefault();
+            this.drag = {y: event.clientY, size: this.size};
+            handle.setPointerCapture(event.pointerId);
+        });
+        handle.addEventListener('pointermove', event => {
+            if (this.drag) this.setSize(this.drag.size + this.drag.y - event.clientY);
+        });
+        const finish = () => {
+            this.drag = null;
+            sessionStorage.setItem('thumbnailSize', String(this.size));
+        };
+        handle.addEventListener('lostpointercapture', finish);
+        handle.addEventListener('keydown', event => {
+            const steps = {ArrowUp: 16, ArrowDown: -16};
+            if (!(event.key in steps)) return;
+            event.preventDefault(); event.stopPropagation();
+            this.setSize(this.size + steps[event.key]); finish();
+        });
+        const saved = Number(sessionStorage.getItem('thumbnailSize'));
+        this.setSize(saved || DEFAULT_SIZE);
+    }
+
+    maxSize() {
+        return Math.max(48, Math.min(240, Math.floor(window.innerHeight * .35)));
+    }
+
+    setSize(size) {
+        const max = this.maxSize();
+        const position = Math.max(0, this.container.scrollLeft - 12) / this.stride;
+        this.size = Math.round(Math.max(48, Math.min(max, size)));
+        this.width = Math.round(this.size * 58 / 64);
+        this.stride = this.width + GAP;
+        this.frame.style.setProperty('--thumbnail-height', this.size + 'px');
+        this.frame.style.setProperty('--thumbnail-width', this.width + 'px');
+        this.handle.setAttribute('aria-valuemin', '48');
+        this.handle.setAttribute('aria-valuemax', String(max));
+        this.handle.setAttribute('aria-valuenow', String(this.size));
+        if (!this.scope) return;
+        this.render();
+        if (this.followImage) this.centerImage();
+        else { this.scrollTo(position * this.stride + 12); this.render(); }
     }
 
     stop() {
@@ -32,45 +122,64 @@ export class ThumbnailStrip {
         this.stop(); this.collection = collection;
         this.paths = image ? [image] : [];
         this.edges = [true, false].map(reverse => ({reverse, cursor: null, done: false, loading: false}));
-        this.container.scrollLeft = 0;
+        this.scrollTo(0);
     }
 
-    show(collection, image, visible, force = false) {
+    show({collection, folder, image}, visible, force = false) {
+        // Collection controls traversal; the URL folder controls displayed paths.
+        this.labelRoot = folder;
         if (force || collection !== this.collection || (image && !this.paths.includes(image))) this.reset(collection, image);
-        this.visible = visible; this.container.hidden = !visible;
+        const opening = !this.visible;
+        this.visible = visible; this.container.hidden = !visible; this.frame.hidden = !visible;
         if (!visible) { this.stop(); return; }
         if (!this.scope) this.scope = new TaskScope();
         const previous = this.image;
         this.image = image;
-        const index = this.paths.indexOf(image);
+        if (previous !== image || opening || force) this.followImage = true;
         this.render();
-        if (previous !== image && index >= 0) {
-            const left = index * STRIDE;
-            if (left < this.container.scrollLeft) this.container.scrollLeft = left;
-            else if (left + STRIDE > this.container.scrollLeft + this.container.clientWidth) {
-                this.container.scrollLeft = left + STRIDE - this.container.clientWidth;
-            }
-            this.render();
-        }
+        if (this.followImage) this.centerImage();
         this.discoverEdges();
+    }
+
+    scrollTo(left) {
+        this.container.scrollLeft = left;
+        this.followScroll = this.container.scrollLeft;
+    }
+
+    centerImage() {
+        const index = this.paths.indexOf(this.image);
+        if (index < 0) return;
+        this.scrollTo(12 + index * this.stride + this.width / 2 - this.container.clientWidth / 2);
+        this.render();
+    }
+
+    updateEdges() {
+        const {scrollLeft, scrollWidth, clientWidth} = this.container;
+        const more = [scrollLeft > 1 || !this.edges[0].done,
+            scrollLeft + clientWidth < scrollWidth - 1 || !this.edges[1].done];
+        this.container.classList.toggle('more-before', more[0]);
+        this.container.classList.toggle('more-after', more[1]);
+        this.failures.forEach((button, index) => {
+            button.hidden = !this.edges[index].failed;
+        });
     }
 
     render() {
         if (!this.visible || !this.scope) return;
-        const first = Math.max(0, Math.floor(this.container.scrollLeft / STRIDE) - 3);
-        const last = Math.min(this.paths.length, Math.ceil((this.container.scrollLeft + this.container.clientWidth) / STRIDE) + 3);
+        const first = Math.max(0, Math.floor(this.container.scrollLeft / this.stride) - 3);
+        const last = Math.min(this.paths.length, Math.ceil((this.container.scrollLeft + this.container.clientWidth) / this.stride) + 3);
         const visible = new Set(this.paths.slice(first, last));
         for (const [path, item] of this.nodes) {
-            if (!visible.has(path)) { item.scope.dispose(); item.button.remove(); this.nodes.delete(path); }
+            if (!visible.has(path)) { item.scope.dispose(); item.tile.remove(); this.nodes.delete(path); }
         }
         if (!this.leading?.isConnected) {
             this.leading = element('span', 'strip-spacer'); this.trailing = element('span', 'strip-spacer');
             this.leading.setAttribute('aria-hidden', 'true'); this.trailing.setAttribute('aria-hidden', 'true');
             this.container.prepend(this.leading); this.container.append(this.trailing);
         }
-        this.leading.style.width = Math.max(0, first * STRIDE - 6) + 'px';
+        this.leading.style.width = Math.max(0, first * this.stride - 6) + 'px';
         this.leading.hidden = first === 0;
-        this.trailing.style.width = Math.max(0, (this.paths.length - last) * STRIDE - 6) + 'px';
+        this.trailing.style.width = Math.max(0, (this.paths.length - last) * this.stride - 6) + 'px';
         this.trailing.hidden = last === this.paths.length;
         for (let index = first; index < last; index++) {
             const path = this.paths[index];
@@ -80,14 +189,37 @@ export class ThumbnailStrip {
                 button.dataset.path = path; button.title = path;
                 button.setAttribute('aria-label', 'View ' + filename(path));
                 button.addEventListener('click', () => this.selectImage(path, 'top'));
-                item = {button, scope: new TaskScope()}; this.nodes.set(path, item);
-                this.previews.image(button, path, item.scope).catch(() => {});
+                const tile = element('div', 'strip-tile');
+                const label = element('span', 'strip-folder');
+                tile.append(label, button);
+                item = {button, tile, label, scope: new TaskScope()}; this.nodes.set(path, item);
+                this.previews.image(button, path, item.scope).catch(error => {
+                    if (error.name === 'AbortError' || item.scope.signal.aborted) return;
+                    button.replaceChildren(icon('brokenImage'));
+                    button.title = 'Thumbnail unavailable: ' + path;
+                });
             }
             item.button.classList.toggle('selected', path === this.image);
             if (path === this.image) item.button.setAttribute('aria-current', 'true');
             else item.button.removeAttribute('aria-current');
-            this.container.insertBefore(item.button, this.trailing);
+            const folder = parentPath(path);
+            const boundary = index > 0 ? parentPath(this.paths[index - 1]) !== folder : this.edges[0].done;
+            item.tile.classList.toggle('folder-start', boundary);
+            const label = relativePath(this.labelRoot, folder);
+            item.label.textContent = boundary ? label : '';
+            item.label.title = label;
+            if (boundary) {
+                let end = index + 1;
+                while (end < this.paths.length && parentPath(this.paths[end]) === folder) end++;
+                const groupWidth = (end - index) * this.stride - GAP;
+                // The last heading can also use the empty space after its images.
+                const remainingWidth = end === this.paths.length
+                    ? this.container.clientWidth - 24 - index * this.stride + this.container.scrollLeft : 0;
+                item.label.style.width = Math.max(groupWidth, remainingWidth) + 'px';
+            }
+            this.container.insertBefore(item.tile, this.trailing);
         }
+        this.updateEdges();
         this.previews.schedule();
     }
 
@@ -99,7 +231,7 @@ export class ThumbnailStrip {
     }
 
     async discover(edge) {
-        if (edge.done || edge.loading) return;
+        if (edge.done || edge.loading || edge.failed) return;
         edge.loading = true;
         const scope = this.scope;
         this.container.setAttribute('aria-busy', 'true');
@@ -122,15 +254,17 @@ export class ThumbnailStrip {
             }
             edge.cursor = result.cursor; edge.done = result.cursor === null;
             this.render();
-            this.container.scrollLeft = Math.max(0, left + (edge.reverse ? added.length : -excess) * STRIDE);
-            this.render();
+            this.scrollTo(Math.max(0, left + (edge.reverse ? added.length : -excess) * this.stride));
+            if (this.followImage) this.centerImage();
+            else this.render();
         } catch (error) {
-            if (error.name !== 'AbortError') edge.done = true;
+            if (error.name !== 'AbortError' && scope === this.scope) edge.failed = true;
         } finally {
             if (scope === this.scope) {
                 edge.loading = false;
                 this.container.setAttribute('aria-busy', String(this.edges.some(item => item.loading)));
-                if (!edge.done) requestAnimationFrame(() => this.discoverEdges());
+                this.updateEdges();
+                if (!edge.done && !edge.failed) requestAnimationFrame(() => this.discoverEdges());
             }
         }
     }
