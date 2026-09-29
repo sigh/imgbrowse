@@ -7,6 +7,7 @@ from pathlib import PurePosixPath
 from contextlib import contextmanager
 
 from .cache import SharedCache
+from .sources import IMAGE_EXTENSIONS
 
 ARCHIVE_EXTENSIONS = {'.zip', '.cbz'}
 MAX_IMAGE_BYTES = 128 * 1024 * 1024
@@ -47,7 +48,7 @@ class ArchiveIndex:
                 parent = '/'.join(parts[:-1])
                 self.folders.setdefault(parent, set()).add(parts[-1])
                 self.folders.setdefault(name, set())
-            elif PurePosixPath(name).suffix.lower() in {'.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp'}:
+            elif PurePosixPath(name).suffix.lower() in IMAGE_EXTENSIONS:
                 # Duplicates are ambiguous in ZIP files; keep the first visible entry.
                 if name not in self.images:
                     self.images[name] = info

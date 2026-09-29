@@ -31,6 +31,7 @@ export const imageUrl = (path, thumbnail = false) =>
     (thumbnail ? '/thumbnail?' : '/image?') + new URLSearchParams({path, v: mediaVersion});
 
 export const getInfo = () => request('/api/info');
+export const getLocation = path => request('/api/location?' + new URLSearchParams({path}));
 
 export const getFolder = (path, signal) =>
     request('/api/folder?' + new URLSearchParams({path}), signal);

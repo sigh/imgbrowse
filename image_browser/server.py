@@ -25,7 +25,7 @@ STATIC_FILES = {
     **{f'/static/{name}.js': f'static/{name}.js' for name in (
         'api', 'dom', 'state', 'preview-loader', 'grid-layout', 'folder-grid', 'image-viewer',
         'viewer-viewport', 'wheel-gesture', 'icons', 'thumbnail-strip',
-        'resource-cache', 'sequence', 'media-cache',
+        'resource-cache', 'sequence', 'media-cache', 'folder-path',
     )},
 }
 
@@ -118,7 +118,9 @@ class GalleryHandler(BaseHTTPRequestHandler):
             content_type = mimetypes.guess_type(file.name)[0] or 'text/plain'
             self.send_content(file.read_bytes(), content_type + '; charset=utf-8')
         elif url.path == '/api/info':
-            self.send_json({'root_name': gallery.root.name, 'root_path': str(gallery.root)})
+            self.send_json({'root_name': gallery.root.name})
+        elif url.path == '/api/location':
+            self.send_json(gallery.location(path))
         elif url.path == '/api/folder':
             self.send_json({'path': path, 'root_name': gallery.root.name, **gallery.listing(path)})
         elif url.path == '/api/preview':
@@ -130,10 +132,8 @@ class GalleryHandler(BaseHTTPRequestHandler):
 
     def _serve_image(self, path, thumbnail=False):
         source = self.gallery.source(path)
-        file, member, stat = source['file'], source['member'], source['stat']
-        etag = f'"{stat.st_mtime_ns}-{stat.st_size}"'
-        if member is not None:
-            etag = f'"{stat.st_mtime_ns}-{stat.st_size}-{member.CRC}-{member.file_size}"'
+        file, member, stat = source.file, source.member, source.stat
+        etag = source.etag
         if self.headers.get('If-None-Match') == etag:
             self.send_response(304)
             self.send_header('ETag', etag)
@@ -153,27 +153,25 @@ class GalleryHandler(BaseHTTPRequestHandler):
                 return data
 
             if thumbnail:
-                key = (str(file), stat.st_mtime_ns, stat.st_size, member.filename,
-                       member.CRC, member.file_size)
-                data = self.thumbnails.get_archive(key, read_member, member.file_size)
+                data = self.thumbnails.get_archive(source.cache_key, read_member, source.size)
                 self.send_content(data, 'image/jpeg', etag=etag)
             elif self.command == 'HEAD':
                 self.send_headers(content_type, member.file_size, etag=etag)
             else:
                 with self.server.archive_work:
                     archive = self.gallery.archives.get(file, stat)
-                    with archive.open(member) as source:
-                        self.send_headers(content_type, member.file_size, etag=etag)
-                        self.copy_image(source)
+                    with archive.open(member) as stream:
+                        self.send_headers(content_type, source.size, etag=etag)
+                        self.copy_image(stream)
             return
         if thumbnail:
             data = self.thumbnails.get(file, stat)
             self.send_content(data, 'image/jpeg', etag=etag)
             return
-        with self.server.image_work, self.gallery.resolve(path).open('rb') as source:
-            self.send_headers(content_type, stat.st_size, etag=etag)
+        with self.server.image_work, self.gallery.resolve(path).open('rb') as stream:
+            self.send_headers(content_type, source.size, etag=etag)
             if self.command != 'HEAD':
-                self.copy_image(source)
+                self.copy_image(stream)
 
     def copy_image(self, source):
         while True:

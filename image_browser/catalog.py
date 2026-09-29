@@ -11,8 +11,8 @@ from .cache import SharedCache
 from .work import WorkGate, check_cancelled
 
 from .archives import ARCHIVE_EXTENSIONS, ArchiveCache
+from .sources import IMAGE_EXTENSIONS, ImageSource
 
-IMAGE_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp'}
 WALK_BUDGET = 24
 PAGE_SIZE = 60
 MAX_CURSOR_DEPTH = 512
@@ -47,16 +47,22 @@ class Gallery:
 
     def archive_parts(self, relative):
         """Return an archive file and its internal path, when the path enters one."""
-        if not isinstance(relative, str):
-            raise ValueError('Invalid path')
-        parts = PurePosixPath(relative).parts
+        parts = self.validate(relative).parts
         for index, part in enumerate(parts):
             if Path(part).suffix.lower() in ARCHIVE_EXTENSIONS:
                 archive = self.resolve('/'.join(parts[:index + 1]))
+                if archive.is_dir():
+                    continue  # A real directory may also have a .zip or .cbz suffix.
                 if not archive.is_file():
                     raise FileNotFoundError('Archive not found')
                 return archive, '/'.join(parts[index + 1:])
         return None
+
+    def location(self, relative):
+        """Resolve a browser path to its physical source without opening an archive."""
+        parts = self.archive_parts(relative)
+        file, member = parts if parts else (self.resolve(relative), None)
+        return {'filesystem_path': str(file), 'archive_member': member}
 
     def invalidate(self, relative=''):
         """Refresh discovered state only; never enumerate descendants to invalidate."""
@@ -79,7 +85,7 @@ class Gallery:
 
     def image_source(self, relative):
         source = self.source(relative)
-        return source['file'], source['member']
+        return source.file, source.member
 
     def source(self, relative):
         self.validate(relative)
@@ -93,12 +99,12 @@ class Gallery:
                 file_stat = file.stat()
                 archive = self.archives.get(file, file_stat)
                 member = archive.image(inner)
-                return {'file': file, 'member': member, 'stat': file_stat}
+                return ImageSource(file, file_stat, member)
             file = self.resolve(relative)
             file_stat = file.stat()
             if file.suffix.lower() not in IMAGE_EXTENSIONS or not stat.S_ISREG(file_stat.st_mode):
                 raise FileNotFoundError('Unsupported image')
-            return {'file': file, 'member': None, 'stat': file_stat}
+            return ImageSource(file, file_stat)
 
     def listing(self, relative: str) -> dict:
         return self.snapshot(relative)['listing']

@@ -1,10 +1,11 @@
+import {renderFolderPath} from './static/folder-path.js';
 import {getInfo, refreshScope} from './static/api.js';
 import {originals} from './static/media-cache.js';
-import {byId, element, renderFolderPath} from './static/dom.js';
+import {byId, element} from './static/dom.js';
 import {FolderGrid} from './static/folder-grid.js';
 import {ImageViewer} from './static/image-viewer.js';
 import {PreviewLoader} from './static/preview-loader.js';
-import {filename, browseAnchor, readState, stateUrl} from './static/state.js';
+import {filename, revealInBrowse, readState, stateUrl} from './static/state.js';
 
 const FILTER_DELAY = 150;
 
@@ -85,24 +86,18 @@ class GalleryApp {
         if (this.state.viewing) this.navigate({viewing: false, image: null});
     }
 
-    browsingPosition(next, image) {
-        const path = browseAnchor(next.folder, image, next.recursive);
-        if (!path) return null;
-        // A filter must not hide the item that the mode switch reveals.
-        if (!next.recursive && !filename(path).toLocaleLowerCase().includes(next.filter.toLocaleLowerCase())) next.filter = '';
-        return {path, offset: 0, reveal: true};
-    }
-
     navigate(changes, replace = false, entry = 'top') {
         clearTimeout(this.filterTimer);
         this.savePosition();
-        const next = {...this.state, ...changes};
+        let next = {...this.state, ...changes};
         if (!replace && stateUrl(next) === stateUrl(this.state)) return;
         const sameFolder = next.folder === this.state.folder;
         let position = sameFolder ? this.grid.position() : null;
         const selection = next.viewing ? next.image : sameFolder
             ? this.state.image || history.state?.selection || null : null;
-        if (this.state.viewing && !next.viewing) position = this.browsingPosition(next, this.state.image);
+        if (this.state.viewing && !next.viewing) {
+            ({state: next, position} = revealInBrowse(next, this.state.image));
+        }
         const metadata = {position, selection};
         history[replace ? 'replaceState' : 'pushState'](metadata, '', stateUrl(next));
         if (this.state.viewing && next.viewing && sameFolder
@@ -142,7 +137,9 @@ class GalleryApp {
         const previous = this.state;
         this.state = readState();
         if (previous?.viewing && !this.state.viewing && previous.folder === this.state.folder) {
-            const position = this.browsingPosition(this.state, previous.image);
+            const result = revealInBrowse(this.state, previous.image);
+            this.state = result.state;
+            const position = result.position;
             history.replaceState({...history.state, position, selection: previous.image}, '', stateUrl(this.state));
         }
         if (this.state.viewing) this.readingSize = this.state.size;

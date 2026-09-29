@@ -81,6 +81,36 @@ class ArchiveTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.gallery.listing('bad.zip')
 
+    def test_physical_locations_distinguish_archive_members_and_real_folders(self):
+        archive = self.make_archive()
+        self.assertEqual(self.gallery.location('Book 2.cbz/Chapter 2'), {
+            'filesystem_path': str(archive.resolve()), 'archive_member': 'Chapter 2'})
+        directory = self.root / 'Actual.zip'
+        directory.mkdir()
+        (directory / 'page.jpg').write_bytes(self.image)
+        self.assertEqual(self.gallery.location('Actual.zip'), {
+            'filesystem_path': str(directory.resolve()), 'archive_member': None})
+        self.assertEqual(self.gallery.listing('Actual.zip')['images'], ['page.jpg'])
+        self.assertIsNone(self.gallery.source('Actual.zip/page.jpg').member)
+        with self.assertRaises(ValueError):
+            self.gallery.location('Book 2.cbz/../outside')
+        (self.root / 'link.cbz').symlink_to(archive)
+        with self.assertRaises(ValueError):
+            self.gallery.location('link.cbz/Chapter 2')
+
+    def test_source_identity_keeps_member_and_file_versions_separate(self):
+        self.make_archive()
+        first = self.gallery.source('Book 2.cbz/page2.jpg')
+        second = self.gallery.source('Book 2.cbz/page10.jpg')
+        self.assertEqual(first.file, second.file)
+        self.assertNotEqual(first.cache_key, second.cache_key)
+        self.assertEqual(first.size, len(self.image))
+        (self.root / 'loose.jpg').write_bytes(self.image)
+        loose = self.gallery.source('loose.jpg')
+        self.assertIsNone(loose.member)
+        self.assertEqual(loose.size, len(self.image))
+        self.assertNotEqual(loose.etag, first.etag)
+
     def test_member_bytes_thumbnail_and_refresh(self):
         archive = self.make_archive()
         file, member = self.gallery.image_source('Book 2.cbz/page2.jpg')

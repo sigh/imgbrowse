@@ -1,6 +1,7 @@
+import {renderFolderPath} from './folder-path.js';
 import {loadOriginal} from './media-cache.js';
 import {walkImages} from './api.js';
-import {byId, renderFolderPath, TaskScope} from './dom.js';
+import {byId, TaskScope} from './dom.js';
 import {filename, parentPath, IMAGE_SIZES} from './state.js';
 import {ViewerViewport} from './viewer-viewport.js';
 import {WheelGesture} from './wheel-gesture.js';

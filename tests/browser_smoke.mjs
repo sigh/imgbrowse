@@ -410,6 +410,10 @@ await click('viewer-next');
 await readyImage('Packed.cbz/Chapter 3/page1.jpg');
 await open(viewerUrl('Packed.cbz/Chapter 3/page1.jpg', 'page', 'Packed.cbz'));
 await readyImage('Packed.cbz/Chapter 3/page1.jpg');
+await evaluate("Object.defineProperty(navigator, 'clipboard', {configurable:true, value:{writeText:async text => { window.copiedPath=text; }}}); document.querySelector('#viewer-path .copy-path').click()");
+await waitFor('window.copiedPath');
+assert.equal(await evaluate('window.copiedPath'), absoluteRoot + '/Packed.cbz');
+
 await evaluate("document.querySelector('#viewer-path a[aria-current]').click()");
 await waitFor("document.getElementById('viewer').hidden && new URLSearchParams(location.search).get('folder') === 'Packed.cbz/Chapter 3'");
 

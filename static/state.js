@@ -61,3 +61,14 @@ export function browseAnchor(folder, image, recursive) {
     const relative = folder ? image.slice(folder.length + 1) : image;
     return recursive ? image : joinPath(folder, relative.split('/')[0]);
 }
+
+/** Return a browse destination without changing the state held by either view. */
+export function revealInBrowse(state, image) {
+    const path = browseAnchor(state.folder, image, state.recursive);
+    const hidden = path && !state.recursive
+        && !filename(path).toLocaleLowerCase().includes(state.filter.toLocaleLowerCase());
+    return {
+        state: hidden ? {...state, filter: ''} : state,
+        position: path ? {path, offset: 0, reveal: true} : null,
+    };
+}
