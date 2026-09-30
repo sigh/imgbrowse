@@ -103,11 +103,11 @@ export class PreviewLoader {
     priority(target) {
         if (!target.isConnected) return Infinity;
         const rect = target.getBoundingClientRect();
-        if (this.viewer.contains(target)) {
+        if (this.viewer.contains(target) && !this.viewport.contains(target)) {
             if (!this.viewerOpen) return Infinity;
             return Math.abs((rect.left + rect.right) / 2 - this.viewer.clientWidth / 2);
         }
-        if (this.viewerOpen) return Infinity;
+        if (this.viewerOpen && !this.viewer.contains(this.viewport)) return Infinity;
         const bounds = this.viewport.getBoundingClientRect();
         const visible = rect.bottom > bounds.top && rect.top < bounds.bottom;
         const distance = visible

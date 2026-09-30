@@ -571,3 +571,8 @@ input:disabled {
 .viewer-strip .video-preview > .video-badge { width: 16px; height: 16px; padding: 1px; right: 3px; bottom: 3px; }
 .viewer-strip .video-duration { left: 3px; bottom: 3px; font-size: 10px; }
 #viewer-video { flex: none; }
+
+#overview { display: flex; flex: 1; flex-direction: column; min-height: 0; }
+#overview #grid-viewport { min-height: 0; }
+.selected-media { outline: 2px solid var(--color-accent); outline-offset: -2px; }
+#strip-expand { align-self: flex-end; margin: 0 12px -24px 0; padding: 3px; border: 0; background: transparent; color: var(--color-muted); z-index: 1; }

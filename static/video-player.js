@@ -5,6 +5,7 @@ export class VideoPlayer {
     constructor(canvas) {
         this.canvas = canvas;
         this.element = null;
+        this.resume = null;
     }
 
     show(path, scope, onError) {
@@ -27,7 +28,12 @@ export class VideoPlayer {
             video.style.width = width + 'px';
             video.style.height = width / ratio + 'px';
         };
-        video.addEventListener('loadedmetadata', fit);
+        video.addEventListener('loadedmetadata', () => {
+            fit();
+            if (this.resume?.path === path && Number.isFinite(video.duration)) {
+                video.currentTime = Math.min(this.resume.time, video.duration);
+            }
+        });
         const observer = new ResizeObserver(fit);
         observer.observe(this.canvas);
         video.src = imageUrl(path);
@@ -37,6 +43,7 @@ export class VideoPlayer {
         fit();
         video.focus({preventScroll: true});
         scope.onDispose(() => {
+            this.resume = {path, time: video.currentTime};
             observer.disconnect();
             video.pause();
             video.removeAttribute('src');

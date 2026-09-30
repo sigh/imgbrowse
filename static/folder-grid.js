@@ -108,7 +108,7 @@ export class FolderGrid {
     removeRow(index) {
         const entry = this.rowNodes.get(index);
         if (!entry) return;
-        if (entry.node.contains(document.activeElement)) {
+        if (!this.focusPath && entry.node.contains(document.activeElement)) {
             this.focusPath = document.activeElement.closest('.card')?.dataset.path;
         }
         entry.scope.dispose();
@@ -140,6 +140,7 @@ export class FolderGrid {
         const folder = item.type === 'folder';
         const node = element('article', 'card list-item');
         node.dataset.path = item.path;
+        node.classList.toggle('selected-media', this.state.overview && this.state.image === item.path);
         const name = folder ? this.folderLink(item.path, filename(item.path))
             : element('button', 'list-name', filename(item.path));
         name.classList.add('list-name');
@@ -167,6 +168,7 @@ export class FolderGrid {
         if (this.state.compact) return this.createListItem(item, scope);
         const node = element('article', 'card');
         node.dataset.path = item.path;
+        node.classList.toggle('selected-media', this.state.overview && this.state.image === item.path);
         const isFolder = item.type === 'folder';
         const picture = isFolder ? this.folderLink(item.path, 'Folder') : element('button', '', 'Loading…');
         picture.className = 'picture';
@@ -215,7 +217,7 @@ export class FolderGrid {
     }
 
     rowSignature(row) {
-        return JSON.stringify([this.state.compact, row.items?.map(item => item.path) ?? row.path]);
+        return JSON.stringify([this.state.compact, this.state.overview ? this.state.image : null, row.items?.map(item => item.path) ?? row.path]);
     }
 
     renderRows() {

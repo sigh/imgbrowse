@@ -81,6 +81,7 @@ export class ImageViewer {
         this.thumbnailsVisible = !this.thumbnailsVisible;
         sessionStorage.setItem('thumbnails', String(this.thumbnailsVisible));
         this.renderStrip();
+        byId('strip-expand').hidden = !this.thumbnailsVisible;
         this.viewport.resize(point);
     }
 
@@ -90,13 +91,13 @@ export class ImageViewer {
     }
 
     updateCollectionLabel() {
-        const folder = this.state.image ? parentPath(this.state.image) : this.state.collection;
+        const folder = !this.state.overview && this.state.image ? parentPath(this.state.image) : this.state.collection;
         renderFolderPath(byId('viewer-path'), folder, this.rootName, this.folderLink,
             {currentLink: true, browseFolder: this.state.folder});
     }
 
     updateControls() {
-        document.querySelector('.size-control').hidden = isVideo(this.state.image);
+        document.querySelector('.size-control').hidden = this.state.overview || isVideo(this.state.image);
         const hasImage = Boolean(this.state.image);
         this.previousButton.disabled = !hasImage || this.singleImage || Boolean(this.moveScope);
         this.nextButton.disabled = this.previousButton.disabled;
@@ -136,7 +137,7 @@ export class ImageViewer {
         const folderChanged = this.state?.folder !== state.folder;
         this.state = state;
         if (this.viewport.size !== state.size) this.viewport.setSize(state.size);
-        const key = JSON.stringify([state.viewing, state.collection, state.image]);
+        const key = JSON.stringify([state.viewing, state.collection, state.image, state.overview]);
         if (!force && key === this.key) {
             this.updateControls();
             if (state.viewing && folderChanged) { this.updateCollectionLabel(); this.renderStrip(); }
@@ -166,6 +167,16 @@ export class ImageViewer {
                     ? this.opener : byId('grid-viewport');
                 target.focus({preventScroll: true});
             }
+            return;
+        }
+        if (state.overview) {
+            this.prefetchScope?.dispose();
+            this.prefetchPath = null;
+            this.viewport.clear();
+            this.filmstrip.stop();
+            this.setSizeMenu(false, false);
+            this.updateCollectionLabel();
+            byId('viewer-name').textContent = '';
             return;
         }
         if (!wasOpen) {
@@ -335,6 +346,7 @@ export class ImageViewer {
             else this.close();
             return;
         }
+        if (this.state.overview) return;
         if (event.composedPath().includes(this.video.element)) return;
         if (event.key === 'Tab') {
             const controls = [...this.container.querySelectorAll('a[href], button, select, [tabindex="0"]')]
@@ -363,7 +375,7 @@ export class ImageViewer {
     }
 
     onWheel(event) {
-        if (isVideo(this.state?.image)) return;
+        if (this.state?.overview || isVideo(this.state?.image)) return;
         if (!this.state?.viewing || event.ctrlKey || event.metaKey || event.altKey || event.shiftKey
             || !event.deltaY || Math.abs(event.deltaX) > Math.abs(event.deltaY)) return;
         const now = performance.now();

@@ -16,7 +16,7 @@ test('strip paths use the browsing folder, including an empty current-folder lab
 
 test('image URLs retain independent grid and viewer contexts', () => {
     const state = {
-        folder: 'Album & photos', recursive: false, compact: true, size: 'width', filter: 'chapter',
+        folder: 'Album & photos', overview: false, recursive: false, compact: true, size: 'width', filter: 'chapter',
         viewing: true, collection: 'Album & photos/Chapter 2',
         image: 'Album & photos/Chapter 2/page #1%.jpg',
     };
@@ -32,7 +32,7 @@ test('closing a viewer drops its collection override and preserves grid settings
     const state = readState('folder=parent&recursive=1&filter=page&collection=child&image=../child/a.jpg');
     const restored = readState(new URL(stateUrl({...state, viewing: false}), 'http://localhost').search);
     assert.equal(restored.folder, 'parent');
-    assert.equal(restored.recursive, true);
+    assert.equal(restored.recursive, false);
     assert.equal(restored.filter, 'page');
     assert.equal(restored.image, null);
     assert.equal(restored.collection, 'parent');
@@ -158,4 +158,14 @@ test('cached preview jobs bypass a blocked video extraction', async () => {
     assert.equal(cachedRan, true);
     release();
     await first;
+});
+
+
+test('view grid has a compact URL and browse never recurses', () => {
+    const state = readState('folder=Album&view=grid');
+    assert.equal(state.viewing, true);
+    assert.equal(state.overview, true);
+    assert.equal(state.recursive, true);
+    assert.equal(stateUrl(state), '/?folder=Album&view=grid');
+    assert.equal(readState('folder=Album').recursive, false);
 });

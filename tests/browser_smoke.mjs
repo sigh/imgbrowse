@@ -134,13 +134,11 @@ await readyImage(second);
 assert.ok(await evaluate("(() => { const image = document.getElementById('viewer-image'); return !image.hidden && image.naturalWidth > 0 && image.getBoundingClientRect().width > 0; })()"), 'Reopening a cached image must display decoded pixels');
 await evaluate('history.back()');
 await waitFor("document.getElementById('viewer').hidden");
-const beforeScope = await evaluate('history.length');
-await click('scope-all');
+await open('/?folder=Album&view=grid');
 await waitFor("document.querySelectorAll('.folder-heading a').length === 2");
-assert.equal(await evaluate('history.length'), beforeScope);
 await evaluate("document.querySelector('.folder-heading a').click()");
 await waitFor("new URLSearchParams(location.search).get('folder') === 'Album/Chapter 1'");
-assert.equal(await evaluate("document.getElementById('scope-all').getAttribute('aria-pressed')"), 'true');
+assert.ok(await evaluate("document.getElementById('viewer').hidden"));
 
 // A folder's View action establishes the same scope for both modes.
 await open('/?folder=Album&compact=1');
@@ -161,7 +159,7 @@ await waitFor("document.getElementById('viewer').hidden");
 assert.equal(await evaluate('history.state.selection'), null);
 
 // Recursive paging and Back reuse discovered items without rebuilding the traversal.
-await open('/?recursive=1');
+await open('/?view=grid');
 await waitFor("document.getElementById('summary').textContent.includes('60 items')");
 for (let page=0; page<5; page++) {
     await evaluate("document.getElementById('grid-viewport').scrollTop = document.getElementById('grid-viewport').scrollHeight");
@@ -170,13 +168,12 @@ for (let page=0; page<5; page++) {
 await waitFor("document.getElementById('summary').textContent === '172 items'");
 await evaluate("document.getElementById('grid-viewport').scrollTop = 1800");
 await pause(160);
-const recursiveAnchor = await evaluate('history.state.position.path');
-await click('layout-list');
-await pause(100);
-assert.equal(await evaluate('history.state.position.path'),recursiveAnchor);
-await click('layout-previews');
-await waitFor("document.getElementById('layout-previews').getAttribute('aria-pressed') === 'true'");
-assert.equal(await evaluate('history.state.position.path'),recursiveAnchor);
+const recursiveAnchor = await evaluate('history.state.overviewPosition.path');
+await evaluate("document.querySelector('#grid .picture').click()");
+await waitFor("!document.getElementById('viewer-stage').hidden");
+await evaluate('history.back()');
+await waitFor("!document.getElementById('overview').hidden");
+assert.equal(await evaluate('history.state.overviewPosition.path'), recursiveAnchor);
 
 // Fit page never upscales a small photo. Native wheel events turn fitted pages.
 await open(viewerUrl('root2.jpg', 'page', ''));
@@ -479,7 +476,13 @@ await evaluate('testVideo.play()', true);
 await waitFor('testVideo.currentTime > 0');
 await evaluate('testVideo.pause(); testVideo.currentTime=1.5');
 await waitFor('!testVideo.seeking && testVideo.currentTime >= 1.4');
-await evaluate("testVideo.dispatchEvent(new Event('ended'))");
+await click('view-grid');
+await waitFor("!document.getElementById('overview').hidden && document.querySelector('.selected-media')");
+assert.ok(await evaluate("testVideo.paused && !testVideo.hasAttribute('src')"));
+await evaluate(`document.querySelector('#overview [data-path="Mixed/2.webm"] .picture').click()`);
+await waitFor("document.getElementById('viewer-video')?.currentTime >= 1.4");
+assert.ok(await evaluate("document.getElementById('viewer-video').paused"));
+await evaluate("window.testVideo=document.getElementById('viewer-video');testVideo.dispatchEvent(new Event('ended'))");
 await waitImage('Mixed/2.webm');
 await screenshot('video');
 await click('viewer-next');

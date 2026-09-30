@@ -1,5 +1,6 @@
 import {renderFolderPath} from './static/folder-path.js';
 import {getInfo, refreshScope} from './static/api.js';
+import {icon} from './static/icons.js';
 import {originals} from './static/media-cache.js';
 import {byId, element} from './static/dom.js';
 import {FolderGrid} from './static/folder-grid.js';
@@ -38,7 +39,10 @@ class GalleryApp {
         for (const button of document.querySelectorAll('[data-layout]')) {
             button.addEventListener('click', () => this.navigate({compact: button.dataset.layout === 'list'}, true));
         }
-        byId('scope-all').addEventListener('click', () => this.navigate({recursive: !this.state.recursive}, true));
+        for (const [id, name, overview] of [['view-single', 'image', false], ['view-grid', 'grid', true], ['strip-expand', 'expand', true]]) {
+            byId(id).append(icon(name));
+            byId(id).addEventListener('click', () => this.navigate({overview, recursive: overview}));
+        }
         this.grid.viewport.addEventListener('scroll', () => {
             clearTimeout(this.positionTimer);
             this.positionTimer = setTimeout(() => this.savePosition(), 120);
@@ -60,8 +64,7 @@ class GalleryApp {
             await refreshScope(this.state.viewing ? this.state.collection : this.state.folder);
             originals.clear();
             this.grid.cache.clear();
-            if (this.state.viewing) this.viewer.show(this.state, true);
-            else this.render(true, true);
+            this.render(true, true);
         } catch (error) {
             (this.state.viewing ? this.viewer.status : this.grid.status).textContent = error.message;
         } finally {
@@ -71,19 +74,25 @@ class GalleryApp {
 
     savePosition() {
         clearTimeout(this.positionTimer);
-        if (this.grid.loadingFolder || this.grid.restorePosition || !this.state || this.state.viewing) return;
-        history.replaceState({...history.state, position: this.grid.position()}, '');
+        if (this.grid.loadingFolder || this.grid.restorePosition || !this.state || (this.state.viewing && !this.state.overview)) return;
+        const key = this.state.overview ? 'overviewPosition' : 'position';
+        history.replaceState({...history.state, [key]: this.grid.position(),
+            ...(this.state.overview ? {overviewImage: this.state.image} : {})}, '');
     }
 
     openViewer(image, collection, opener) {
+        if (this.state.overview && image) {
+            this.state = {...this.state, image};
+            history.replaceState({...history.state, overviewImage: image}, '', stateUrl(this.state));
+        }
         this.viewer.openingFocus = opener || document.activeElement;
-        const changes = {viewing: true, image, collection, folder: collection, size: this.readingSize};
+        const changes = {viewing: true, overview: false, recursive: false, image, collection, folder: collection, size: this.readingSize};
         if (collection !== this.state.folder) changes.filter = '';
         this.navigate(changes);
     }
 
     closeViewer() {
-        if (this.state.viewing) this.navigate({viewing: false, image: null});
+        if (this.state.viewing) this.navigate({viewing: false, overview: false, recursive: false, image: null});
     }
 
     navigate(changes, replace = false, entry = 'top') {
@@ -92,15 +101,17 @@ class GalleryApp {
         let next = {...this.state, ...changes};
         if (!replace && stateUrl(next) === stateUrl(this.state)) return;
         const sameFolder = next.folder === this.state.folder;
-        let position = sameFolder ? this.grid.position() : null;
+        let position = sameFolder ? (this.state.overview ? history.state?.position : this.grid.position()) : null;
         const selection = next.viewing ? next.image : sameFolder
             ? this.state.image || history.state?.selection || null : null;
         if (this.state.viewing && !next.viewing) {
             ({state: next, position} = revealInBrowse(next, this.state.image));
         }
-        const metadata = {position, selection};
+        const overviewPosition = sameFolder ? (this.state.overview ? this.grid.position() : history.state?.overviewPosition) : null;
+        const overviewImage = this.state.overview ? next.image : history.state?.overviewImage;
+        const metadata = {position, selection, overviewPosition, overviewImage};
         history[replace ? 'replaceState' : 'pushState'](metadata, '', stateUrl(next));
-        if (this.state.viewing && next.viewing && sameFolder
+        if (this.state.viewing && next.viewing && !this.state.overview && !next.overview && sameFolder
             && next.recursive === this.state.recursive && next.compact === this.state.compact) {
             this.state = next;
             this.readingSize = next.size;
@@ -109,7 +120,7 @@ class GalleryApp {
     }
 
     folderLink(path, label) {
-        const changes = {folder: path, collection: path, viewing: false, image: null, filter: ''};
+        const changes = {folder: path, collection: path, viewing: false, overview: false, recursive: false, image: null, filter: ''};
         const link = element('a', '', label);
         link.href = stateUrl({...this.state, ...changes});
         link.addEventListener('click', event => {
@@ -146,17 +157,36 @@ class GalleryApp {
         for (const button of document.querySelectorAll('[data-layout]')) {
             button.setAttribute('aria-pressed', String((button.dataset.layout === 'list') === this.state.compact));
         }
-        byId('scope-all').setAttribute('aria-pressed', String(this.state.recursive));
-        byId('scope-note').hidden = !this.state.recursive;
         byId('filter').value = this.state.filter;
-        byId('filter').hidden = this.state.recursive;
-        byId('filter-note').hidden = !this.state.recursive;
         document.querySelector('.toolbar').inert = this.state.viewing;
         document.querySelector('.app-header').inert = this.state.viewing;
         this.renderBreadcrumbs();
+        const overview = this.state.viewing && this.state.overview;
+        const host = byId('overview');
+        if (overview) {
+            host.append(this.grid.viewport, byId('summary'));
+        } else {
+            document.body.insertBefore(this.grid.viewport, byId('viewer'));
+            document.body.insertBefore(byId('summary'), byId('viewer'));
+        }
         this.previews.setViewerOpen(this.state.viewing);
-        this.grid.show(this.state, force, restore ? history.state?.position : null);
+        host.hidden = !overview;
+        byId('viewer-stage').hidden = overview;
+        document.querySelector('.viewer-footer').hidden = overview;
+        byId('viewer-thumbnails').hidden = overview;
+        document.querySelector('.size-control').hidden = overview;
+        byId('view-single').setAttribute('aria-pressed', String(!overview));
+        byId('view-grid').setAttribute('aria-pressed', String(overview));
+        let position = restore ? history.state?.position : null;
+        if (overview) {
+            position = history.state?.overviewImage === this.state.image ? history.state?.overviewPosition : null;
+            if (!position && this.state.image) position = {path: this.state.image, offset: 0, reveal: true};
+        }
         this.viewer.show(this.state, force, entry);
+        if (overview) document.querySelector('.strip-frame').hidden = true;
+        byId('strip-expand').hidden = overview || !this.state.viewing || !this.viewer.thumbnailsVisible;
+        this.grid.show(overview ? {...this.state, folder: this.state.collection, viewing: false, recursive: true, compact: false, filter: ''}
+            : {...this.state, recursive: false}, force, position);
     }
 }
 

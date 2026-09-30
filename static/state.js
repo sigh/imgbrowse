@@ -31,26 +31,27 @@ export function readState(search = location.search) {
     return {
         folder,
         size: imageSize(query.get('size')),
-        recursive: query.get('recursive') === '1',
+        overview: query.get('view') === 'grid',
+        recursive: query.get('view') === 'grid',
         compact: query.get('compact') === '1',
         filter: query.get('filter') || '',
         image: image === null ? null : resolveImage(folder, image),
         collection: query.get('collection') ?? folder,
-        viewing: image !== null || query.get('viewer') === '1',
+        viewing: image !== null || query.get('viewer') === '1' || query.get('view') === 'grid',
     };
 }
 
 export function stateUrl(next) {
     const query = new URLSearchParams();
     if (next.folder) query.set('folder', next.folder);
-    if (next.recursive) query.set('recursive', '1');
     if (next.compact) query.set('compact', '1');
     if (next.filter) query.set('filter', next.filter);
     if (next.viewing) {
+        if (next.overview) query.set('view', 'grid');
         if (imageSize(next.size) !== 'page') query.set('size', imageSize(next.size));
         if (next.collection !== next.folder) query.set('collection', next.collection);
         if (next.image != null) query.set('image', relativePath(next.folder, next.image));
-        else query.set('viewer', '1');
+        else if (!next.overview) query.set('viewer', '1');
     }
     return query.size ? '/?' + query : '/';
 }

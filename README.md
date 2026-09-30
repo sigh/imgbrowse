@@ -22,8 +22,8 @@ Open folders or select an image to read. The viewer includes all descendants in
 natural filename order. Use left/right arrows to turn pages, Escape to close,
 and the size selector to fit or zoom. Scroll again at an image edge to turn pages.
 
-Switch between previews and a name list; optionally include subfolders. Filtering
-matches names in the current folder. URLs can be bookmarked, and browser history
+Browse immediate children as previews or a name list. In View, switch between a
+single item and a recursive thumbnail grid. Filtering matches names in Browse. URLs can be bookmarked, and browser history
 restores grid positions. Refresh picks up filesystem changes.
 
 Supports JPG, JPEG, PNG, GIF, WebP, and BMP, including images inside ZIP and CBZ

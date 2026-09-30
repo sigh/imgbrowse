@@ -32,8 +32,8 @@ async function wait(expression) {
 }
 await call('Page.enable'); await call('Runtime.enable');
 await call('Emulation.setDeviceMetricsOverride', {width:1440,height:900,deviceScaleFactor:1,mobile:false});
-await call('Page.navigate', {url:base + '/?folder=Large&recursive=1&compact=1'});
-await wait("document.readyState === 'complete' && document.querySelector('.list-item')");
+await call('Page.navigate', {url:base + '/?folder=Large&view=grid'});
+await wait("document.readyState === 'complete' && document.querySelector('.card')");
 await evaluate("import('/gallery.js').then(module=>window.testApp=module.app)");
 await evaluate(`(async()=>{
  const grid=testApp.grid;
@@ -78,11 +78,13 @@ assert.ok(media.bytes <= 96*1024*1024 && media.entries <=4);
 // Return from an image outside the retained grid window without scanning from the start.
 await evaluate("testApp.openViewer('Large/page5.jpg', 'Large')");
 await wait("document.getElementById('viewer-image').dataset.path === 'Large/page5.jpg'");
-await evaluate("testApp.closeViewer()");
+await evaluate("testApp.navigate({overview:true,recursive:true})");
 await wait("document.activeElement.closest('.card')?.dataset.path === 'Large/page5.jpg'");
-assert.equal(await evaluate('history.state.selection'), 'Large/page5.jpg');
+assert.equal(await evaluate('testApp.state.image'), 'Large/page5.jpg');
 assert.ok(await evaluate('testApp.grid.directory.images.length <= 2000'));
-await evaluate("document.getElementById('read-folder').click()");
+await evaluate("document.getElementById('view-single').click()");
 await wait("document.getElementById('viewer-image').dataset.path === 'Large/page5.jpg' && !document.getElementById('viewer-image').hidden");
+await evaluate('testApp.closeViewer()');
+await wait("document.activeElement.closest('.card')?.dataset.path === 'Large/page5.jpg'");
 console.log('Performance browser checks passed:' ,JSON.stringify({grid,strip,media}));
 socket.close();
