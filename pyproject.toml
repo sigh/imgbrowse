@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "imgbrowse"
+version = "0.1.0"
+description = "A local image and video browser for folder trees and ZIP/CBZ archives"
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = ["Pillow>=10"]
+
+[project.scripts]
+imgbrowse = "image_browser.cli:main"
+
+[tool.setuptools]
+packages = ["image_browser"]
+include-package-data = false
+
+[tool.setuptools.package-data]
+image_browser = ["web/*.html", "web/*.css", "web/*.js", "web/static/*.js"]

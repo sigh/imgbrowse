@@ -6,7 +6,7 @@ import select
 import socket
 import zipfile
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from pathlib import Path
+from importlib.resources import files
 from urllib.parse import parse_qs, urlsplit
 
 from PIL import Image
@@ -17,7 +17,7 @@ from .thumbnails import ThumbnailCache
 from .sources import VIDEO_TYPES
 from .ranges import UnsatisfiableRange, byte_range
 
-APP_DIRECTORY = Path(__file__).resolve().parent.parent
+APP_DIRECTORY = files('image_browser').joinpath('web')
 MAX_REQUEST_BYTES = 128 * 1024
 STATIC_FILES = {
     '/': 'template.html',
@@ -118,7 +118,7 @@ class GalleryHandler(BaseHTTPRequestHandler):
         path = query.get('path', [''])[0]
         gallery = self.gallery
         if url.path in STATIC_FILES:
-            file = APP_DIRECTORY / STATIC_FILES[url.path]
+            file = APP_DIRECTORY.joinpath(STATIC_FILES[url.path])
             content_type = mimetypes.guess_type(file.name)[0] or 'text/plain'
             self.send_content(file.read_bytes(), content_type + '; charset=utf-8')
         elif url.path == '/api/info':

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import {ResourceCache} from '../static/resource-cache.js';
-import {Sequence} from '../static/sequence.js';
+import {ResourceCache} from '../image_browser/web/static/resource-cache.js';
+import {Sequence} from '../image_browser/web/static/sequence.js';
 
 test('shared work survives one cancelled consumer and caches its result', async () => {
     const cache = new ResourceCache(10);

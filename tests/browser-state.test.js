@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import {readState, stateUrl, relativePath, revealInBrowse} from '../static/state.js';
-import {TaskScope} from '../static/dom.js';
-import {PreviewLoader, durationLabel} from '../static/preview-loader.js';
+import {readState, stateUrl, relativePath, revealInBrowse} from '../image_browser/web/static/state.js';
+import {TaskScope} from '../image_browser/web/static/dom.js';
+import {PreviewLoader, durationLabel} from '../image_browser/web/static/preview-loader.js';
 
 test('strip paths use the browsing folder, including an empty current-folder label', () => {
     const state = readState('folder=Album&collection=Album/Chapter%202&image=Chapter%202/page.jpg');

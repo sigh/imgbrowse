@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import {writeFileSync} from 'node:fs';
 import {join} from 'node:path';
-import {readState, stateUrl} from '../static/state.js';
+import {readState, stateUrl} from '../image_browser/web/static/state.js';
 
 const [debugPort, base, screenshots] = process.argv.slice(2);
 const targets = await (await fetch(`http://127.0.0.1:${debugPort}/json/list`)).json();

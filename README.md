@@ -3,18 +3,29 @@
 A local image browser for images in a folder tree. Targets macOS and Linux.
 Requires Python 3.9+ and Pillow.
 
-## Run
+## Install and run
+
+From a checkout, run `pipx install .`, or install a shared wheel:
 
 ```sh
-python3 -m venv .venv
-source .venv/bin/activate
-python3 -m pip install -r requirements.txt
-python3 imgbrowse.py 8080 "/path/to/images"
+pipx install /path/to/imgbrowse-0.1.0-py3-none-any.whl
+imgbrowse "/path/to/images"
+imgbrowse "/path/to/images" --host 0.0.0.0 --port 8080
 ```
 
-Open `http://127.0.0.1:8080/`. The port defaults to `8080` and the directory defaults
-to the current directory. A directory alone is also accepted. Stop with Ctrl+C.
-The server currently listens on localhost.
+Open `http://127.0.0.1:8080/` locally. With `--host 0.0.0.0`, other devices can
+browse the selected folder at `http://<this-computer-IP>:8080/`. LAN access has no
+login. Each computer can run its own instance with any local or mounted directory.
+The default root is the current directory; stop with Ctrl+C.
+FFmpeg/ffprobe are optional for video previews and duration labels.
+
+To build a wheel to share (no publishing required):
+
+```sh
+python3 -m pip wheel . --no-deps --wheel-dir dist
+```
+
+Reinstall an updated wheel with `pipx install --force /path/to/new.whl`.
 
 ## Browse
 
@@ -37,7 +48,9 @@ Refresh reloads the current scope from disk.
 ## Development
 
 Python HTTP, traversal, and thumbnail code lives in `image_browser/`. Browser
-modules are in `static/`, coordinated by `gallery.js`. No frontend build is needed.
+assets are in `image_browser/web/`. No frontend build is needed.
+For source development, install with `python3 -m pip install -e .` in a virtual
+environment and run `python3 imgbrowse.py "/path/to/images"`.
 
 ## Check
 

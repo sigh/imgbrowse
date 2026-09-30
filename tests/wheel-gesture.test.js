@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import {WheelGesture} from '../static/wheel-gesture.js';
+import {WheelGesture} from '../image_browser/web/static/wheel-gesture.js';
 
 test('momentum cannot turn another page after reaching an edge', () => {
     const gesture = new WheelGesture();
