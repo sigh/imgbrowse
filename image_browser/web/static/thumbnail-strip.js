@@ -215,7 +215,7 @@ export class ThumbnailStrip {
                 const label = element('span', 'strip-folder');
                 tile.append(label, button);
                 item = {button, tile, label, scope: new TaskScope()}; this.nodes.set(path, item);
-                this.previews.image(button, path, item.scope).catch(error => {
+                this.previews.thumbnail(button, path, item.scope).catch(error => {
                     if (error.name === 'AbortError' || item.scope.signal.aborted) return;
                     button.replaceChildren(icon('brokenImage'));
                     button.title = 'Thumbnail unavailable: ' + path;

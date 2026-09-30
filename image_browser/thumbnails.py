@@ -1,17 +1,18 @@
 """On-demand thumbnail generation with a bounded in-memory LRU cache."""
 
 import io
-from pathlib import Path
+from hashlib import sha256
 
 from PIL import Image, ImageOps
 
 from .cache import SharedCache
-from .work import ByteBudget, WorkGate
 from .video_thumbnails import render_video_thumbnail, video_metadata
+from .work import ByteBudget, WorkGate
 
 DEFAULT_CACHE_BYTES = 64 * 1024 * 1024
 THUMBNAIL_SIZE = (400, 300)
 JPEG_QUALITY = 78
+THUMBNAIL_RECIPE = ('jpeg-v1', THUMBNAIL_SIZE, JPEG_QUALITY)
 ARCHIVE_BUFFER_BUDGET = ByteBudget(128 * 1024 * 1024)
 DECODE_BUDGET = ByteBudget(256 * 1024 * 1024)
 
@@ -45,30 +46,37 @@ class ThumbnailCache:
     def bytes_used(self):
         return self.cache.weight
 
-    def get(self, file: Path, stat) -> bytes:
-        key = (str(file), stat.st_mtime_ns, stat.st_size)
-        return self._get(key, lambda: file)
+    @property
+    def generation(self):
+        return self.cache.generation
 
-    def get_archive(self, key, read_member, size=0) -> bytes:
-        return self._get(key, lambda: io.BytesIO(read_member()), size)
+    @staticmethod
+    def key(source):
+        return source.cache_key, THUMBNAIL_RECIPE
 
-    def get_video(self, source) -> bytes:
+    def etag(self, source):
+        return 'W/"' + sha256(repr(self.key(source)).encode()).hexdigest() + '"'
+
+    def cached_video_info(self, source):
+        return self.metadata.peek(source.cache_key) if source.kind == 'video' else None
+
+    def get(self, source, archives=None, archive_work=None, *, generation=None) -> bytes:
+        """Render a resolved source; folder covers and direct media share this cache."""
         def load():
-            with self.video_workers:
-                return render_video_thumbnail(source.file, THUMBNAIL_SIZE)
-        return self.cache.get(source.cache_key, load, len)
+            if source.kind == 'video':
+                with self.video_workers:
+                    return render_video_thumbnail(source.file, THUMBNAIL_SIZE)
+            size = source.size if source.member is not None else 0
+            with self.workers, ARCHIVE_BUFFER_BUDGET.reserve(size):
+                file = io.BytesIO(source.read_member(archives, archive_work)) if source.member else source.file
+                return render_thumbnail(file)
+        return self.cache.get(self.key(source), load, len, generation=generation)
 
     def video_info(self, source):
         def load():
             with self.video_workers:
                 return video_metadata(source.file)
         return self.metadata.get(source.cache_key, load, lambda _: 128)
-
-    def _get(self, key, source, size=0):
-        def load():
-            with self.workers, ARCHIVE_BUFFER_BUDGET.reserve(size):
-                return render_thumbnail(source())
-        return self.cache.get(key, load, len)
 
     def invalidate(self):
         self.cache.invalidate()

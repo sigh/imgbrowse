@@ -18,14 +18,13 @@ async function request(url, signal, data) {
 let mediaVersion = Date.now();
 const thumbnails = new ResourceCache(32 * 1024 * 1024, 512);
 const videoInfo = new ResourceCache(1024 * 1024, 4096);
-const previews = new ResourceCache(1024 * 1024, 2048);
 const walks = new ResourceCache(4 * 1024 * 1024, 256);
 export const sequence = new Sequence((options, signal) => walks.get(JSON.stringify(options),
     shared => request('/api/walk', shared, options), signal, value => JSON.stringify(value).length * 2));
 
 export async function refreshScope(path) {
     await request('/api/refresh', undefined, {path});
-    mediaVersion++; thumbnails.clear(); videoInfo.clear(); previews.clear(); walks.clear(); sequence.clear();
+    mediaVersion++; thumbnails.clear(); videoInfo.clear(); walks.clear(); sequence.clear();
 }
 
 export const imageUrl = (path, thumbnail = false) =>
@@ -37,10 +36,6 @@ export const getLocation = path => request('/api/location?' + new URLSearchParam
 export const getFolder = (path, signal) =>
     request('/api/folder?' + new URLSearchParams({path}), signal);
 
-export const getPreview = (path, signal) =>
-    previews.get(path, shared => request('/api/preview?' + new URLSearchParams({path}), shared), signal,
-        value => JSON.stringify(value).length * 2);
-
 export const walkImages = (options, signal) => sequence.walk(options, signal);
 
 export const cachedThumbnail = path => thumbnails.peek(path);
@@ -50,10 +45,14 @@ export const getVideoInfo = (path, signal) => videoInfo.get(path,
 export function getThumbnail(path, signal) {
     return thumbnails.get(path, async shared => {
         const response = await fetch(imageUrl(path, true), {signal: shared, priority: 'low'});
-        if (!response.ok) throw new Error('Preview unavailable');
+        if (!response.ok) {
+            const detail = await response.json();
+            throw Object.assign(new Error(detail.error || 'Preview unavailable'), {code: detail.code, mediaKind: detail.media_kind});
+        }
+        if (response.status === 204) return {blob: null, mediaKind: null};
         const blob = await response.blob();
         const duration = response.headers.get('X-Video-Duration');
-        if (duration !== null) blob.duration = Number(duration);
-        return blob;
-    }, signal, blob => blob.size);
+        return {blob, mediaKind: response.headers.get('X-Media-Kind'),
+            ...(duration !== null ? {duration: Number(duration)} : {})};
+    }, signal, result => (result.blob?.size || 0) + 128);
 }

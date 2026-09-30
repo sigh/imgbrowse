@@ -56,7 +56,7 @@ class GalleryTests(unittest.TestCase):
         (self.root / 'series/first/leaf').mkdir(parents=True)
         image = self.image('series/second/1.jpg')
         with patch.object(self.gallery, 'listing', wraps=self.gallery.listing) as listing:
-            self.assertEqual(self.gallery.preview('series'), {'image': None})
+            self.assertIsNone(self.gallery.representative('series'))
             self.assertEqual([call.args[0] for call in listing.call_args_list],
                              ['series', 'series/first', 'series/first/leaf'])
         self.assertEqual(self.sequence(root='series'), [image])
@@ -64,9 +64,9 @@ class GalleryTests(unittest.TestCase):
     def test_preview_prefers_direct_images(self):
         self.image('series/a.jpg')
         self.image('series/nested/1.jpg')
-        self.assertEqual(self.gallery.preview('series')['image'], 'series/a.jpg')
+        self.assertEqual(self.gallery.representative('series'), 'series/a.jpg')
 
-    def test_walk_and_preview_have_bounded_directory_work(self):
+    def test_walk_pages_but_cover_completes_its_first_branch(self):
         for number in range(WALK_BUDGET + 10):
             (self.root / f'empty{number}').mkdir()
         with patch.object(self.gallery, 'listing', wraps=self.gallery.listing) as listing:
@@ -76,10 +76,9 @@ class GalleryTests(unittest.TestCase):
         deep = '/'.join(['deep'] * (WALK_BUDGET + 2))
         self.image(deep + '/1.jpg')
         with patch.object(self.gallery, 'listing', wraps=self.gallery.listing) as listing:
-            result = self.gallery.preview('deep')
-            self.assertEqual(listing.call_count, WALK_BUDGET)
-            self.assertIn('continue', result)
-        self.assertEqual(self.gallery.preview(result['continue'])['image'], deep + '/1.jpg')
+            result = self.gallery.representative('deep')
+            self.assertEqual(listing.call_count, WALK_BUDGET + 2)
+            self.assertEqual(result, deep + '/1.jpg')
 
     def test_hidden_symlinks_empty_and_nonimages(self):
         self.image('visible/1.jpg')

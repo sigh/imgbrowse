@@ -5,7 +5,14 @@ from collections import OrderedDict
 from concurrent.futures import Future, TimeoutError
 from time import monotonic
 
-from .work import Cancelled, cancellation, check_cancelled, current_priority, request_work
+from .work import (
+    Cancelled,
+    Invalidated,
+    cancellation,
+    check_cancelled,
+    current_priority,
+    request_work,
+)
 
 
 class SharedCache:
@@ -20,9 +27,20 @@ class SharedCache:
         self.lock = threading.Lock()
         self.hits = self.loads = 0
 
-    def get(self, key, load, weight=lambda value: 1):
+    def peek(self, key):
+        """Return a completed, unexpired value without starting or waiting for work."""
+        with self.lock:
+            entry = self.entries.get(key)
+            if entry and entry[0] > monotonic() and not isinstance(entry[1], Exception):
+                return entry[1]
+        return None
+
+    def get(self, key, load, weight=lambda value: 1, *, generation=None, valid=None):
+        """Share a load; optional epoch checks run under the lock and must not block."""
         check_cancelled()
         with self.lock:
+            if (generation is not None and generation != self.generation) or (valid is not None and not valid()):
+                raise Invalidated('Refreshed during request')
             entry = self.entries.get(key)
             if entry and entry[0] > monotonic():
                 self.entries.move_to_end(key)
@@ -51,7 +69,7 @@ class SharedCache:
                     continue
                 except Cancelled:
                     # The producer left before starting its work; a live consumer retries.
-                    return self.get(key, load, weight)
+                    return self.get(key, load, weight, generation=generation, valid=valid)
         try:
             def abandoned():
                 with self.lock:
@@ -67,13 +85,17 @@ class SharedCache:
             if isinstance(error, (OSError, ValueError)) and not isinstance(error, Cancelled):
                 self._store(token, type(error)(str(error)), 256, 2)
             # Remove before waking consumers, allowing retry after cancellation.
-            with self.lock:
-                self.pending.pop(token, None)
+            self._release(token, pending)
             future.set_exception(error)
             raise
         finally:
-            with self.lock:
-                self.pending.pop(token, None)
+            self._release(token, pending)
+
+    def _release(self, token, pending):
+        with self.lock:
+            # A consumer can already have started a replacement after cancellation.
+            if self.pending.get(token) is pending:
+                del self.pending[token]
 
     def _store(self, token, value, cost, ttl):
         generation, key = token

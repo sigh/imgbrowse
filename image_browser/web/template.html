@@ -39,11 +39,6 @@
             </div>
             <div class="viewer-location"><nav id="viewer-path" class="breadcrumbs" aria-label="Image folder path"></nav><div id="viewer-name"></div></div>
             <div class="viewer-tools" aria-label="Reading controls">
-                <div class="choice-group" role="group" aria-label="Viewing layout">
-                    <button id="view-single" title="Single item" aria-label="Single item" aria-pressed="true"></button>
-                    <button id="view-grid" title="Grid" aria-label="Grid" aria-pressed="false"></button>
-                </div>
-                <button id="viewer-thumbnails" aria-label="Thumbnails" aria-expanded="false" aria-controls="viewer-strip" title="Thumbnails (T)"></button>
                 <div class="size-control">
                     <button id="viewer-zoom" aria-expanded="false" aria-controls="size-menu">Fit ▾</button>
                     <div id="size-menu" role="group" aria-label="Image size" hidden>
@@ -57,6 +52,11 @@
                         </div>
                     </div>
                 </div>
+                <div class="choice-group viewer-layouts" role="group" aria-label="Viewing layout">
+                    <button id="view-grid" title="Grid" aria-label="Grid" aria-pressed="false"></button>
+                    <button id="view-strip" title="Image with thumbnails (T)" aria-label="Image with thumbnails" aria-pressed="true"></button>
+                    <button id="view-single" title="Image only (T)" aria-label="Image only" aria-pressed="false"></button>
+                </div>
             </div>
         </header>
         <div id="overview" hidden></div>
@@ -69,7 +69,6 @@
             <span id="viewer-status" role="status"></span>
             <button id="viewer-retry" hidden>Retry</button>
         </div>
-        <button id="strip-expand" title="Expand thumbnails to grid" aria-label="Expand thumbnails to grid"></button>
         <div id="viewer-strip" class="viewer-strip" aria-label="Collection thumbnails" tabindex="0" hidden></div>
     </section>
 </body>

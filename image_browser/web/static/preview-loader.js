@@ -1,12 +1,11 @@
-import {getPreview, getThumbnail, cachedThumbnail, getVideoInfo} from './api.js';
+import {getThumbnail, cachedThumbnail, getVideoInfo} from './api.js';
 import {element} from './dom.js';
 import {isVideo} from './media-kind.js';
 import {icon} from './icons.js';
 
 const PREVIEW_CONCURRENCY = 8;
-const OFFSCREEN_PRIORITY = 1e9;
 
-/** One job owns discovery and decoding for a card, preserving visual load order. */
+/** One visible card owns one thumbnail request, including any server-side discovery. */
 export class PreviewLoader {
     constructor(viewport, viewer) {
         this.viewport = viewport;
@@ -38,7 +37,7 @@ export class PreviewLoader {
         }), target, scope.signal, true).catch(() => {});
     }
 
-    image(target, path, scope) {
+    thumbnail(target, path, scope) {
         if (cachedThumbnail(path)) return this.attachImage(target, path, scope, scope.signal);
         if (isVideo(path)) {
             const placeholder = icon('video');
@@ -48,44 +47,50 @@ export class PreviewLoader {
         return this.enqueue(signal => this.attachImage(target, path, scope, signal), target, scope.signal, isVideo(path), () => Boolean(cachedThumbnail(path)));
     }
 
-    folder(target, path, scope) {
-        return this.enqueue(async signal => {
-            let result;
-            do {
-                result = await getPreview(path, signal);
-                path = result.continue;
-            } while (path !== undefined);
-            return result.image;
-        }, target, scope.signal).then(image => {
-            if (image) return this.image(target, image, scope);
-            target.textContent = 'Folder';
-        });
-    }
-
     async attachImage(target, path, scope, signal) {
-        let blob;
-        try { blob = await getThumbnail(path, signal); }
+        let result;
+        try { result = await getThumbnail(path, signal); }
         catch (error) {
-            if (!isVideo(path) || error.name === 'AbortError') throw error;
-            return; // Keep the playable placeholder when extraction is unavailable.
+            signal.throwIfAborted();
+            if (error.code !== 'video_preview_unavailable') throw error;
+            const placeholder = icon('video');
+            placeholder.classList.add('video-placeholder');
+            target.replaceChildren(placeholder);
+            return;
         }
+        signal.throwIfAborted();
+        if (!result.blob) return; // Preserve the folder placeholder for an empty branch.
         const image = element('img');
         image.alt = '';
-        image.src = scope.objectUrl(blob);
+        image.src = scope.objectUrl(result.blob);
         target.replaceChildren(image);
-        if (isVideo(path)) {
+        if (result.mediaKind === 'video') {
             const badge = icon('video');
             badge.classList.add('video-badge');
             target.classList.add('video-preview');
             target.append(badge);
-            const duration = element('span', 'video-duration', durationLabel(blob.duration));
+            const duration = element('span', 'video-duration', durationLabel(result.duration));
             target.append(duration);
         }
     }
 
     enqueue(work, target, signal, video = false, cached = null) {
         return new Promise((resolve, reject) => {
-            this.jobs.push({work, target, signal, video, cached, resolve, reject});
+            const finish = (settle, value) => {
+                signal.removeEventListener('abort', abort);
+                settle(value);
+            };
+            const job = {work, target, signal, video, cached,
+                resolve: value => finish(resolve, value), reject: error => finish(reject, error)};
+            const abort = () => {
+                const index = this.jobs.indexOf(job);
+                if (index >= 0) this.jobs.splice(index, 1);
+                job.controller?.abort();
+                job.reject(new DOMException('Aborted', 'AbortError'));
+            };
+            signal.addEventListener('abort', abort, {once: true});
+            if (signal.aborted) { abort(); return; }
+            this.jobs.push(job);
             this.schedule();
         });
     }
@@ -101,22 +106,22 @@ export class PreviewLoader {
     }
 
     priority(target) {
-        if (!target.isConnected) return Infinity;
+        if (!target.isConnected || target.getClientRects?.().length === 0) return Infinity;
         const rect = target.getBoundingClientRect();
-        if (this.viewer.contains(target) && !this.viewport.contains(target)) {
-            if (!this.viewerOpen) return Infinity;
-            return Math.abs((rect.left + rect.right) / 2 - this.viewer.clientWidth / 2);
-        }
-        if (this.viewerOpen && !this.viewer.contains(this.viewport)) return Infinity;
-        const bounds = this.viewport.getBoundingClientRect();
-        const visible = rect.bottom > bounds.top && rect.top < bounds.bottom;
-        const distance = visible
-            ? Math.max(0, rect.top - bounds.top)
-            : Math.abs(rect.top - bounds.top);
-        return (visible ? 0 : OFFSCREEN_PRIORITY) + distance * 1000 + rect.left;
+        const inStrip = this.viewer.contains(target) && !this.viewport.contains(target);
+        if (inStrip && !this.viewerOpen) return Infinity;
+        if (!inStrip && this.viewerOpen && !this.viewer.contains(this.viewport)) return Infinity;
+        const bounds = (inStrip ? target.closest('.viewer-strip') : this.viewport).getBoundingClientRect();
+        if (rect.bottom <= bounds.top || rect.top >= bounds.bottom
+            || rect.right <= bounds.left || rect.left >= bounds.right) return Infinity;
+        return inStrip ? Math.abs((rect.left + rect.right - bounds.left - bounds.right) / 2)
+            : Math.max(0, rect.top - bounds.top) * 1000 + rect.left;
     }
 
     pump() {
+        for (const job of this.active) {
+            if (!Number.isFinite(this.priority(job.target))) job.controller.abort();
+        }
         const remaining = [];
         for (const job of this.jobs) {
             if (job.signal.aborted) job.reject(new DOMException('Aborted', 'AbortError'));
@@ -132,8 +137,6 @@ export class PreviewLoader {
             if (job.video) this.runningVideos++;
             this.running++;
             job.controller = new AbortController();
-            const abort = () => job.controller.abort();
-            job.signal.addEventListener('abort', abort, {once: true});
             this.active.add(job);
             Promise.resolve().then(() => {
                 job.signal.throwIfAborted();
@@ -142,7 +145,6 @@ export class PreviewLoader {
                 if (error.name === 'AbortError' && !job.signal.aborted) this.jobs.push(job);
                 else job.reject(error);
             }).finally(() => {
-                job.signal.removeEventListener('abort', abort);
                 this.active.delete(job);
                 this.running--;
                 if (job.video) this.runningVideos--;

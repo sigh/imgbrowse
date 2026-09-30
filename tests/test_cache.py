@@ -3,17 +3,48 @@
 import tempfile
 import threading
 import unittest
-from concurrent.futures import ThreadPoolExecutor
+import zipfile
+from concurrent.futures import Future, ThreadPoolExecutor
 from pathlib import Path
 from unittest.mock import patch
 
+from image_browser.archives import ArchiveCache
 from image_browser.cache import SharedCache
 from image_browser.catalog import Gallery
-from image_browser.archives import ArchiveCache
-import zipfile
+from image_browser.work import Cancelled
 
 
 class CacheTests(unittest.TestCase):
+    def test_cancelled_load_does_not_unregister_its_replacement(self):
+        cache = SharedCache(100)
+        entered, release = threading.Event(), threading.Event()
+        first = Future()
+        replacements = []
+
+        def replacement():
+            entered.set()
+            self.assertTrue(release.wait(2))
+            return b'new'
+
+        def cancelled():
+            raise Cancelled()
+
+        with ThreadPoolExecutor(2) as pool:
+            def retry(_):
+                replacements.append(pool.submit(cache.get, 'key', replacement))
+                self.assertTrue(entered.wait(2))
+            first.add_done_callback(retry)
+            with patch('image_browser.cache.Future', side_effect=[first, Future()]):
+                old = pool.submit(cache.get, 'key', cancelled)
+                try:
+                    with self.assertRaises(Cancelled):
+                        old.result(timeout=2)
+                    with cache.lock:
+                        self.assertEqual(len(cache.pending), 1, 'Replacement must remain available to shared consumers')
+                finally:
+                    release.set()
+                self.assertEqual(replacements[0].result(timeout=2), b'new')
+
     def test_parallel_requests_share_one_load(self):
         cache = SharedCache(100)
         entered, release = threading.Event(), threading.Event()
@@ -61,7 +92,7 @@ class CacheTests(unittest.TestCase):
                 for _ in range(10):
                     gallery.walk(anchor='2.jpg', limit=1)
                     gallery.walk(anchor='2.jpg', limit=1, reverse=True)
-                    gallery.preview('')
+                    gallery.representative('')
                 self.assertEqual(scan.call_count, 1)
                 (Path(root) / '4.jpg').write_bytes(b'fixture')
                 gallery.invalidate('')
@@ -72,17 +103,15 @@ class CacheTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as root:
             file = Path(root) / 'book.cbz'
             with zipfile.ZipFile(file, 'w') as archive:
-                for i in range(12): archive.writestr(f'{i}.jpg', b'fixture')
-            cache = ArchiveCache()
-            original = zipfile.ZipFile._RealGetContents
-            calls = []
-            def read_directory(reader):
-                calls.append(1); return original(reader)
-            with patch.object(zipfile.ZipFile, '_RealGetContents', read_directory):
                 for i in range(12):
-                    reader = cache.get(file)
+                    archive.writestr(f'{i}.jpg', b'fixture')
+            cache = ArchiveCache()
+            with patch('image_browser.archives.zipfile.ZipFile', wraps=zipfile.ZipFile) as open_archive:
+                reader = cache.get(file)
+                for i in range(12):
+                    self.assertIs(cache.get(file), reader)
                     self.assertEqual(reader.read(reader.image(f'{i}.jpg')), b'fixture')
-                self.assertEqual(len(calls), 1)
+                self.assertEqual(open_archive.call_count, 1)
                 cache.invalidate()
                 self.assertEqual(reader.read(reader.image('0.jpg')), b'fixture')
 

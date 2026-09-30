@@ -61,7 +61,6 @@ await wait("testApp.viewer.prefetchPath==='Large/page1.jpg'");
 await wait("import('/static/media-cache.js').then(module=>module.originals.values.has('Large/page1.jpg'))");
 await evaluate("testApp.viewer.requestMove(false)");
 await wait("document.getElementById('viewer-image').dataset.path==='Large/page1.jpg'");
-await evaluate("if(!testApp.viewer.thumbnailsVisible)testApp.viewer.toggleThumbnails()");
 await evaluate(`(async()=>{
  const strip=testApp.viewer.filmstrip;
  for(let i=0;i<78;i++) {
@@ -78,11 +77,11 @@ assert.ok(media.bytes <= 96*1024*1024 && media.entries <=4);
 // Return from an image outside the retained grid window without scanning from the start.
 await evaluate("testApp.openViewer('Large/page5.jpg', 'Large')");
 await wait("document.getElementById('viewer-image').dataset.path === 'Large/page5.jpg'");
-await evaluate("testApp.navigate({overview:true,recursive:true})");
+await evaluate("testApp.changeLayout('grid')");
 await wait("document.activeElement.closest('.card')?.dataset.path === 'Large/page5.jpg'");
 assert.equal(await evaluate('testApp.state.image'), 'Large/page5.jpg');
 assert.ok(await evaluate('testApp.grid.directory.images.length <= 2000'));
-await evaluate("document.getElementById('view-single').click()");
+await evaluate("document.getElementById('view-strip').click()");
 await wait("document.getElementById('viewer-image').dataset.path === 'Large/page5.jpg' && !document.getElementById('viewer-image').hidden");
 await evaluate('testApp.closeViewer()');
 await wait("document.activeElement.closest('.card')?.dataset.path === 'Large/page5.jpg'");

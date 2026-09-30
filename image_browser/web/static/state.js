@@ -28,16 +28,18 @@ export function readState(search = location.search) {
     const query = new URLSearchParams(search);
     const folder = query.get('folder') ?? '';
     const image = query.get('image');
+    const layout = ['grid', 'single'].includes(query.get('view')) ? query.get('view') : 'strip';
     return {
         folder,
         size: imageSize(query.get('size')),
-        overview: query.get('view') === 'grid',
-        recursive: query.get('view') === 'grid',
+        layout,
+        overview: layout === 'grid',
+        recursive: layout === 'grid',
         compact: query.get('compact') === '1',
         filter: query.get('filter') || '',
         image: image === null ? null : resolveImage(folder, image),
         collection: query.get('collection') ?? folder,
-        viewing: image !== null || query.get('viewer') === '1' || query.get('view') === 'grid',
+        viewing: image !== null || query.get('viewer') === '1' || layout !== 'strip',
     };
 }
 
@@ -47,11 +49,11 @@ export function stateUrl(next) {
     if (next.compact) query.set('compact', '1');
     if (next.filter) query.set('filter', next.filter);
     if (next.viewing) {
-        if (next.overview) query.set('view', 'grid');
+        if (next.layout !== 'strip') query.set('view', next.layout);
         if (imageSize(next.size) !== 'page') query.set('size', imageSize(next.size));
         if (next.collection !== next.folder) query.set('collection', next.collection);
         if (next.image != null) query.set('image', relativePath(next.folder, next.image));
-        else if (!next.overview) query.set('viewer', '1');
+        else if (next.layout === 'strip') query.set('viewer', '1');
     }
     return query.size ? '/?' + query : '/';
 }

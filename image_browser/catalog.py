@@ -1,21 +1,44 @@
 """Safe filesystem access and incremental, naturally ordered traversal."""
 
+from __future__ import annotations
+
 import os
 import re
 import stat
 from bisect import bisect_left, bisect_right
-from time import monotonic
+from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
+from time import monotonic
 
+from .archives import ARCHIVE_EXTENSIONS, ArchiveCache, ArchiveIndex
 from .cache import SharedCache
-from .work import WorkGate, check_cancelled
-
-from .archives import ARCHIVE_EXTENSIONS, ArchiveCache
 from .sources import MEDIA_EXTENSIONS, MediaSource
+from .work import WorkGate, check_cancelled
 
 WALK_BUDGET = 24
 PAGE_SIZE = 60
 MAX_CURSOR_DEPTH = 512
+
+
+@dataclass(frozen=True)
+class ResolvedEntry:
+    """Validated filesystem location, optionally within an open archive index."""
+
+    file: Path
+    stat: os.stat_result
+    archive: ArchiveIndex | None = None
+    inner: str = ''
+
+    @property
+    def is_container(self):
+        return self.inner in self.archive.folders if self.archive else stat.S_ISDIR(self.stat.st_mode)
+
+    def media_source(self):
+        if self.archive is not None:
+            return MediaSource(self.file, self.stat, self.archive.image(self.inner))
+        if self.file.suffix.lower() not in MEDIA_EXTENSIONS or not stat.S_ISREG(self.stat.st_mode):
+            raise ValueError('Unsupported media file')
+        return MediaSource(self.file, self.stat)
 
 
 def natural_key(name):
@@ -66,12 +89,19 @@ class Gallery:
 
     def invalidate(self, relative=''):
         """Refresh discovered state only; never enumerate descendants to invalidate."""
-        self.validate(relative)
+        parts = self.validate(relative).parts
+        # All virtual paths inside an archive depend on the same physical file.
+        # Conservatively include suffix-like real directories too, without I/O.
+        for index, part in enumerate(parts):
+            if PurePosixPath(part).suffix.lower() in ARCHIVE_EXTENSIONS:
+                relative = '/'.join(parts[:index + 1])
+                break
         self.generation += 1
         within = lambda path: not relative or path == relative or path.startswith(relative + '/')
-        self.listings.invalidate(within)
+        related = lambda path: within(path) or not path or relative.startswith(path + '/')
+        self.listings.invalidate(related)
         self.sources.invalidate(within)
-        self.previews.invalidate(lambda path: within(path) or not path or relative.startswith(path + '/'))
+        self.previews.invalidate(related)
         self.archives.invalidate()
 
     @staticmethod
@@ -87,47 +117,61 @@ class Gallery:
         source = self.source(relative)
         return source.file, source.member
 
-    def source(self, relative):
+    def source(self, relative, *, entry=None, valid=None):
         self.validate(relative)
-        return self.sources.get(relative, lambda: self._source(relative), lambda _: 512)
+        return self.sources.get(relative, lambda: entry.media_source() if entry else self._source(relative),
+                                lambda _: 512, valid=valid)
+
+    def _locate(self, relative):
+        """Classify a path once, including archive boundaries and suffix-like folders."""
+        parts = self.validate(relative).parts
+        file = self.root
+        for index, part in enumerate(parts):
+            file = file / part
+            entry = self._physical_entry(file)
+            if entry.archive is not None:
+                return ResolvedEntry(file, entry.stat, entry.archive, '/'.join(parts[index + 1:]))
+            if index == len(parts) - 1:
+                return entry
+        return ResolvedEntry(file, file.stat())
+
+    def _physical_entry(self, file):
+        file_stat = file.lstat()
+        if stat.S_ISLNK(file_stat.st_mode):
+            raise PermissionError('Symbolic links are not included')
+        archive = self.archives.get(file, file_stat) if (
+            stat.S_ISREG(file_stat.st_mode) and file.suffix.lower() in ARCHIVE_EXTENSIONS) else None
+        return ResolvedEntry(file, file_stat, archive)
 
     def _source(self, relative):
         with self.directory_work:
-            parts = self.archive_parts(relative)
-            if parts:
-                file, inner = parts
-                file_stat = file.stat()
-                archive = self.archives.get(file, file_stat)
-                member = archive.image(inner)
-                return MediaSource(file, file_stat, member)
-            file = self.resolve(relative)
-            file_stat = file.stat()
-            if file.suffix.lower() not in MEDIA_EXTENSIONS or not stat.S_ISREG(file_stat.st_mode):
-                raise FileNotFoundError('Unsupported media file')
-            return MediaSource(file, file_stat)
+            return self._locate(relative).media_source()
 
-    def listing(self, relative: str) -> dict:
-        return self.snapshot(relative)['listing']
+    def listing(self, relative: str, *, entry=None, valid=None) -> dict:
+        return self.snapshot(relative, entry=entry, valid=valid)['listing']
 
-    def snapshot(self, relative):
+    def snapshot(self, relative, *, entry=None, valid=None):
         self.validate(relative)
         def load():
-            listing = self._listing(relative)
+            listing = self._listing(relative, entry=entry)
             keys = {kind: [natural_key(name) for name in names] for kind, names in listing.items()}
             return {'listing': listing, 'keys': keys}
         return self.listings.get(relative, load,
-                                 lambda item: sum(256 + len(name) * 4 for names in item['listing'].values() for name in names) + 256)
+                                 lambda item: sum(256 + len(name) * 4 for names in item['listing'].values() for name in names) + 256,
+                                 valid=valid)
 
-    def _listing(self, relative: str) -> dict:
+    def _listing(self, relative: str, *, entry=None) -> dict:
         """Read one directory; never inspect its descendants."""
-        archive = self.archive_parts(relative)
-        if archive:
-            file, inner = archive
-            with self.directory_work:
-                return self.archives.get(file).listing(inner, natural_key)
-        directory = self.resolve(relative)
+        with self.directory_work:
+            entry = entry or self._locate(relative)
+            if entry.archive is not None:
+                return entry.archive.listing(entry.inner, natural_key)
+            return self._scan_directory(entry.file)
+
+    @staticmethod
+    def _scan_directory(directory):
         folders, images = [], []
-        with self.directory_work, os.scandir(directory) as entries:
+        with os.scandir(directory) as entries:
             for index, entry in enumerate(entries):
                 if index % 128 == 0:
                     check_cancelled()
@@ -148,25 +192,53 @@ class Gallery:
             'images': sorted(images, key=natural_key),
         }
 
-    def preview(self, relative):
+    def representative(self, relative, *, entry=None, valid=None):
+        """Return the first branch's media path, never traversal instructions."""
         self.validate(relative)
-        return self.previews.get(relative, lambda: self._preview(relative),
-                                 lambda value: 256 + len(str(value)) * 2)
+        generation = self.generation
+        valid = valid or (lambda: generation == self.generation)
+        return self.previews.get(relative, lambda: self._representative(relative, entry, valid),
+                                 lambda value: 256 + len(str(value)) * 2, valid=valid)
 
-    def _preview(self, relative):
-        """Follow one branch only; return a continuation after bounded work."""
-        started = monotonic()
-        for step in range(WALK_BUDGET):
+    def _representative(self, relative, entry, valid):
+        if entry is None:
+            with self.directory_work:
+                entry = self._locate(relative)
+        for _ in range(MAX_CURSOR_DEPTH):
             check_cancelled()
-            if step and monotonic() - started > .15:
-                break
-            listing = self.listing(relative)
+            listing = self.listing(relative, entry=entry, valid=valid)
+            check_cancelled()
             if listing['images']:
-                return {'image': str(PurePosixPath(relative) / listing['images'][0])}
+                return str(PurePosixPath(relative) / listing['images'][0])
             if not listing['folders']:
-                return {'image': None}
-            relative = str(PurePosixPath(relative) / listing['folders'][0])
-        return {'image': None, 'continue': relative}
+                return None
+            child = listing['folders'][0]
+            relative = str(PurePosixPath(relative) / child)
+            with self.directory_work:
+                entry = self._child_entry(entry, child)
+        raise ValueError('Folder nesting exceeds the preview depth limit')
+
+    def _child_entry(self, entry, name):
+        """Continue a validated branch without restatting every ancestor."""
+        if entry.archive is not None:
+            return ResolvedEntry(entry.file, entry.stat, entry.archive, str(PurePosixPath(entry.inner) / name))
+        return self._physical_entry(entry.file / name)
+
+    def thumbnail_source(self, relative):
+        """Resolve media or a container cover to a single versioned source."""
+        generation = self.generation
+        valid = lambda: generation == self.generation
+        self.validate(relative)
+        # Reuse the same short-lived source validation as original-media requests.
+        cached = self.sources.peek(relative)
+        if cached is not None:
+            return self.source(relative, valid=valid)
+        with self.directory_work:
+            entry = self._locate(relative)
+        if not entry.is_container:
+            return self.source(relative, entry=entry, valid=valid)
+        selected = self.representative(relative, entry=entry, valid=valid)
+        return self.source(selected, valid=valid) if selected is not None else None
 
     def walk(self, root='', anchor=None, reverse=False, cursor=None, limit=PAGE_SIZE):
         """Page through a depth-first sequence; each request visits bounded folders.

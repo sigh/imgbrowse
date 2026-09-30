@@ -16,7 +16,7 @@ test('strip paths use the browsing folder, including an empty current-folder lab
 
 test('image URLs retain independent grid and viewer contexts', () => {
     const state = {
-        folder: 'Album & photos', overview: false, recursive: false, compact: true, size: 'width', filter: 'chapter',
+        folder: 'Album & photos', layout: 'strip', overview: false, recursive: false, compact: true, size: 'width', filter: 'chapter',
         viewing: true, collection: 'Album & photos/Chapter 2',
         image: 'Album & photos/Chapter 2/page #1%.jpg',
     };
@@ -55,22 +55,28 @@ test('disposing a task scope aborts requests and releases resources only once', 
 
 function scheduler() {
     return new PreviewLoader(
-        {getBoundingClientRect: () => ({top: 0, bottom: 600})},
+        {getBoundingClientRect: () => ({top: 0, bottom: 600, left: 0, right: 800})},
         {contains: () => false, clientWidth: 800},
     );
 }
 
 function target(top) {
-    return {isConnected: true, getBoundingClientRect: () => ({top, bottom: top + 100, left: 0})};
+    return {isConnected: true, getBoundingClientRect: () => ({top, bottom: top + 100, left: 0, right: 100})};
 }
 
-test('visible previews start top to bottom before offscreen work', async () => {
+test('visible previews load top to bottom; offscreen work waits for visibility', async () => {
     const loader = scheduler();
     const scope = new TaskScope();
     const order = [];
-    await Promise.all([1000, 200, 10].map(top => loader.enqueue(
+    const offscreen = target(1000);
+    const pending = loader.enqueue(() => order.push(1000), offscreen, scope.signal);
+    await Promise.all([200, 10].map(top => loader.enqueue(
         () => order.push(top), target(top), scope.signal,
     )));
+    assert.deepEqual(order, [10, 200]);
+    offscreen.getBoundingClientRect = target(300).getBoundingClientRect;
+    loader.schedule();
+    await pending;
     assert.deepEqual(order, [10, 200, 1000]);
 });
 
@@ -82,6 +88,41 @@ test('queued previews are discarded when their row is removed', async () => {
     scope.dispose();
     await assert.rejects(job, {name: 'AbortError'});
     assert.equal(started, false);
+});
+
+test('cancelling idle offscreen work releases its promise and queue entry immediately', async () => {
+    const loader = scheduler();
+    const scope = new TaskScope();
+    const job = loader.enqueue(() => assert.fail('Offscreen work started'), target(1000), scope.signal);
+    await new Promise(resolve => setTimeout(resolve, 0));
+    scope.dispose();
+    await assert.rejects(job, {name: 'AbortError'});
+    assert.equal(loader.jobs.length, 0);
+});
+
+test('leaving the viewport aborts active work and reentry resumes without a retry loop', async () => {
+    const loader = scheduler();
+    const scope = new TaskScope();
+    const card = target(10);
+    let calls = 0;
+    let started;
+    const running = new Promise(resolve => { started = resolve; });
+    const job = loader.enqueue(signal => {
+        calls++;
+        if (calls > 1) return 'loaded';
+        started();
+        return new Promise((resolve, reject) => signal.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')), {once: true}));
+    }, card, scope.signal);
+    await running;
+    card.getBoundingClientRect = target(1000).getBoundingClientRect;
+    loader.schedule();
+    await new Promise(resolve => setTimeout(resolve, 10));
+    assert.equal(calls, 1);
+    assert.equal(loader.running, 0);
+    card.getBoundingClientRect = target(20).getBoundingClientRect;
+    loader.schedule();
+    assert.equal(await job, 'loaded');
+    assert.equal(calls, 2);
 });
 
 
@@ -168,4 +209,14 @@ test('view grid has a compact URL and browse never recurses', () => {
     assert.equal(state.recursive, true);
     assert.equal(stateUrl(state), '/?folder=Album&view=grid');
     assert.equal(readState('folder=Album').recursive, false);
+});
+
+test('viewer layouts have stable, reloadable URLs', () => {
+    for (const layout of ['grid', 'strip', 'single']) {
+        const state = {...readState('folder=Album&image=page.jpg'), layout, overview: layout === 'grid', recursive: layout === 'grid'};
+        const url = stateUrl(state);
+        assert.equal(readState(new URL(url, 'http://localhost').search).layout, layout);
+        assert.equal(new URL(url, 'http://localhost').searchParams.get('view'), layout === 'strip' ? null : layout);
+    }
+    assert.equal(stateUrl(readState('folder=Album&view=single')), '/?folder=Album&view=single');
 });

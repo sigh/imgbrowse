@@ -183,13 +183,13 @@ export class FolderGrid {
             const name = this.folderLink(item.path, filename(item.path));
             name.prepend(icon('folder'));
             caption.append(name, read);
-            preview = this.previews.folder(picture, item.path, scope);
+            preview = this.previews.thumbnail(picture, item.path, scope);
         } else {
             picture.addEventListener('click', event => this.openViewer(item.path, this.state.folder, event.currentTarget));
             const name = element('button', 'image-name', filename(item.path));
             name.addEventListener('click', event => this.openViewer(item.path, this.state.folder, event.currentTarget));
             caption.append(name);
-            preview = this.previews.image(picture, item.path, scope);
+            preview = this.previews.thumbnail(picture, item.path, scope);
         }
         preview.catch(error => {
             if (error.name !== 'AbortError') picture.textContent = 'Preview unavailable';

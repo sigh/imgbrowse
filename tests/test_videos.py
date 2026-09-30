@@ -43,7 +43,7 @@ class VideoTests(unittest.TestCase):
         self.assertEqual(gallery.source('2.MP4').kind, 'video')
         with self.assertRaises(FileNotFoundError):
             gallery.source('book.cbz/video.mp4')
-        self.assertEqual(self.request(path='/thumbnail?path=2.MP4')[0], 400)
+        self.assertEqual(self.request(path='/thumbnail?path=2.MP4')[0], 422)
 
     def test_ranges_and_full_responses(self):
         status, headers, data = self.request()

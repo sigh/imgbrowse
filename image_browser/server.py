@@ -12,10 +12,11 @@ from urllib.parse import parse_qs, urlsplit
 from PIL import Image
 
 from .catalog import PAGE_SIZE, Gallery
-from .work import Cancelled, WorkGate, check_cancelled, request_work
-from .thumbnails import ThumbnailCache
-from .sources import VIDEO_TYPES
+from .previews import PreviewService
 from .ranges import UnsatisfiableRange, byte_range
+from .sources import VIDEO_TYPES
+from .thumbnails import ThumbnailCache
+from .work import Busy, Cancelled, Invalidated, WorkGate, check_cancelled, request_work
 
 APP_DIRECTORY = files('image_browser').joinpath('web')
 MAX_REQUEST_BYTES = 128 * 1024
@@ -40,6 +41,7 @@ class GalleryHandler(BaseHTTPRequestHandler):
         self.connection.settimeout(30)
 
     def __init__(self, request, client_address, server: 'GalleryServer'):
+        self.gallery_server = server
         self.gallery = server.gallery
         self.thumbnails = server.thumbnails
         super().__init__(request, client_address, server)
@@ -48,9 +50,11 @@ class GalleryHandler(BaseHTTPRequestHandler):
         self.response_started = True
         self.send_response(status)
         self.send_header('Content-Type', content_type)
-        self.send_header('Content-Length', str(length))
+        if status not in (204, 304):
+            self.send_header('Content-Length', str(length))
         media = urlsplit(self.path).path in ('/image', '/thumbnail')
-        self.send_header('Cache-Control', 'private, max-age=300' if media else 'no-cache')
+        self.send_header('Cache-Control', 'no-store' if status >= 400 else
+                         'private, max-age=300' if media and status != 204 else 'no-cache')
         if etag is not None:
             self.send_header('ETag', etag)
         for name, value in (extra or {}).items():
@@ -78,7 +82,7 @@ class GalleryHandler(BaseHTTPRequestHandler):
         self.response_started = False
         try:
             path = urlsplit(self.path).path
-            priority = 0 if path == '/image' else 2 if path in ('/thumbnail', '/api/preview', '/api/video') else 1
+            priority = 0 if path == '/image' else 2 if path in ('/thumbnail', '/api/video') else 1
             if parse_qs(urlsplit(self.path).query).get('prefetch') == ['1']:
                 priority = 3
             with request_work(priority, self.disconnected):
@@ -132,28 +136,63 @@ class GalleryHandler(BaseHTTPRequestHandler):
             self.send_json(gallery.location(path))
         elif url.path == '/api/folder':
             self.send_json({'path': path, 'root_name': gallery.root.name, **gallery.listing(path)})
-        elif url.path == '/api/preview':
-            self.send_json(gallery.preview(path))
-        elif url.path in ('/image', '/thumbnail'):
-            self._serve_image(path, thumbnail=url.path == '/thumbnail')
+        elif url.path == '/thumbnail':
+            self._serve_thumbnail(path)
+        elif url.path == '/image':
+            self._serve_image(path)
         else:
             self.send_json({'error': 'Not found'}, 404)
 
-    def _serve_image(self, path, thumbnail=False):
+    def _serve_thumbnail(self, path):
+        service = self.gallery_server.previews
+        preview = None
+        try:
+            # Input errors are distinct from a valid source that cannot be decoded.
+            try:
+                self.gallery.validate(path)
+            except ValueError as error:
+                self.send_json({'error': str(error)}, 400)
+                return
+            preview = service.prepare(path)
+            if preview.source is None:
+                self.send_headers('image/jpeg', 0, 204)
+                return
+            metadata = service.metadata(preview)
+            headers = {'X-Media-Kind': metadata['media_kind']}
+            if metadata['duration'] is not None:
+                headers['X-Video-Duration'] = str(metadata['duration'])
+            candidates = [value.strip().removeprefix('W/') for value in
+                          self.headers.get('If-None-Match', '').split(',')]
+            if '*' in candidates or (preview.etag is not None and
+                                     preview.etag.removeprefix('W/') in candidates):
+                service.check(preview)
+                self.send_headers('image/jpeg', 0, 304, preview.etag, headers)
+                return
+            data = service.render(preview)
+            self.send_headers('image/jpeg', len(data), etag=preview.etag, extra=headers)
+            if self.command != 'HEAD':
+                self.wfile.write(data)
+        except (Cancelled, BrokenPipeError, ConnectionResetError):
+            raise
+        except (OSError, ValueError, RuntimeError, zipfile.BadZipFile, Image.DecompressionBombError) as error:
+            if self.response_started:
+                raise
+            status = (503 if isinstance(error, (Busy, Invalidated)) else
+                      403 if isinstance(error, PermissionError) else
+                      404 if isinstance(error, (FileNotFoundError, NotADirectoryError)) else
+                      422 if isinstance(error, (ValueError, zipfile.BadZipFile, Image.UnidentifiedImageError,
+                                               Image.DecompressionBombError)) else 500)
+            body = {'error': str(error)}
+            if preview and preview.source:
+                body['media_kind'] = preview.source.kind
+                if preview.source.kind == 'video' and isinstance(error, ValueError):
+                    body['code'] = 'video_preview_unavailable'
+            self.send_json(body, status)
+
+    def _serve_image(self, path):
         source = self.gallery.source(path)
         if source.kind == 'video':
-            if thumbnail:
-                data = self.thumbnails.get_video(source)
-                try:
-                    duration = self.thumbnails.video_info(source).get('duration')
-                except (ValueError, OSError):
-                    duration = None
-                extra = {'X-Video-Duration': str(duration)} if duration is not None else {}
-                self.send_headers('image/jpeg', len(data), etag=source.etag, extra=extra)
-                if self.command != 'HEAD':
-                    self.wfile.write(data)
-            else:
-                self._serve_video(path, source)
+            self._serve_video(path, source)
             return
         file, member, stat = source.file, source.member, source.stat
         etag = source.etag
@@ -164,34 +203,16 @@ class GalleryHandler(BaseHTTPRequestHandler):
             return
         content_type = mimetypes.guess_type(path)[0] or 'application/octet-stream'
         if member is not None:
-            def read_member():
-                try:
-                    with self.server.archive_work:
-                        archive = self.gallery.archives.get(file, stat)
-                        data = archive.read(member)
-                except (zipfile.BadZipFile, RuntimeError, KeyError) as error:
-                    raise ValueError('Unable to read archive image') from error
-                if len(data) != member.file_size:
-                    raise ValueError('Archive image has an invalid size')
-                return data
-
-            if thumbnail:
-                data = self.thumbnails.get_archive(source.cache_key, read_member, source.size)
-                self.send_content(data, 'image/jpeg', etag=etag)
-            elif self.command == 'HEAD':
+            if self.command == 'HEAD':
                 self.send_headers(content_type, member.file_size, etag=etag)
             else:
-                with self.server.archive_work:
+                with self.gallery_server.archive_work:
                     archive = self.gallery.archives.get(file, stat)
                     with archive.open(member) as stream:
                         self.send_headers(content_type, source.size, etag=etag)
                         self.copy_image(stream)
             return
-        if thumbnail:
-            data = self.thumbnails.get(file, stat)
-            self.send_content(data, 'image/jpeg', etag=etag)
-            return
-        with self.server.image_work, self.gallery.resolve(path).open('rb') as stream:
+        with self.gallery_server.image_work, self.gallery.resolve(path).open('rb') as stream:
             self.send_headers(content_type, source.size, etag=etag)
             if self.command != 'HEAD':
                 self.copy_image(stream)
@@ -216,7 +237,7 @@ class GalleryHandler(BaseHTTPRequestHandler):
         length = end - start + 1
         if selected:
             headers['Content-Range'] = f'bytes {start}-{end}/{source.size}'
-        with self.server.video_work, self.gallery.resolve(path).open('rb') as stream:
+        with self.gallery_server.video_work, self.gallery.resolve(path).open('rb') as stream:
             stream.seek(start)
             self.send_headers(content_type, length, 206 if selected else 200, source.etag, headers)
             if self.command != 'HEAD':
@@ -271,6 +292,7 @@ class GalleryServer(ThreadingHTTPServer):
         self.gallery = Gallery(root)
         self.thumbnails = ThumbnailCache()
         self.archive_work = WorkGate(2, 1)
+        self.previews = PreviewService(self.gallery, self.thumbnails, self.archive_work)
         self.image_work = WorkGate(4, 1)
         self.video_work = WorkGate(2, 1)
         super().__init__(address, GalleryHandler)

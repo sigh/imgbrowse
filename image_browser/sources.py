@@ -1,9 +1,11 @@
 """Media identity distinguishes loose files from images inside archives."""
 
+from __future__ import annotations
+
+import zipfile
 from dataclasses import dataclass
 from os import stat_result
 from pathlib import Path
-from typing import Optional
 from zipfile import ZipInfo
 
 IMAGE_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp'}
@@ -20,7 +22,7 @@ class MediaSource:
 
     file: Path
     stat: stat_result
-    member: Optional[ZipInfo] = None
+    member: ZipInfo | None = None
 
     @property
     def kind(self):
@@ -43,3 +45,14 @@ class MediaSource:
         if self.member is not None:
             version += f'-{self.member.CRC}-{self.member.file_size}'
         return f'"{version}"'
+
+    def read_member(self, archives, work):
+        """Read a bounded archive member through the shared archive reader."""
+        try:
+            with work:
+                data = archives.get(self.file, self.stat).read(self.member)
+        except (zipfile.BadZipFile, RuntimeError, KeyError) as error:
+            raise ValueError('Unable to read archive image') from error
+        if len(data) != self.size:
+            raise ValueError('Archive image has an invalid size')
+        return data

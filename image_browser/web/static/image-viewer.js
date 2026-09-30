@@ -6,7 +6,6 @@ import {filename, parentPath, IMAGE_SIZES} from './state.js';
 import {ViewerViewport} from './viewer-viewport.js';
 import {WheelGesture} from './wheel-gesture.js';
 
-import {icon} from './icons.js';
 import {ThumbnailStrip} from './thumbnail-strip.js';
 import {VideoPlayer} from './video-player.js';
 import {isVideo} from './media-kind.js';
@@ -17,8 +16,8 @@ const ZOOM_STEPS = IMAGE_SIZES.slice(2).map(Number);
 
 /** Owns image loading and collection navigation; geometry and gestures are separate. */
 export class ImageViewer {
-    constructor(previews, {selectImage, changeSize, close, folderLink, refresh}) {
-        Object.assign(this, {previews, selectImage, changeSize, close, folderLink, refresh});
+    constructor(previews, {selectImage, changeSize, changeLayout, close, folderLink, refresh}) {
+        Object.assign(this, {previews, selectImage, changeSize, changeLayout, close, folderLink, refresh});
         this.container = byId('viewer');
         this.canvas = byId('viewer-canvas');
         this.viewport = new ViewerViewport(this.canvas);
@@ -33,7 +32,6 @@ export class ImageViewer {
         this.key = null;
         this.boundaryDirection = null;
         this.nearbyImages = [];
-        this.thumbnailsVisible = sessionStorage.getItem('thumbnails') !== 'false';
         this.filmstrip = new ThumbnailStrip(this.strip, previews, selectImage);
         this.lastWheelTurn = -Infinity;
         this.loadingImage = false;
@@ -42,7 +40,6 @@ export class ImageViewer {
     }
 
     bindControls() {
-        byId('viewer-thumbnails').append(icon('thumbnails'));
         byId('viewer-zoom').addEventListener('click', () => this.setSizeMenu(byId('size-menu').hidden));
         for (const button of document.querySelectorAll('[data-size]')) {
             button.addEventListener('click', () => { this.changeSize(button.dataset.size); this.setSizeMenu(false); });
@@ -52,7 +49,6 @@ export class ImageViewer {
         });
         byId('viewer-zoom-in').addEventListener('click', () => this.zoom(1));
         byId('viewer-zoom-out').addEventListener('click', () => this.zoom(-1));
-        byId('viewer-thumbnails').addEventListener('click', () => this.toggleThumbnails());
         byId('viewer-retry').addEventListener('click', () => this.refresh());
         this.closeButton.addEventListener('click', this.close);
         this.previousButton.addEventListener('click', () => this.requestMove(true));
@@ -76,15 +72,6 @@ export class ImageViewer {
         if (!open && wasOpen && restoreFocus) byId('viewer-zoom').focus({preventScroll: true});
     }
 
-    toggleThumbnails() {
-        const point = this.viewport.point();
-        this.thumbnailsVisible = !this.thumbnailsVisible;
-        sessionStorage.setItem('thumbnails', String(this.thumbnailsVisible));
-        this.renderStrip();
-        byId('strip-expand').hidden = !this.thumbnailsVisible;
-        this.viewport.resize(point);
-    }
-
     setRootName(name) {
         this.rootName = name;
         if (this.state?.viewing) this.updateCollectionLabel();
@@ -97,7 +84,11 @@ export class ImageViewer {
     }
 
     updateControls() {
-        document.querySelector('.size-control').hidden = this.state.overview || isVideo(this.state.image);
+        const unavailable = this.state.overview || isVideo(this.state.image);
+        const sizeControl = document.querySelector('.size-control');
+        sizeControl.classList.toggle('unavailable', unavailable);
+        sizeControl.inert = unavailable;
+        if (unavailable) this.setSizeMenu(false, false);
         const hasImage = Boolean(this.state.image);
         this.previousButton.disabled = !hasImage || this.singleImage || Boolean(this.moveScope);
         this.nextButton.disabled = this.previousButton.disabled;
@@ -135,12 +126,18 @@ export class ImageViewer {
 
     show(state, force = false, entry = 'top') {
         const folderChanged = this.state?.folder !== state.folder;
+        const layoutChanged = this.state?.layout !== state.layout;
+        const anchor = layoutChanged && this.viewport.ready ? this.viewport.point() : null;
         this.state = state;
         if (this.viewport.size !== state.size) this.viewport.setSize(state.size);
         const key = JSON.stringify([state.viewing, state.collection, state.image, state.overview]);
         if (!force && key === this.key) {
             this.updateControls();
-            if (state.viewing && folderChanged) { this.updateCollectionLabel(); this.renderStrip(); }
+            if (state.viewing && folderChanged) this.updateCollectionLabel();
+            if (state.viewing && (folderChanged || layoutChanged)) {
+                this.renderStrip();
+                if (anchor) this.viewport.resize(anchor);
+            }
             return;
         }
         this.key = key;
@@ -170,6 +167,7 @@ export class ImageViewer {
             return;
         }
         if (state.overview) {
+            this.updateControls();
             this.prefetchScope?.dispose();
             this.prefetchPath = null;
             this.viewport.clear();
@@ -274,8 +272,7 @@ export class ImageViewer {
     }
 
     renderStrip(force = false) {
-        byId('viewer-thumbnails').setAttribute('aria-expanded', String(this.thumbnailsVisible));
-        this.filmstrip.show(this.state, this.thumbnailsVisible, force);
+        this.filmstrip.show(this.state, this.state.layout === 'strip', force);
     }
 
     requestMove(reverse, fresh = true, source = 'explicit') {
@@ -346,7 +343,10 @@ export class ImageViewer {
             else this.close();
             return;
         }
-        if (this.state.overview) return;
+        if (this.state.overview) {
+            if (event.key.toLowerCase() === 't') this.changeLayout('strip');
+            return;
+        }
         if (event.composedPath().includes(this.video.element)) return;
         if (event.key === 'Tab') {
             const controls = [...this.container.querySelectorAll('a[href], button, select, [tabindex="0"]')]
@@ -371,7 +371,7 @@ export class ImageViewer {
             this.zoom(event.key === '-' ? -1 : 1);
         } else if (event.key.toLowerCase() === 'f') this.changeSize('page');
         else if (event.key.toLowerCase() === 'w') this.changeSize('width');
-        else if (event.key.toLowerCase() === 't') this.toggleThumbnails();
+        else if (event.key.toLowerCase() === 't') this.changeLayout(this.state.layout === 'strip' ? 'single' : 'strip');
     }
 
     onWheel(event) {

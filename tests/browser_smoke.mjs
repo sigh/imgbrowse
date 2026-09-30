@@ -80,6 +80,18 @@ await open('/');
 await waitFor("document.querySelectorAll('.card').length > 5");
 assert.ok(await evaluate("document.querySelectorAll('.card').length < 50"));
 await screenshot('grid');
+await pause(150);
+const visibleCards = await evaluate(`(() => {
+    const bounds = document.getElementById('grid-viewport').getBoundingClientRect();
+    return [...document.querySelectorAll('.card')].filter(card => {
+        const rect = card.querySelector('.picture').getBoundingClientRect();
+        return rect.bottom > bounds.top && rect.top < bounds.bottom && rect.right > bounds.left && rect.left < bounds.right;
+    }).map(card => card.dataset.path);
+})()`);
+assert.ok(await evaluate('document.querySelectorAll(".card").length') > visibleCards.length, 'Fixture must include DOM overscan');
+for (const request of requests.filter(url => new URL(url).pathname === '/thumbnail')) {
+    assert.ok(visibleCards.includes(new URL(request).searchParams.get('path')), 'Only visible card paths may request thumbnails: ' + request);
+}
 await evaluate("Object.defineProperty(navigator, 'clipboard', {configurable:true, value:{writeText:async text => { window.copiedPath=text; }}}); document.querySelector('#breadcrumbs .copy-path').click()");
 await waitFor("window.copiedPath");
 const absoluteRoot = await evaluate('window.copiedPath');
@@ -141,6 +153,11 @@ await waitFor("new URLSearchParams(location.search).get('folder') === 'Album/Cha
 assert.ok(await evaluate("document.getElementById('viewer').hidden"));
 
 // A folder's View action establishes the same scope for both modes.
+const beforeCovers = requests.length;
+await open('/?folder=Album');
+await waitFor("document.querySelectorAll('.folder-card .picture img').length === 2");
+const covers = requests.slice(beforeCovers).filter(url => new URL(url).pathname === '/thumbnail');
+assert.deepEqual(covers.map(url => new URL(url).searchParams.get('path')).sort(), ['Album/Chapter 1', 'Album/Chapter 2']);
 await open('/?folder=Album&compact=1');
 await waitFor("document.querySelector('.list-read')");
 await evaluate("document.querySelector('.list-read').click()");
@@ -174,6 +191,34 @@ await waitFor("!document.getElementById('viewer-stage').hidden");
 await evaluate('history.back()');
 await waitFor("!document.getElementById('overview').hidden");
 assert.equal(await evaluate('history.state.overviewPosition.path'), recursiveAnchor);
+
+// The layout choice keeps the header geometry fixed and survives history and reload.
+await open(viewerUrl(first));
+await readyImage(first);
+const headerPositions = () => evaluate(`(() => ({
+    layouts: document.querySelector('.viewer-layouts').getBoundingClientRect().x,
+    size: document.querySelector('.size-control').getBoundingClientRect().x,
+    width: document.querySelector('.size-control').getBoundingClientRect().width,
+}))()`);
+const initialPositions = await headerPositions();
+await click('view-single');
+assert.equal(await evaluate("new URLSearchParams(location.search).get('view')"), 'single');
+assert.ok(await evaluate("document.getElementById('viewer-strip').hidden && document.getElementById('viewer-image').dataset.path === 'Album/Chapter 1/page2.jpg'"));
+assert.deepEqual(await headerPositions(), initialPositions);
+await call('Page.reload');
+await readyImage(first);
+assert.equal(await evaluate("document.getElementById('view-single').getAttribute('aria-pressed')"), 'true');
+await key('t');
+await waitFor("!new URLSearchParams(location.search).has('view') && !document.getElementById('viewer-strip').hidden");
+assert.deepEqual(await headerPositions(), initialPositions);
+await click('view-grid');
+await waitFor("!document.getElementById('overview').hidden");
+assert.equal(await evaluate("new URLSearchParams(location.search).get('view')"), 'grid');
+assert.ok(await evaluate("document.querySelector('.size-control').classList.contains('unavailable')"));
+assert.deepEqual(await headerPositions(), initialPositions);
+await evaluate('history.back()');
+await waitFor("document.getElementById('view-strip').getAttribute('aria-pressed') === 'true' && !document.getElementById('viewer-strip').hidden");
+await readyImage(first);
 
 // Fit page never upscales a small photo. Native wheel events turn fitted pages.
 await open(viewerUrl('root2.jpg', 'page', ''));
@@ -253,7 +298,7 @@ assert.equal(await evaluate("document.getElementById('viewer-zoom').dataset.size
 await evaluate("document.getElementById('viewer-stage').dispatchEvent(new WheelEvent('wheel',{deltaY:100,ctrlKey:true,cancelable:true}))");
 assert.ok(await evaluate(imageIs(second)));
 
-assert.equal(await evaluate("document.getElementById('viewer-thumbnails').getAttribute('aria-expanded')"), 'true');
+assert.equal(await evaluate("document.getElementById('view-strip').getAttribute('aria-pressed')"), 'true');
 await waitFor("document.querySelectorAll('#viewer-strip button').length === 3");
 assert.deepEqual(await evaluate("Array.from(document.querySelectorAll('#viewer-strip .folder-start .strip-folder'), node=>node.textContent)"), ['Chapter 1', 'Chapter 2/deep']);
 // Resize through the actual pointer handle, then the keyboard, without changing image.
@@ -276,7 +321,8 @@ await waitFor("import('/gallery.js').then(({app})=>app.viewer.viewport.box.heigh
 // Hidden filmstrip cancels preview work and does not request thumbnails on later pages.
 await evaluate("document.getElementById('viewer-canvas').scrollTop = 450");
 const beforeStrip = await sourcePoint();
-await click('viewer-thumbnails');
+await click('view-single');
+assert.equal(await evaluate("new URLSearchParams(location.search).get('view')"), 'single');
 await pause(150);
 assert.ok(Math.abs(await sourcePoint() - beforeStrip) < 3);
 const thumbnailsBefore = requests.filter(url=>url.includes('/thumbnail?')).length;
@@ -343,7 +389,7 @@ await pause(100);
 assert.ok(await evaluate("Number(new URLSearchParams(location.search).get('image').match(/root(\\d+)/)[1]) >= 4"));
 
 // A visible strip retains buttons and their order as pages turn; discovery is demand driven.
-await click('viewer-thumbnails');
+await click('view-strip');
 await waitFor("document.querySelectorAll('#viewer-strip button').length >= 16");
 await evaluate("window.retainedThumbnail=document.querySelector('#viewer-strip button')");
 const stripPaths = await evaluate("Array.from(document.querySelectorAll('#viewer-strip button'),button=>button.dataset.path)");
@@ -385,7 +431,7 @@ assert.equal(await evaluate("document.querySelectorAll('#size-menu > button').le
 await screenshot('sizing');
 await key('Escape');
 assert.ok(await evaluate("document.getElementById('size-menu').hidden && !document.getElementById('viewer').hidden"));
-await click('viewer-thumbnails');
+await click('view-single');
 
 // Breadcrumbs leave the reader for the image's actual folder, preserving the grid layout.
 await open(viewerUrl(first));
@@ -457,7 +503,7 @@ await evaluate(`document.querySelector('[data-path="Mixed/2.webm"] .picture').cl
 await waitFor("document.getElementById('viewer-video')?.readyState >= 2");
 assert.ok(await evaluate("document.activeElement === document.getElementById('viewer-video')"));
 if (videoPreviewAvailable) assert.ok(await evaluate("document.getElementById('viewer-video').poster.startsWith('blob:')"));
-if (await evaluate("document.getElementById('viewer-thumbnails').getAttribute('aria-expanded') === 'false'")) await click('viewer-thumbnails');
+if (await evaluate("document.getElementById('view-strip').getAttribute('aria-pressed') === 'false'")) await click('view-strip');
 await waitFor(`document.querySelector('#viewer-strip button[data-path="Mixed/1.jpg"]')`);
 assert.ok(await evaluate(`document.querySelector('#viewer-strip button[data-path="Mixed/2.webm"]').offsetWidth > document.querySelector('#viewer-strip button[data-path="Mixed/1.jpg"]').offsetWidth`));
 await call('Emulation.setDeviceMetricsOverride', {width:390,height:844,deviceScaleFactor:1,mobile:true});
@@ -469,7 +515,8 @@ await open(viewerUrl('Mixed/1.jpg', 'page', 'Mixed'));
 await readyImage('Mixed/1.jpg');
 await click('viewer-next');
 await waitFor("document.getElementById('viewer-video')?.readyState >= 2");
-assert.ok(await evaluate("document.getElementById('viewer-video').paused && document.querySelector('.size-control').hidden"));
+assert.ok(await evaluate("document.getElementById('viewer-video').paused && document.querySelector('.size-control').classList.contains('unavailable')"));
+assert.deepEqual(await headerPositions(), initialPositions);
 await evaluate("window.testVideo=document.getElementById('viewer-video'); testVideo.focus(); testVideo.dispatchEvent(new KeyboardEvent('keydown', {key:'ArrowRight',bubbles:true})); testVideo.dispatchEvent(new WheelEvent('wheel', {deltaY:100,bubbles:true}));");
 await waitImage('Mixed/2.webm');
 await evaluate('testVideo.play()', true);
@@ -487,7 +534,7 @@ await waitImage('Mixed/2.webm');
 await screenshot('video');
 await click('viewer-next');
 await readyImage('Mixed/3.jpg');
-assert.ok(await evaluate("testVideo.paused && !testVideo.hasAttribute('src') && !testVideo.isConnected && !document.querySelector('.size-control').hidden"));
+assert.ok(await evaluate("testVideo.paused && !testVideo.hasAttribute('src') && !testVideo.isConnected && !document.querySelector('.size-control').classList.contains('unavailable')"));
 await click('viewer-prev');
 await waitFor("document.getElementById('viewer-video')?.readyState >= 2");
 await evaluate("window.testVideo=document.getElementById('viewer-video')");
@@ -498,5 +545,6 @@ await waitFor("document.getElementById('viewer-status').textContent.includes('Un
 await click('viewer-prev');
 await readyImage('Mixed/3.jpg');
 assert.equal(exceptions.length, 0, JSON.stringify(exceptions));
+assert.equal(requests.filter(url => new URL(url).pathname === '/api/preview').length, 0);
 console.log('Browser smoke passed: navigation, history, filtering, layout anchors, gesture edges, zoom anchors, slow loads, cancellation, filmstrip, URLs, empty/single images, responsive controls.');
 socket.close();

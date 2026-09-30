@@ -6,11 +6,13 @@ import tempfile
 import unittest
 import zipfile
 from pathlib import Path
+from unittest.mock import patch
 
 from PIL import Image
 
 from image_browser.catalog import Gallery
 from image_browser.thumbnails import ThumbnailCache
+from image_browser.work import WorkGate
 
 
 class ArchiveTests(unittest.TestCase):
@@ -57,7 +59,7 @@ class ArchiveTests(unittest.TestCase):
         self.assertEqual(self.gallery.listing('Book 2.cbz'),
                          {'folders': ['Chapter 2', 'Chapter 10'],
                           'images': ['page2.jpg', 'page10.jpg']})
-        self.assertEqual(self.gallery.preview('Book 2.cbz')['image'], 'Book 2.cbz/page2.jpg')
+        self.assertEqual(self.gallery.representative('Book 2.cbz'), 'Book 2.cbz/page2.jpg')
         expected = ['cover.jpg', 'Book 2.cbz/page2.jpg', 'Book 2.cbz/page10.jpg',
                     'Book 2.cbz/Chapter 2/1.jpg', 'Book 2.cbz/Chapter 2/2.jpg',
                     'Book 2.cbz/Chapter 10/page1.jpg']
@@ -118,11 +120,12 @@ class ArchiveTests(unittest.TestCase):
         with zipfile.ZipFile(file) as source:
             self.assertEqual(source.read(member), self.image)
         thumbnails = ThumbnailCache()
-        key = (str(file), file.stat().st_mtime_ns, member.CRC)
-        result = thumbnails.get_archive(key, lambda: self.image)
+        media = self.gallery.source('Book 2.cbz/page2.jpg')
+        result = thumbnails.get(media, self.gallery.archives, WorkGate())
         with Image.open(io.BytesIO(result)) as image:
             self.assertEqual(image.size, (16, 24))
-        self.assertEqual(thumbnails.get_archive(key, lambda: self.fail('decoded twice')), result)
+        with patch.object(self.gallery.archives, 'get', side_effect=AssertionError('decoded twice')):
+            self.assertEqual(thumbnails.get(media, self.gallery.archives, WorkGate()), result)
         with zipfile.ZipFile(archive, 'a') as source:
             source.writestr('page3.jpg', self.image)
         self.assertEqual(self.gallery.listing('Book 2.cbz')['images'],

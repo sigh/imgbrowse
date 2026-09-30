@@ -11,6 +11,14 @@ class Cancelled(OSError):
     """The request no longer needs its queued work."""
 
 
+class Invalidated(RuntimeError):
+    """Refresh superseded this operation before it could finish."""
+
+
+class Busy(OSError):
+    """The bounded storage queue has no remaining capacity."""
+
+
 def cancellation():
     return getattr(_local, 'cancel', lambda: False)
 
@@ -55,7 +63,7 @@ class WorkGate:
         ticket = (priority, monotonic(), object())
         with self.condition:
             if len(self.waiting) >= 128:
-                raise OSError('Storage is busy; retry shortly')
+                raise Busy('Storage is busy; retry shortly')
             self.waiting.append(ticket)
             try:
                 while True:

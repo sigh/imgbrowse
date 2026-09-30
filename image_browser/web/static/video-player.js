@@ -21,7 +21,7 @@ export class VideoPlayer {
             if (!scope.signal.aborted) onError();
         });
         const poster = cachedThumbnail(path);
-        if (poster) video.poster = scope.objectUrl(poster);
+        if (poster?.blob) video.poster = scope.objectUrl(poster.blob);
         const fit = () => {
             const ratio = video.videoWidth && video.videoHeight ? video.videoWidth / video.videoHeight : 16 / 9;
             const width = Math.min(this.canvas.clientWidth, this.canvas.clientHeight * ratio);

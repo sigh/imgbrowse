@@ -3,8 +3,8 @@
 import stat
 import threading
 import zipfile
-from pathlib import PurePosixPath
 from contextlib import contextmanager
+from pathlib import PurePosixPath
 
 from .cache import SharedCache
 from .sources import IMAGE_EXTENSIONS

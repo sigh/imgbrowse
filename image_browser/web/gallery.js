@@ -25,6 +25,7 @@ class GalleryApp {
         this.viewer = new ImageViewer(this.previews, {
             selectImage: (image, entry) => this.navigate({image}, true, entry),
             changeSize: size => this.navigate({size}, true),
+            changeLayout: layout => this.changeLayout(layout),
             close: () => this.closeViewer(),
             refresh: () => this.refresh(),
             folderLink: (path, label) => this.folderLink(path, label),
@@ -39,9 +40,9 @@ class GalleryApp {
         for (const button of document.querySelectorAll('[data-layout]')) {
             button.addEventListener('click', () => this.navigate({compact: button.dataset.layout === 'list'}, true));
         }
-        for (const [id, name, overview] of [['view-single', 'image', false], ['view-grid', 'grid', true], ['strip-expand', 'expand', true]]) {
+        for (const [id, name, layout] of [['view-grid', 'grid', 'grid'], ['view-strip', 'thumbnails', 'strip'], ['view-single', 'image', 'single']]) {
             byId(id).append(icon(name));
-            byId(id).addEventListener('click', () => this.navigate({overview, recursive: overview}));
+            byId(id).addEventListener('click', () => this.changeLayout(layout));
         }
         this.grid.viewport.addEventListener('scroll', () => {
             clearTimeout(this.positionTimer);
@@ -86,13 +87,24 @@ class GalleryApp {
             history.replaceState({...history.state, overviewImage: image}, '', stateUrl(this.state));
         }
         this.viewer.openingFocus = opener || document.activeElement;
-        const changes = {viewing: true, overview: false, recursive: false, image, collection, folder: collection, size: this.readingSize};
+        const changes = {viewing: true, layout: 'strip', overview: false, recursive: false, image, collection, folder: collection, size: this.readingSize};
         if (collection !== this.state.folder) changes.filter = '';
         this.navigate(changes);
     }
 
     closeViewer() {
         if (this.state.viewing) this.navigate({viewing: false, overview: false, recursive: false, image: null});
+    }
+
+    changeLayout(layout) {
+        const overview = layout === 'grid';
+        this.navigate({layout, overview, recursive: overview});
+    }
+
+    updateLayoutButtons() {
+        for (const layout of ['grid', 'strip', 'single']) {
+            byId('view-' + layout).setAttribute('aria-pressed', String(this.state.layout === layout));
+        }
     }
 
     navigate(changes, replace = false, entry = 'top') {
@@ -115,12 +127,13 @@ class GalleryApp {
             && next.recursive === this.state.recursive && next.compact === this.state.compact) {
             this.state = next;
             this.readingSize = next.size;
+            this.updateLayoutButtons();
             this.viewer.show(next, false, entry);
         } else this.render(false, true, entry);
     }
 
     folderLink(path, label) {
-        const changes = {folder: path, collection: path, viewing: false, overview: false, recursive: false, image: null, filter: ''};
+        const changes = {folder: path, collection: path, viewing: false, layout: 'strip', overview: false, recursive: false, image: null, filter: ''};
         const link = element('a', '', label);
         link.href = stateUrl({...this.state, ...changes});
         link.addEventListener('click', event => {
@@ -173,10 +186,7 @@ class GalleryApp {
         host.hidden = !overview;
         byId('viewer-stage').hidden = overview;
         document.querySelector('.viewer-footer').hidden = overview;
-        byId('viewer-thumbnails').hidden = overview;
-        document.querySelector('.size-control').hidden = overview;
-        byId('view-single').setAttribute('aria-pressed', String(!overview));
-        byId('view-grid').setAttribute('aria-pressed', String(overview));
+        this.updateLayoutButtons();
         let position = restore ? history.state?.position : null;
         if (overview) {
             position = history.state?.overviewImage === this.state.image ? history.state?.overviewPosition : null;
@@ -184,7 +194,6 @@ class GalleryApp {
         }
         this.viewer.show(this.state, force, entry);
         if (overview) document.querySelector('.strip-frame').hidden = true;
-        byId('strip-expand').hidden = overview || !this.state.viewing || !this.viewer.thumbnailsVisible;
         this.grid.show(overview ? {...this.state, folder: this.state.collection, viewing: false, recursive: true, compact: false, filter: ''}
             : {...this.state, recursive: false}, force, position);
     }
