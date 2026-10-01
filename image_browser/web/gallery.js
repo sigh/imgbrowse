@@ -37,15 +37,14 @@ class GalleryApp {
     }
 
     bindControls() {
-        for (const [id, name] of [['read-folder', 'play'], ['viewer-close', 'back'], ['layout-previews', 'previews'], ['layout-list', 'list']]) {
-            byId(id).append(icon(name));
+        for (const button of document.querySelectorAll('[data-icon]')) {
+            button.append(icon(button.dataset.icon));
         }
         for (const button of document.querySelectorAll('[data-layout]')) {
             button.addEventListener('click', () => this.navigate({compact: button.dataset.layout === 'list'}, true));
         }
-        for (const [id, name, layout] of [['view-grid', 'grid', 'grid'], ['view-strip', 'thumbnails', 'strip'], ['view-single', 'image', 'single']]) {
-            byId(id).append(icon(name));
-            byId(id).addEventListener('click', () => this.changeLayout(layout));
+        for (const button of document.querySelectorAll('[data-view-layout]')) {
+            button.addEventListener('click', () => this.changeLayout(button.dataset.viewLayout));
         }
         this.grid.viewport.addEventListener('scroll', () => {
             clearTimeout(this.positionTimer);
@@ -105,8 +104,8 @@ class GalleryApp {
     }
 
     updateLayoutButtons() {
-        for (const layout of ['grid', 'strip', 'single']) {
-            byId('view-' + layout).setAttribute('aria-pressed', String(this.state.layout === layout));
+        for (const button of document.querySelectorAll('[data-view-layout]')) {
+            button.setAttribute('aria-pressed', String(button.dataset.viewLayout === this.state.layout));
         }
     }
 

@@ -9,7 +9,7 @@
 </head>
 <body>
     <header class="app-header">
-        <button id="read-folder" class="mode-action" aria-label="View folder images" title="View folder images"></button>
+        <button id="read-folder" data-icon="play" class="mode-action" aria-label="View folder images" title="View folder images"></button>
         <div id="browse-location" class="item-location">
             <div class="path-copy"></div>
             <nav id="breadcrumbs" class="breadcrumbs" aria-label="Folder path"></nav>
@@ -18,11 +18,9 @@
         <div id="browse-actions" class="item-actions"></div>
     </header>
     <div class="toolbar">
-        <div class="browse-controls">
-            <div class="choice-group" role="group" aria-label="Folder layout">
-                <button id="layout-previews" data-layout="previews" aria-pressed="true" aria-label="Previews" title="Previews"></button>
-                <button id="layout-list" data-layout="list" aria-pressed="false" aria-label="List" title="List"></button>
-            </div>
+        <div class="browse-controls choice-group" role="group" aria-label="Folder layout">
+            <button id="layout-previews" data-layout="previews" data-icon="previews" aria-pressed="true" aria-label="Previews" title="Previews"></button>
+            <button id="layout-list" data-layout="list" data-icon="list" aria-pressed="false" aria-label="List" title="List"></button>
         </div>
         <input id="filter" type="search" placeholder="Filter" aria-label="Filter this folder by name">
     </div>
@@ -35,8 +33,12 @@
 
     <section id="viewer" class="viewer" role="dialog" aria-modal="true" aria-label="Image viewer" hidden>
         <header class="viewer-header">
-            <button id="viewer-close" class="mode-action" aria-label="Return to folder" title="Return to folder (Escape)"></button>
-            <div id="viewer-location" class="viewer-location item-location"><div class="path-copy"></div><nav id="viewer-path" class="breadcrumbs" aria-label="Image path"></nav><span id="viewer-name" class="item-name" hidden></span></div>
+            <button id="viewer-close" data-icon="back" class="mode-action" aria-label="Return to folder" title="Return to folder (Escape)"></button>
+            <div id="viewer-location" class="item-location">
+                <div class="path-copy"></div>
+                <nav id="viewer-path" class="breadcrumbs" aria-label="Image path"></nav>
+                <span id="viewer-name" class="item-name" hidden></span>
+            </div>
             <div class="viewer-tools" aria-label="Reading controls">
                 <div class="size-control">
                     <button id="viewer-zoom" aria-expanded="false" aria-controls="size-menu">Fit ▾</button>
@@ -52,9 +54,9 @@
                     </div>
                 </div>
                 <div class="choice-group viewer-layouts" role="group" aria-label="Viewing layout">
-                    <button id="view-grid" title="Grid" aria-label="Grid" aria-pressed="false"></button>
-                    <button id="view-strip" title="Image with thumbnails (T)" aria-label="Image with thumbnails" aria-pressed="true"></button>
-                    <button id="view-single" title="Image only (T)" aria-label="Image only" aria-pressed="false"></button>
+                    <button id="view-grid" data-view-layout="grid" data-icon="grid" title="Grid" aria-label="Grid" aria-pressed="false"></button>
+                    <button id="view-strip" data-view-layout="strip" data-icon="thumbnails" title="Image with thumbnails (T)" aria-label="Image with thumbnails" aria-pressed="true"></button>
+                    <button id="view-single" data-view-layout="single" data-icon="image" title="Image only (T)" aria-label="Image only" aria-pressed="false"></button>
                 </div>
             </div>
             <div id="viewer-actions" class="item-actions"></div>
@@ -62,7 +64,9 @@
         <div id="overview" hidden></div>
         <div id="viewer-stage" class="viewer-stage">
             <button id="viewer-prev" class="viewer-nav" aria-label="Previous image" title="Previous image (←)"></button>
-            <div id="viewer-canvas" tabindex="-1" aria-label="Image; scroll when enlarged"><div class="image-surface"><img id="viewer-image" alt="" hidden></div></div>
+            <div id="viewer-canvas" tabindex="-1" aria-label="Image; scroll when enlarged">
+                <div class="image-surface"><img id="viewer-image" alt="" hidden></div>
+            </div>
             <button id="viewer-next" class="viewer-nav" aria-label="Next image" title="Next image (→)"></button>
             <div class="viewer-feedback">
                 <span id="viewer-status" role="status"></span>

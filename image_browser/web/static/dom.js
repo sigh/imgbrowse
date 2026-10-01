@@ -8,6 +8,12 @@ export function element(tag, className = '', text) {
     return node;
 }
 
+/** Keep an icon action's accessible name and hover description together. */
+export function setButtonLabel(button, label, title = label) {
+    button.setAttribute('aria-label', label);
+    button.title = title;
+}
+
 export class TaskScope {
     constructor() {
         this.controller = new AbortController();

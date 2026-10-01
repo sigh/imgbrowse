@@ -3,7 +3,7 @@ import {renderItemHeader} from './folder-path.js';
 import {closeMetadata} from './metadata.js';
 import {loadOriginal} from './media-cache.js';
 import {walkImages} from './api.js';
-import {byId, TaskScope} from './dom.js';
+import {byId, setButtonLabel, TaskScope} from './dom.js';
 import {filename, parentPath, IMAGE_SIZES} from './state.js';
 import {ViewerViewport} from './viewer-viewport.js';
 import {WheelGesture} from './wheel-gesture.js';
@@ -43,7 +43,7 @@ export class ImageViewer {
 
     bindControls() {
         byId('viewer-zoom').addEventListener('click', () => this.setSizeMenu(byId('size-menu').hidden));
-        for (const button of document.querySelectorAll('[data-size]')) {
+        for (const button of document.querySelectorAll('#size-menu [data-size]')) {
             button.addEventListener('click', () => { this.changeSize(button.dataset.size); this.setSizeMenu(false); });
         }
         document.addEventListener('pointerdown', event => {
@@ -80,8 +80,8 @@ export class ImageViewer {
     }
 
     updateCollectionLabel() {
-        const folder = !this.state.overview && this.state.image ? parentPath(this.state.image) : this.state.collection;
-        const image = !this.state.overview && this.state.image;
+        const image = this.state.overview ? null : this.state.image;
+        const folder = image ? parentPath(image) : this.state.collection;
         renderItemHeader(byId('viewer-location'), byId('viewer-actions'), {
             folder, image, rootName: this.rootName, folderLink: this.folderLink,
             currentLink: true, browseFolder: this.state.folder,
@@ -106,7 +106,7 @@ export class ImageViewer {
         }
         byId('viewer-zoom').dataset.size = this.state.size;
         byId('zoom-value').textContent = Math.round(this.viewport.scale * 100) + '%';
-        for (const button of document.querySelectorAll('[data-size]')) {
+        for (const button of document.querySelectorAll('#size-menu [data-size]')) {
             button.setAttribute('aria-pressed', String(button.dataset.size === this.state.size));
             button.disabled = !sizing;
         }
@@ -121,8 +121,7 @@ export class ImageViewer {
             }
             const label = wrap ? (reverse ? 'Go to last item' : 'Go to first item')
                 : (reverse ? 'Previous item' : 'Next item');
-            button.setAttribute('aria-label', label);
-            button.title = `${label} (${reverse ? '←' : '→'})`;
+            setButtonLabel(button, label, `${label} (${reverse ? '←' : '→'})`);
             button.classList.toggle('wrap', wrap);
         }
         this.container.setAttribute('aria-busy', String(this.loadingImage || Boolean(this.moveScope)));
@@ -185,7 +184,6 @@ export class ImageViewer {
             this.filmstrip.stop();
             this.setSizeMenu(false, false);
             this.updateCollectionLabel();
-            byId('viewer-name').textContent = '';
             return;
         }
         if (!wasOpen) {
@@ -204,7 +202,6 @@ export class ImageViewer {
         } else {
             this.viewport.clear();
             this.updateControls();
-            byId('viewer-name').textContent = '';
             this.moveImage();
         }
     }
@@ -213,8 +210,6 @@ export class ImageViewer {
         if (isVideo(path)) {
             this.viewport.clear();
             this.setSizeMenu(false, false);
-            byId('viewer-name').textContent = filename(path);
-            byId('viewer-name').title = path;
             this.video.show(path, scope, () => {
                 this.status.textContent = 'Unable to play this video. Its format may not be supported by this browser.';
                 byId('viewer-retry').hidden = false;
@@ -232,13 +227,10 @@ export class ImageViewer {
             const {image} = await loadOriginal(path, scope.signal);
             scope.signal.throwIfAborted();
             this.viewport.show(image, this.state.size, entry);
-            byId('viewer-name').textContent = filename(path);
-            byId('viewer-name').title = path;
             if (this.boundaryDirection === null && !this.moveScope) this.status.textContent = '';
         } catch (error) {
             if (error.name !== 'AbortError' && !scope.signal.aborted) {
                 this.viewport.clear();
-                byId('viewer-name').textContent = filename(path);
                 this.status.textContent = 'Unable to open ' + path + '. Retry or move to another image.';
                 byId('viewer-retry').hidden = false;
             }

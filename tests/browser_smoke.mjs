@@ -101,8 +101,23 @@ const cancellationCheck = await evaluate(`(async () => {
 })()`);
 assert.deepEqual(cancellationCheck, {attempts: 1, result: 'AbortError', scopeAborted: false});
 assert.ok(await evaluate("document.querySelectorAll('.card').length < 50"));
+await waitFor("document.querySelector('.picture img')?.naturalWidth > 0");
+assert.ok(await evaluate("(() => {const image=document.querySelector('.picture img').getBoundingClientRect(), frame=document.querySelector('.picture img').parentElement.getBoundingClientRect(); return image.left>=frame.left-.5 && image.right<=frame.right+.5 && image.top>=frame.top-.5 && image.bottom<=frame.bottom+.5;})()"), 'Preview images stay within their card area');
+assert.equal(await evaluate("document.getElementById('layout-previews').getBoundingClientRect().right"), await evaluate("document.getElementById('layout-list').getBoundingClientRect().left"), 'Layout choices remain a contiguous button group');
 await screenshot('grid');
 const folderModeAction = await evaluate("document.getElementById('read-folder').getBoundingClientRect().toJSON()");
+const actionColors = await evaluate("(() => {const style=id=>getComputedStyle(document.getElementById(id)); return {action:style('read-folder').backgroundColor, neutral:style('layout-list').backgroundColor, selected:style('layout-previews').backgroundColor};})()");
+assert.equal(actionColors.action, actionColors.neutral, 'View uses neutral action styling');
+assert.notEqual(actionColors.action, actionColors.selected, 'View does not appear permanently selected');
+await call('Input.dispatchMouseEvent', {type:'mouseMoved', x:folderModeAction.x+folderModeAction.width/2, y:folderModeAction.y+folderModeAction.height/2});
+assert.notEqual(await evaluate("getComputedStyle(document.getElementById('read-folder')).backgroundColor"), actionColors.action, 'Hover feedback is visible');
+assert.deepEqual(await evaluate("document.getElementById('read-folder').getBoundingClientRect().toJSON()"), folderModeAction, 'Hover preserves button geometry');
+await call('Input.dispatchMouseEvent', {type:'mouseMoved', x:700, y:450});
+const imageNameBounds = await evaluate("document.querySelector('.card-caption .image-name').getBoundingClientRect().toJSON()");
+await call('Input.dispatchMouseEvent', {type:'mouseMoved', x:imageNameBounds.x+imageNameBounds.width/2, y:imageNameBounds.y+imageNameBounds.height/2});
+assert.equal(await evaluate("getComputedStyle(document.querySelector('.card-caption .image-name')).backgroundColor"), 'rgba(0, 0, 0, 0)', 'Content links stay unfilled under the shared hover rules');
+await call('Input.dispatchMouseEvent', {type:'mouseMoved', x:700, y:450});
+
 assert.equal(await evaluate("document.getElementById('read-folder').textContent.trim()"), '', 'Opening the viewer uses one icon action');
 assert.equal(await evaluate("document.querySelectorAll('.mode-switch').length"), 0, 'No disabled current-mode controls');
 assert.ok(await evaluate("[...document.querySelectorAll('[data-layout]')].every(button => button.textContent.trim()==='' && button.querySelector('svg') && button.getAttribute('aria-label') && button.title)"), 'Layout choices use named icons');
@@ -124,6 +139,8 @@ const absoluteRoot = await evaluate('window.copiedPath');
 assert.ok(absoluteRoot.startsWith('/'));
 await evaluate("{ const info=document.querySelector('#browse-actions .item-info'); info.focus(); info.click(); }");
 await waitFor("document.getElementById('metadata-details').textContent.includes('Media')");
+assert.equal(await evaluate("getComputedStyle(document.querySelector('#browse-actions .item-info')).backgroundColor"), actionColors.selected, 'Expanded Info shares the selected-layout treatment');
+
 assert.equal(await evaluate("document.getElementById('metadata-popover').matches(':popover-open')"), true);
 assert.equal(await evaluate("document.querySelector('#metadata-popover button') === null"), true, 'Info itself dismisses the popover');
 assert.equal(await evaluate("[...document.querySelectorAll('#metadata-details dt')].some(row => row.textContent === 'Type')"), false);
@@ -281,6 +298,7 @@ await evaluate("Object.defineProperty(navigator, 'clipboard', {configurable:true
 await waitFor("window.copiedPath");
 assert.equal(await evaluate('window.copiedPath'), absoluteRoot + '/' + first);
 await evaluate('document.execCommand=window.originalExecCommand');
+assert.equal(await evaluate("getComputedStyle(document.querySelector('#viewer-strip button.selected')).borderColor"), await evaluate("getComputedStyle(document.getElementById('layout-previews')).borderColor"), 'Current thumbnails and layout choices share the selection accent');
 const returnAction = await evaluate("document.getElementById('viewer-close').getBoundingClientRect().toJSON()");
 assert.deepEqual(returnAction, folderModeAction, 'Open and return actions have identical positions and dimensions');
 assert.equal(folderModeAction.width, 64, 'The primary View action has a wider target');
@@ -442,7 +460,9 @@ assert.equal(await evaluate("document.getElementById('viewer-image').dataset.pat
 assert.equal(await evaluate("document.getElementById('viewer-zoom').disabled"), false);
 await click('viewer-zoom');
 assert.equal(await evaluate("document.getElementById('size-menu').hidden"), false);
+assert.equal(await evaluate("getComputedStyle(document.getElementById('viewer-zoom')).backgroundColor"), actionColors.selected, 'An open size menu uses the shared expanded state');
 await evaluate("document.querySelector('[data-size=width]').click()");
+assert.equal(await evaluate("getComputedStyle(document.getElementById('viewer-zoom')).backgroundColor"), actionColors.action, 'Closing the menu restores neutral action styling');
 assert.equal(await evaluate("new URLSearchParams(location.search).get('size')"), 'width');
 assert.equal(await evaluate("document.getElementById('viewer-image').dataset.path"), first);
 

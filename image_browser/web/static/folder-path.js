@@ -2,7 +2,7 @@ import {joinPath, filename} from './state.js';
 import {isVideo} from './media-kind.js';
 import {getLocation, fullPath} from './api.js';
 import {icon} from './icons.js';
-import {element} from './dom.js';
+import {element, setButtonLabel} from './dom.js';
 import {toggleMetadata, updateMetadataTarget} from './metadata.js';
 
 async function copyPath(target) {
@@ -50,7 +50,7 @@ export function renderItemHeader(location, actions, {folder, image = null, rootN
 }
 
 /** Shared path presentation; the viewer keeps the current folder navigable. */
-export function renderFolderPath(container, folder, rootName, folderLink, {currentLink = false, browseFolder = folder} = {}) {
+function renderFolderPath(container, folder, rootName, folderLink, {currentLink = false, browseFolder = folder} = {}) {
     const focused = container.contains(document.activeElement) ? document.activeElement.getAttribute('href') : null;
     const changed = container.dataset.folder !== folder;
     const scrollLeft = container.scrollLeft;
@@ -82,13 +82,12 @@ export function renderFolderPath(container, folder, rootName, folderLink, {curre
 }
 
 /** Actions belong next to the item they describe. */
-export function renderItemActions(container, target, kind) {
+function renderItemActions(container, target, kind) {
     const focused = container.contains(document.activeElement) ? document.activeElement.className : null;
     container.replaceChildren();
     const info = element('button', 'item-info');
     info.type = 'button';
-    info.title = `${kind[0].toUpperCase() + kind.slice(1)} info`;
-    info.setAttribute('aria-label', info.title);
+    setButtonLabel(info, `${kind[0].toUpperCase() + kind.slice(1)} info`);
     info.setAttribute('aria-controls', 'metadata-popover');
     info.append(icon('info'));
     info.addEventListener('click', () => toggleMetadata(target, info, container));
@@ -101,23 +100,20 @@ export function renderItemActions(container, target, kind) {
 function copyPathButton(target, kind) {
     const copy = element('button', 'copy-path');
     copy.type = 'button';
-    copy.title = `Copy ${kind} path`;
-    copy.setAttribute('aria-label', copy.title);
+    const label = `Copy ${kind} path`;
+    setButtonLabel(copy, label);
     copy.append(icon('copy'));
     copy.addEventListener('click', async () => {
         try {
             await copyPath(target);
-            copy.querySelector('.icon').replaceWith(icon('check'));
-            copy.title = 'Copied';
-            copy.setAttribute('aria-label', copy.title);
+            copy.replaceChildren(icon('check'));
+            setButtonLabel(copy, 'Copied');
             setTimeout(() => {
-                copy.querySelector('.icon').replaceWith(icon('copy'));
-                copy.title = `Copy ${kind} path`;
-                copy.setAttribute('aria-label', copy.title);
+                copy.replaceChildren(icon('copy'));
+                setButtonLabel(copy, label);
             }, 1500);
         } catch {
-            copy.title = 'Unable to copy path. Click to retry.';
-            copy.setAttribute('aria-label', copy.title);
+            setButtonLabel(copy, 'Unable to copy path. Click to retry.');
         }
     });
     return copy;
