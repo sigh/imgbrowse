@@ -12,6 +12,7 @@ from urllib.parse import parse_qs, urlsplit
 from PIL import Image
 
 from .catalog import PAGE_SIZE, Gallery
+from .metadata import metadata
 from .previews import PreviewService
 from .ranges import UnsatisfiableRange, byte_range
 from .sources import VIDEO_TYPES
@@ -28,7 +29,7 @@ STATIC_FILES = {
     **{f'/static/{name}.js': f'static/{name}.js' for name in (
         'api', 'dom', 'state', 'preview-loader', 'grid-layout', 'folder-grid', 'image-viewer',
         'viewer-viewport', 'wheel-gesture', 'icons', 'thumbnail-strip',
-        'resource-cache', 'sequence', 'media-cache', 'folder-path', 'video-player', 'media-kind',
+        'resource-cache', 'sequence', 'media-cache', 'folder-path', 'video-player', 'media-kind', 'metadata',
     )},
 }
 
@@ -134,6 +135,9 @@ class GalleryHandler(BaseHTTPRequestHandler):
             self.send_json(self.thumbnails.video_info(source))
         elif url.path == '/api/location':
             self.send_json(gallery.location(path))
+        elif url.path == '/api/metadata':
+            self.send_json(metadata(gallery, path, self.gallery_server.image_work,
+                                    self.gallery_server.archive_work))
         elif url.path == '/api/folder':
             self.send_json({'path': path, 'root_name': gallery.root.name, **gallery.listing(path)})
         elif url.path == '/thumbnail':

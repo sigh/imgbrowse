@@ -192,7 +192,7 @@ export class FolderGrid {
             preview = this.previews.thumbnail(picture, item.path, scope);
         }
         preview.catch(error => {
-            if (error.name !== 'AbortError') picture.textContent = 'Preview unavailable';
+            if (!scope.signal.aborted) picture.textContent = 'Preview unavailable';
         });
         caption.title = item.path;
         node.append(picture, caption);

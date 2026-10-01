@@ -1,4 +1,6 @@
-import {renderFolderPath} from './folder-path.js';
+import {icon} from './icons.js';
+import {renderItemHeader} from './folder-path.js';
+import {closeMetadata} from './metadata.js';
 import {loadOriginal} from './media-cache.js';
 import {walkImages} from './api.js';
 import {byId, TaskScope} from './dom.js';
@@ -79,8 +81,11 @@ export class ImageViewer {
 
     updateCollectionLabel() {
         const folder = !this.state.overview && this.state.image ? parentPath(this.state.image) : this.state.collection;
-        renderFolderPath(byId('viewer-path'), folder, this.rootName, this.folderLink,
-            {currentLink: true, browseFolder: this.state.folder});
+        const image = !this.state.overview && this.state.image;
+        renderItemHeader(byId('viewer-location'), byId('viewer-actions'), {
+            folder, image, rootName: this.rootName, folderLink: this.folderLink,
+            currentLink: true, browseFolder: this.state.folder,
+        });
     }
 
     updateControls() {
@@ -109,10 +114,15 @@ export class ImageViewer {
         byId('viewer-zoom-in').disabled = !sizing || this.viewport.scale >= ZOOM_STEPS.at(-1);
         for (const [button, reverse] of [[this.previousButton, true], [this.nextButton, false]]) {
             const wrap = this.boundaryDirection === reverse;
-            button.querySelector('.nav-label').textContent = wrap ? (reverse ? 'Go to last item' : 'Go to first item')
-                : (reverse ? 'Prev' : 'Next');
-            button.setAttribute('aria-label', wrap ? (reverse ? 'Go to last item' : 'Go to first item')
-                : (reverse ? 'Previous item' : 'Next item'));
+            const name = wrap ? (reverse ? 'last' : 'first') : (reverse ? 'previous' : 'next');
+            if (button.dataset.icon !== name) {
+                button.replaceChildren(icon(name));
+                button.dataset.icon = name;
+            }
+            const label = wrap ? (reverse ? 'Go to last item' : 'Go to first item')
+                : (reverse ? 'Previous item' : 'Next item');
+            button.setAttribute('aria-label', label);
+            button.title = `${label} (${reverse ? '←' : '→'})`;
             button.classList.toggle('wrap', wrap);
         }
         this.container.setAttribute('aria-busy', String(this.loadingImage || Boolean(this.moveScope)));
@@ -151,6 +161,7 @@ export class ImageViewer {
         const wasOpen = !this.container.hidden;
         this.container.hidden = !state.viewing;
         if (!state.viewing) {
+            closeMetadata();
             this.prefetchScope?.dispose();
             this.prefetchScope = null;
             this.prefetchPath = null;
@@ -178,6 +189,7 @@ export class ImageViewer {
             return;
         }
         if (!wasOpen) {
+            closeMetadata();
             this.opener = this.openingFocus || document.activeElement;
             this.openingFocus = null;
             this.canvas.focus({preventScroll: true});

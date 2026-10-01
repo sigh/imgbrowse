@@ -125,6 +125,41 @@ test('leaving the viewport aborts active work and reentry resumes without a retr
     assert.equal(calls, 2);
 });
 
+test('a source AbortError settles once and leaves the browser event loop available', async () => {
+    const loader = scheduler();
+    const scope = new TaskScope();
+    let calls = 0, heartbeat = false;
+    const timer = new Promise(resolve => setTimeout(() => { heartbeat = true; resolve(); }, 0));
+    const job = loader.enqueue(() => {
+        calls++;
+        // Keep this regression finite if unconditional retry is reintroduced.
+        if (calls <= 100) throw new DOMException('Source cancelled', 'AbortError');
+        return 'unexpected retry';
+    }, target(10), scope.signal);
+    await assert.rejects(job, {name: 'AbortError'});
+    await timer;
+    assert.equal(calls, 1);
+    assert.equal(heartbeat, true);
+    assert.equal(scope.signal.aborted, false);
+    assert.equal(await loader.enqueue(() => 'next preview', target(20), scope.signal), 'next preview');
+});
+
+test('even deliberately paused previews yield to input between restarts', async () => {
+    const loader = scheduler();
+    const scope = new TaskScope();
+    let heartbeat = false, calls = 0;
+    const job = loader.enqueue(signal => {
+        calls++;
+        if (calls > 1) return heartbeat;
+        // The viewport can change while a request is being scheduled.
+        [...loader.active][0].controller.abort();
+        setTimeout(() => { heartbeat = true; }, 0);
+        signal.throwIfAborted();
+    }, target(10), scope.signal);
+    assert.equal(await job, true);
+    assert.equal(calls, 2);
+});
+
 
 test('invalid image sizes fall back to Fit page and valid sizes survive URLs', () => {
     for (const size of ['0', '-1', 'NaN', 'Infinity', '10', '<script>']) {

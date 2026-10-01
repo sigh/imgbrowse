@@ -59,6 +59,9 @@ const click = id => evaluate(`{ const button=document.getElementById(${JSON.stri
 const imageIs = path => `import('/static/state.js').then(({readState}) => readState().image === ${JSON.stringify(path)})`;
 const waitImage = path => waitFor(imageIs(path));
 const key = (key, repeat = false) => evaluate(`document.dispatchEvent(new KeyboardEvent('keydown', ${JSON.stringify({key, repeat})}))`);
+async function nativeKey(key, code) {
+    for (const type of ['keyDown', 'keyUp']) await call('Input.dispatchKeyEvent', {type, key, code: key, windowsVirtualKeyCode: code});
+}
 const wheel = async deltaY => { await call('Input.dispatchMouseEvent', {type:'mouseWheel', x:700, y:350, deltaX:0, deltaY}); await new Promise(resolve => setTimeout(resolve, 70)); };
 async function screenshot(name) {
     if (screenshots) writeFileSync(join(screenshots, name + '.png'), Buffer.from((await call('Page.captureScreenshot')).data, 'base64'));
@@ -78,8 +81,31 @@ await call('Page.enable');
 await call('Emulation.setDeviceMetricsOverride', {width:1440,height:900,deviceScaleFactor:1,mobile:false});
 await open('/');
 await waitFor("document.querySelectorAll('.card').length > 5");
+// An unrelated cancellation must settle once, rather than freezing the folder
+// view with an endless chain of immediately retried promises.
+const cancellationCheck = await evaluate(`(async () => {
+    const {PreviewLoader} = await import('/static/preview-loader.js');
+    const loader = new PreviewLoader(document.getElementById('grid-viewport'), document.getElementById('viewer'));
+    const controller = new AbortController();
+    let attempts = 0;
+    let result;
+    try {
+        await loader.enqueue(() => {
+            if (++attempts <= 1000) throw new DOMException('Source cancelled', 'AbortError');
+            return 'retried';
+        }, document.querySelector('.card .picture'), controller.signal);
+        result = 'unexpected retry';
+    } catch (error) { result = error.name; }
+    await new Promise(resolve => requestAnimationFrame(resolve));
+    return {attempts, result, scopeAborted: controller.signal.aborted};
+})()`);
+assert.deepEqual(cancellationCheck, {attempts: 1, result: 'AbortError', scopeAborted: false});
 assert.ok(await evaluate("document.querySelectorAll('.card').length < 50"));
 await screenshot('grid');
+const folderModeAction = await evaluate("document.getElementById('read-folder').getBoundingClientRect().toJSON()");
+assert.equal(await evaluate("document.getElementById('read-folder').textContent.trim()"), '', 'Opening the viewer uses one icon action');
+assert.equal(await evaluate("document.querySelectorAll('.mode-switch').length"), 0, 'No disabled current-mode controls');
+assert.ok(await evaluate("[...document.querySelectorAll('[data-layout]')].every(button => button.textContent.trim()==='' && button.querySelector('svg') && button.getAttribute('aria-label') && button.title)"), 'Layout choices use named icons');
 await pause(150);
 const visibleCards = await evaluate(`(() => {
     const bounds = document.getElementById('grid-viewport').getBoundingClientRect();
@@ -92,10 +118,31 @@ assert.ok(await evaluate('document.querySelectorAll(".card").length') > visibleC
 for (const request of requests.filter(url => new URL(url).pathname === '/thumbnail')) {
     assert.ok(visibleCards.includes(new URL(request).searchParams.get('path')), 'Only visible card paths may request thumbnails: ' + request);
 }
-await evaluate("Object.defineProperty(navigator, 'clipboard', {configurable:true, value:{writeText:async text => { window.copiedPath=text; }}}); document.querySelector('#breadcrumbs .copy-path').click()");
+await evaluate("Object.defineProperty(navigator, 'clipboard', {configurable:true, value:{writeText:async text => { window.copiedPath=text; }}}); document.querySelector('#browse-location .copy-path').click()");
 await waitFor("window.copiedPath");
 const absoluteRoot = await evaluate('window.copiedPath');
 assert.ok(absoluteRoot.startsWith('/'));
+await evaluate("{ const info=document.querySelector('#browse-actions .item-info'); info.focus(); info.click(); }");
+await waitFor("document.getElementById('metadata-details').textContent.includes('Media')");
+assert.equal(await evaluate("document.getElementById('metadata-popover').matches(':popover-open')"), true);
+assert.equal(await evaluate("document.querySelector('#metadata-popover button') === null"), true, 'Info itself dismisses the popover');
+assert.equal(await evaluate("[...document.querySelectorAll('#metadata-details dt')].some(row => row.textContent === 'Type')"), false);
+assert.equal(await evaluate("import('/static/metadata.js').then(({formatMetadataDate}) => formatMetadataDate('2005-01-10T17:08:17'))"), '2005-01-10 17:08');
+const folderActions = await evaluate("document.getElementById('browse-actions').getBoundingClientRect().toJSON()");
+const folderCopy = await evaluate("document.querySelector('#browse-location .copy-path').getBoundingClientRect().toJSON()");
+assert.ok(await evaluate("document.querySelector('#browse-location .copy-path').getBoundingClientRect().right < document.getElementById('breadcrumbs').getBoundingClientRect().left"));
+assert.equal(await evaluate("document.getElementById('metadata-details').textContent.includes('including archives') || document.getElementById('metadata-details').textContent.includes('Scope')"), false);
+assert.ok(folderActions.right <= await evaluate('innerWidth'));
+await screenshot('folder-info');
+assert.equal(await evaluate("document.getElementById('metadata-popover').getBoundingClientRect().top"), await evaluate("document.querySelector('.app-header').getBoundingClientRect().bottom + 8"));
+await nativeKey('Escape', 27);
+await waitFor("!document.getElementById('metadata-popover').matches(':popover-open')");
+assert.equal(await evaluate("document.activeElement === document.querySelector('#browse-actions .item-info')"), true);
+await evaluate("document.querySelector('#browse-actions .item-info').click()");
+await waitFor("document.getElementById('metadata-popover').matches(':popover-open')");
+await call('Input.dispatchMouseEvent', {type:'mousePressed', x:10, y:450, button:'left', clickCount:1});
+await call('Input.dispatchMouseEvent', {type:'mouseReleased', x:10, y:450, button:'left', clickCount:1});
+await waitFor("!document.getElementById('metadata-popover').matches(':popover-open')");
 
 
 // Filtering is immediate and makes no directory request. Both presentations preserve an item.
@@ -205,6 +252,8 @@ await click('view-single');
 assert.equal(await evaluate("new URLSearchParams(location.search).get('view')"), 'single');
 assert.ok(await evaluate("document.getElementById('viewer-strip').hidden && document.getElementById('viewer-image').dataset.path === 'Album/Chapter 1/page2.jpg'"));
 assert.deepEqual(await headerPositions(), initialPositions);
+assert.equal(await evaluate("document.getElementById('viewer-canvas').getBoundingClientRect().bottom"), await evaluate('innerHeight'), 'Image-only canvas uses all space below the header');
+assert.equal(await evaluate("getComputedStyle(document.querySelector('.viewer-feedback')).display"), 'none', 'Empty feedback takes no space');
 await call('Page.reload');
 await readyImage(first);
 assert.equal(await evaluate("document.getElementById('view-single').getAttribute('aria-pressed')"), 'true');
@@ -228,10 +277,49 @@ await call('Input.dispatchMouseEvent', {type:'mouseWheel', x:700,y:350,deltaX:0,
 await readyImage('root3.jpg');
 await open(viewerUrl(first));
 await readyImage(first);
-await evaluate("Object.defineProperty(navigator, 'clipboard', {configurable:true, value:undefined}); window.originalExecCommand=document.execCommand; document.execCommand=command => { if(command==='copy') { window.copiedPath=document.querySelector('.clipboard-input').value; return true; } return false; }; document.querySelector('#viewer-path .copy-path').click()");
+await evaluate("Object.defineProperty(navigator, 'clipboard', {configurable:true, value:undefined}); window.originalExecCommand=document.execCommand; document.execCommand=command => { if(command==='copy') { window.copiedPath=document.querySelector('.clipboard-input').value; return true; } return false; }; document.querySelector('#viewer-location .copy-path').click()");
 await waitFor("window.copiedPath");
-assert.equal(await evaluate('window.copiedPath'), absoluteRoot + '/Album/Chapter 1');
+assert.equal(await evaluate('window.copiedPath'), absoluteRoot + '/' + first);
 await evaluate('document.execCommand=window.originalExecCommand');
+const returnAction = await evaluate("document.getElementById('viewer-close').getBoundingClientRect().toJSON()");
+assert.deepEqual(returnAction, folderModeAction, 'Open and return actions have identical positions and dimensions');
+assert.equal(folderModeAction.width, 64, 'The primary View action has a wider target');
+assert.ok(await evaluate("[...document.querySelectorAll('.viewer-nav')].every(button => button.textContent.trim()==='' && button.querySelector('svg') && button.getAttribute('aria-label') && button.title && button.getBoundingClientRect().height >= 60)"), 'Navigation has no visible labels and keeps generous click targets');
+const viewerFrame = await evaluate("({header:document.querySelector('.viewer-header').offsetHeight, canvas:document.getElementById('viewer-canvas').getBoundingClientRect().toJSON()})");
+assert.equal(viewerFrame.header, await evaluate("document.querySelector('.app-header').offsetHeight"), 'Image and folder headers have the same height');
+assert.ok(viewerFrame.header <= 45, 'Desktop header uses one compact row');
+assert.equal(viewerFrame.canvas.y, viewerFrame.header, 'Canvas starts immediately below the header');
+assert.equal(await evaluate("document.getElementById('viewer-stage').getBoundingClientRect().bottom"), await evaluate("document.querySelector('.strip-frame').getBoundingClientRect().top"), 'No footer reserves image space');
+assert.ok(await evaluate("(() => {const buttons=document.querySelector('.browse-controls').getBoundingClientRect(), filter=document.getElementById('filter').getBoundingClientRect(); return buttons.left===16 && buttons.right < filter.left && buttons.top===filter.top && buttons.height===32 && filter.height===32;})()"), 'Layout controls sit left of the filter in one compact row');
+assert.deepEqual(await evaluate("document.getElementById('viewer-actions').getBoundingClientRect().toJSON()"), folderActions, 'Copy and Info keep the same position and size across modes');
+assert.deepEqual(await evaluate("document.querySelector('#viewer-location .copy-path').getBoundingClientRect().toJSON()"), folderCopy, 'Copy stays immediately left of the path in both modes');
+assert.equal(await evaluate("document.getElementById('viewer-actions').textContent.trim()"), '', 'Header actions use icons with accessible names');
+await evaluate("document.querySelector('#viewer-actions .item-info').click()");
+await waitFor("document.getElementById('metadata-details').textContent.includes('1000 × 1800')");
+assert.equal(await evaluate("(() => { const path=document.querySelector('.metadata-path'); const size=[...document.querySelectorAll('#metadata-details dt')].find(row => row.textContent==='Size').nextElementSibling; return path.getBoundingClientRect().left===size.getBoundingClientRect().left && getComputedStyle(path).fontSize===getComputedStyle(size).fontSize; })()"), true, 'Paths use the same value column and type size as other details');
+assert.deepEqual(await evaluate("({header:document.querySelector('.viewer-header').offsetHeight, canvas:document.getElementById('viewer-canvas').getBoundingClientRect().toJSON()})"), viewerFrame, 'Opening Info must not resize or move the viewer');
+assert.equal(await evaluate("document.querySelector('#viewer-path .item-info') === null"), true);
+assert.match(await evaluate("document.querySelector('#viewer-location .copy-path').getAttribute('aria-label')"), /^(Copy image path|Copied)$/);
+await screenshot('image-metadata');
+await nativeKey('ArrowRight', 39);
+await readyImage(second);
+await waitFor("document.getElementById('metadata-title').textContent === 'page10.jpg'");
+assert.deepEqual(await evaluate("document.getElementById('viewer-actions').getBoundingClientRect().toJSON()"), folderActions, 'Changing the current item must not move its controls');
+assert.equal(await evaluate("document.getElementById('metadata-popover').matches(':popover-open')"), true);
+await evaluate("window.copiedPath=null; Object.defineProperty(navigator, 'clipboard', {configurable:true, value:{writeText:async text => { window.copiedPath=text; }}})");
+const copyBounds = await evaluate("document.querySelector('#viewer-location .copy-path').getBoundingClientRect().toJSON()");
+for (const type of ['mousePressed', 'mouseReleased']) await call('Input.dispatchMouseEvent', {type, x:copyBounds.x+copyBounds.width/2, y:copyBounds.y+copyBounds.height/2, button:'left', clickCount:1});
+await waitFor('window.copiedPath');
+assert.equal(await evaluate('window.copiedPath'), absoluteRoot + '/' + second);
+assert.equal(await evaluate("document.getElementById('metadata-popover').matches(':popover-open')"), true);
+const previousBounds = await evaluate("document.getElementById('viewer-prev').getBoundingClientRect().toJSON()");
+for (const type of ['mousePressed', 'mouseReleased']) await call('Input.dispatchMouseEvent', {type, x:previousBounds.x+previousBounds.width/2, y:previousBounds.y+previousBounds.height/2, button:'left', clickCount:1});
+await readyImage(first);
+await waitFor("document.getElementById('metadata-title').textContent === 'page2.jpg'");
+assert.equal(await evaluate("document.getElementById('metadata-popover').matches(':popover-open')"), true);
+await nativeKey('Escape', 27);
+await waitFor("!document.getElementById('metadata-popover').matches(':popover-open')");
+assert.equal(await evaluate("document.getElementById('viewer').hidden"), false);
 
 await readyImage(first);
 await screenshot('viewer');
@@ -243,11 +331,15 @@ const heightAtEnd = await evaluate("document.getElementById('viewer-image').heig
 await click('viewer-next');
 await waitFor("document.getElementById('viewer-next').getAttribute('aria-label') === 'Go to first item'");
 assert.equal(await evaluate("document.getElementById('viewer-image').height"), heightAtEnd);
+assert.equal(await evaluate("document.getElementById('viewer-next').dataset.icon"), 'first', 'At the end, the arrow becomes an explicit return-to-first action');
+assert.equal(await evaluate("document.getElementById('viewer-next').textContent.trim()"), '');
+await screenshot('collection-boundary');
 await key('ArrowRight', true);
 assert.ok(await evaluate(imageIs(last)));
 await key('ArrowRight');
 await readyImage(first);
 assert.equal(await evaluate("document.getElementById('viewer-wrap')"), null);
+assert.equal(await evaluate("document.getElementById('viewer-next').dataset.icon"), 'next', 'Normal navigation icon returns after wrapping');
 
 // Edge gestures consume momentum; reverse wheel entry is at the previous image's bottom.
 await key('w');
@@ -340,9 +432,12 @@ await readyImage(first);
 await call('Fetch.enable', {patterns:[{urlPattern:'*/image?*'},{urlPattern:'*/api/walk'}]});
 pauseImages = true;
 await evaluate("import('/static/media-cache.js').then(module => module.originals.clear())");
+const beforeLoading = await evaluate("document.getElementById('viewer-canvas').getBoundingClientRect().toJSON()");
 await click('viewer-next');
 await waitImage(second);
 await waitFor("document.getElementById('viewer-status').textContent.includes('Loading')");
+assert.deepEqual(await evaluate("document.getElementById('viewer-canvas').getBoundingClientRect().toJSON()"), beforeLoading, 'Loading feedback does not resize the canvas');
+assert.equal(await evaluate("getComputedStyle(document.querySelector('.viewer-feedback')).display"), 'flex', 'Loading feedback is visible');
 assert.equal(await evaluate("document.getElementById('viewer-image').dataset.path"), first);
 assert.equal(await evaluate("document.getElementById('viewer-zoom').disabled"), false);
 await click('viewer-zoom');
@@ -374,6 +469,7 @@ await waitFor("document.getElementById('viewer-prev').disabled && document.getEl
 
 await open(viewerUrl('Album/Chapter 1/missing.jpg'));
 await waitFor("!document.getElementById('viewer-retry').hidden");
+assert.equal(await evaluate("getComputedStyle(document.querySelector('.viewer-feedback')).display"), 'flex', 'Error feedback and Retry are visible');
 assert.ok(await evaluate("!document.getElementById('viewer-next').disabled"));
 await click('viewer-next');
 await readyImage(first);
@@ -453,9 +549,13 @@ await click('viewer-next');
 await readyImage('Packed.cbz/Chapter 3/page1.jpg');
 await open(viewerUrl('Packed.cbz/Chapter 3/page1.jpg', 'page', 'Packed.cbz'));
 await readyImage('Packed.cbz/Chapter 3/page1.jpg');
-await evaluate("Object.defineProperty(navigator, 'clipboard', {configurable:true, value:{writeText:async text => { window.copiedPath=text; }}}); document.querySelector('#viewer-path .copy-path').click()");
+await evaluate("Object.defineProperty(navigator, 'clipboard', {configurable:true, value:{writeText:async text => { window.copiedPath=text; }}}); document.querySelector('#viewer-location .copy-path').click()");
 await waitFor('window.copiedPath');
-assert.equal(await evaluate('window.copiedPath'), absoluteRoot + '/Packed.cbz');
+assert.equal(await evaluate('window.copiedPath'), absoluteRoot + '/Packed.cbz/Chapter 3/page1.jpg');
+await evaluate("document.querySelector('#viewer-actions .item-info').click()");
+await waitFor("document.getElementById('metadata-details').textContent.includes('Packed.cbz/Chapter 3/page1.jpg')");
+await nativeKey('Escape', 27);
+await waitFor("!document.getElementById('metadata-popover').matches(':popover-open')");
 
 await evaluate("document.querySelector('#viewer-path a[aria-current]').click()");
 await waitFor("document.getElementById('viewer').hidden && new URLSearchParams(location.search).get('folder') === 'Packed.cbz/Chapter 3'");
@@ -470,13 +570,26 @@ assert.ok(await evaluate('document.documentElement.scrollWidth <= innerWidth'));
 assert.equal(await evaluate("document.querySelector('#viewer-path .browsing-folder').textContent"), 'Album');
 assert.ok(await evaluate("getComputedStyle(document.querySelector('#viewer-path [aria-current]')).textDecorationLine.includes('underline')"));
 assert.ok(await evaluate("document.getElementById('viewer-close').getBoundingClientRect().right <= innerWidth"));
-assert.ok(await evaluate("document.querySelector('.viewer-header').getBoundingClientRect().height < 150"));
+assert.ok(await evaluate("document.querySelector('.viewer-header').getBoundingClientRect().height <= 85"));
 assert.ok(await evaluate("document.getElementById('viewer-close').scrollWidth <= document.getElementById('viewer-close').clientWidth"));
 await screenshot('mobile-viewer');
+const mobileModeAction = await evaluate("document.getElementById('viewer-close').getBoundingClientRect().toJSON()");
+const mobileActions = await evaluate("document.getElementById('viewer-actions').getBoundingClientRect().toJSON()");
+const mobileFrame = await evaluate("document.getElementById('viewer-canvas').getBoundingClientRect().toJSON()");
+await evaluate("document.querySelector('#viewer-actions .item-info').click()");
+await waitFor("document.getElementById('metadata-details').textContent.includes('1000 × 1800')");
+assert.deepEqual(await evaluate("document.getElementById('viewer-canvas').getBoundingClientRect().toJSON()"), mobileFrame);
+assert.ok(await evaluate("(() => { const rect=document.getElementById('metadata-popover').getBoundingClientRect(); return rect.left >= 0 && rect.right <= innerWidth && rect.bottom <= innerHeight; })()"));
+assert.ok(await evaluate("document.getElementById('metadata-popover').getBoundingClientRect().top >= document.querySelector('.viewer-header').getBoundingClientRect().bottom"), 'Info must not obscure the location or filename');
+await screenshot('mobile-info');
+await evaluate("document.querySelector('#viewer-actions .item-info').click()");
+assert.equal(await evaluate("document.getElementById('metadata-popover').matches(':popover-open')"), false);
 await key('Tab');
 assert.ok(await evaluate("document.activeElement.getClientRects().length > 0"));
 await open('/?folder=Names&compact=1');
 await waitFor("document.querySelector('.list-name')");
+assert.deepEqual(await evaluate("document.getElementById('read-folder').getBoundingClientRect().toJSON()"), mobileModeAction, 'Open and return actions have identical geometry on narrow screens');
+assert.deepEqual(await evaluate("document.getElementById('browse-actions').getBoundingClientRect().toJSON()"), mobileActions, 'The narrow layout uses the same action position in Browse and View');
 assert.ok(await evaluate("document.querySelector('.list-name').getBoundingClientRect().bottom <= document.querySelector('.list-item').getBoundingClientRect().bottom"));
 assert.ok(await evaluate("document.querySelector('.list-read').getBoundingClientRect().right < document.querySelector('.list-name').getBoundingClientRect().left"));
 assert.equal(await evaluate("document.querySelector('.list-item').firstElementChild.className"),'list-read');
@@ -487,8 +600,11 @@ await click('read-folder');
 await waitFor("document.querySelector('#viewer-path [aria-current]')?.textContent.includes('Chapter 123')");
 assert.ok(await evaluate("document.getElementById('viewer-path').scrollLeft > 0"));
 assert.ok(await evaluate("document.getElementById('viewer-close').getBoundingClientRect().right <= innerWidth"));
-assert.ok(await evaluate("document.querySelector('.viewer-header').getBoundingClientRect().height < 150"));
+assert.ok(await evaluate("document.querySelector('.viewer-header').getBoundingClientRect().height <= 85"));
 await screenshot('long-header');
+const longPathOffset = await evaluate("document.getElementById('viewer-path').scrollLeft");
+await evaluate("import('/gallery.js').then(({app}) => app.viewer.updateCollectionLabel())");
+assert.equal(await evaluate("document.getElementById('viewer-path').scrollLeft"), longPathOffset, 'Refreshing controls preserves the visible part of a long image path');
 // Mixed media: placeholder previews, streaming, native controls, seeking, and cleanup.
 await call('Emulation.setDeviceMetricsOverride', {width:1440,height:900,deviceScaleFactor:1,mobile:false});
 await open('/?folder=Mixed');

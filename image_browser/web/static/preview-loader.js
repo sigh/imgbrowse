@@ -98,11 +98,12 @@ export class PreviewLoader {
     schedule() {
         if (this.scheduled) return;
         this.scheduled = true;
-        // Cards must be attached to the DOM before measuring their priorities.
-        queueMicrotask(() => {
+        // Yield to input and paint before measuring cards or restarting paused work.
+        // A chain of immediately cancelled promises must not monopolize microtasks.
+        setTimeout(() => {
             this.scheduled = false;
             this.pump();
-        });
+        }, 0);
     }
 
     priority(target) {
@@ -142,7 +143,7 @@ export class PreviewLoader {
                 job.signal.throwIfAborted();
                 return job.work(job.controller.signal);
             }).then(job.resolve, error => {
-                if (error.name === 'AbortError' && !job.signal.aborted) this.jobs.push(job);
+                if (error.name === 'AbortError' && job.controller.signal.aborted && !job.signal.aborted) this.jobs.push(job);
                 else job.reject(error);
             }).finally(() => {
                 this.active.delete(job);

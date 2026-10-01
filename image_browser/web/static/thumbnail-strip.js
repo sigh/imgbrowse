@@ -216,7 +216,7 @@ export class ThumbnailStrip {
                 tile.append(label, button);
                 item = {button, tile, label, scope: new TaskScope()}; this.nodes.set(path, item);
                 this.previews.thumbnail(button, path, item.scope).catch(error => {
-                    if (error.name === 'AbortError' || item.scope.signal.aborted) return;
+                    if (item.scope.signal.aborted) return;
                     button.replaceChildren(icon('brokenImage'));
                     button.title = 'Thumbnail unavailable: ' + path;
                 });

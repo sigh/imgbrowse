@@ -1,4 +1,4 @@
-import {renderFolderPath} from './static/folder-path.js';
+import {renderItemHeader} from './static/folder-path.js';
 import {getInfo, refreshScope} from './static/api.js';
 import {icon} from './static/icons.js';
 import {originals} from './static/media-cache.js';
@@ -37,6 +37,9 @@ class GalleryApp {
     }
 
     bindControls() {
+        for (const [id, name] of [['read-folder', 'play'], ['viewer-close', 'back'], ['layout-previews', 'previews'], ['layout-list', 'list']]) {
+            byId(id).append(icon(name));
+        }
         for (const button of document.querySelectorAll('[data-layout]')) {
             button.addEventListener('click', () => this.navigate({compact: button.dataset.layout === 'list'}, true));
         }
@@ -152,8 +155,10 @@ class GalleryApp {
     }
 
     renderBreadcrumbs() {
-        renderFolderPath(byId('breadcrumbs'), this.state.folder, this.rootName,
-            (path, name) => this.folderLink(path, name));
+        renderItemHeader(byId('browse-location'), byId('browse-actions'), {
+            folder: this.state.folder, rootName: this.rootName,
+            folderLink: (path, name) => this.folderLink(path, name),
+        });
     }
 
     render(force = false, restore = false, entry = 'top') {
@@ -185,7 +190,6 @@ class GalleryApp {
         this.previews.setViewerOpen(this.state.viewing);
         host.hidden = !overview;
         byId('viewer-stage').hidden = overview;
-        document.querySelector('.viewer-footer').hidden = overview;
         this.updateLayoutButtons();
         let position = restore ? history.state?.position : null;
         if (overview) {

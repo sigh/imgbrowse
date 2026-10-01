@@ -1,8 +1,17 @@
 /** Small, consistent outline icons. Accessible names belong to their controls. */
 const paths = {
+    play: '<path d="m8 5 11 7-11 7Z" fill="currentColor" stroke="none"/>',
+    back: '<path d="m10 5-7 7 7 7M3 12h18"/>',
+    previews: '<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/><path d="m3 8 3-3 4 4m4-1 3-3 4 4M3 19l3-3 4 4m4-1 3-3 4 4"/>',
+    list: '<path d="M8 5h13M8 12h13M8 19h13M3 5h1M3 12h1M3 19h1"/>',
+    previous: '<path d="m15 5-7 7 7 7"/>',
+    next: '<path d="m9 5 7 7-7 7"/>',
+    first: '<path d="M5 4v16m13-15-7 7 7 7"/>',
+    last: '<path d="M19 4v16M6 5l7 7-7 7"/>',
     grid: '<path d="M3 3h7v7H3ZM14 3h7v7h-7ZM3 14h7v7H3ZM14 14h7v7h-7Z"/>',
     video: '<rect x="3" y="3" width="18" height="18" rx="2"/><path d="m10 8 6 4-6 4Z"/>',
     copy: '<rect x="8" y="8" width="12" height="13" rx="2"/><path d="M16 8V3H3v13h5"/>',
+    info: '<circle cx="12" cy="12" r="9"/><path d="M12 11v6m0-10v1"/>',
     check: '<path d="m5 12 4 4L19 6"/>',
     folder: '<path d="M3 7V5h6l2 2h10v12H3Z"/>',
     image: '<rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8" cy="8" r="1"/><path d="m3 17 6-6 4 4 3-3 5 5"/>',
