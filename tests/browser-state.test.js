@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import {readState, stateUrl, relativePath, revealInBrowse} from '../image_browser/web/static/state.js';
+import {readState, stateUrl, relativePath} from '../image_browser/web/static/state.js';
 import {TaskScope} from '../image_browser/web/static/dom.js';
 import {PreviewLoader, durationLabel} from '../image_browser/web/static/preview-loader.js';
 
@@ -188,17 +188,6 @@ test('relative image paths are unambiguous even with repeated folder names', () 
     assert.equal(readState('folder=Album&image=Album/page.jpg').image, 'Album/Album/page.jpg');
 });
 
-
-test('returning to browse reveals the image without mutating shared state', () => {
-    const state = Object.freeze({...readState('folder=Album&filter=other'), viewing: false});
-    const result = revealInBrowse(state, 'Album/Chapter/page.jpg');
-    assert.equal(state.filter, 'other');
-    assert.equal(result.state.filter, '');
-    assert.deepEqual(result.position, {path: 'Album/Chapter', offset: 0, reveal: true});
-    assert.equal(revealInBrowse(state, 'Elsewhere/page.jpg').position, null);
-    const recursive = {...state, recursive: true};
-    assert.equal(revealInBrowse(recursive, 'Album/Chapter/page.jpg').position.path, 'Album/Chapter/page.jpg');
-});
 
 test('queued video extraction leaves capacity for image previews', async () => {
     const loader = scheduler();

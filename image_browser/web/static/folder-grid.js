@@ -239,8 +239,13 @@ export class FolderGrid {
         }
         if (this.focusPath && !this.state.viewing) {
             const item = [...this.container.querySelectorAll('.card')].find(node => node.dataset.path === this.focusPath);
-            item?.querySelector('.list-name, .card-caption a, .image-name, button')?.focus({preventScroll: true});
-            this.focusPath = null;
+            const target = item?.querySelector(this.focusSelector || '.list-name, .card-caption a, .image-name, button');
+            (target || item?.querySelector('a, button'))?.focus({preventScroll: true});
+            if (item || !this.loadingFolder) {
+                if (!item) this.viewport.focus({preventScroll: true});
+                this.focusPath = null;
+                this.focusSelector = null;
+            }
         }
         this.previews.schedule();
         if (this.state.recursive && this.directory?.trimmedBefore && this.viewport.scrollTop < DISCOVERY_MARGIN

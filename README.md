@@ -30,12 +30,17 @@ Reinstall an updated wheel with `pipx install --force /path/to/new.whl`.
 ## Browse
 
 Open folders or select an image to read. The viewer includes all descendants in
-natural filename order. Use left/right arrows to turn pages, Escape to close,
+natural filename order. Use left/right arrows to turn pages, Escape to return to Browse,
 and the size selector to fit or zoom. Scroll again at an image edge to turn pages.
 
-Browse immediate children as previews or a name list. In View, switch between a
-single item and a recursive thumbnail grid. Filtering matches names in Browse. URLs can be bookmarked, and browser history
-restores grid positions. Refresh picks up filesystem changes.
+The fixed folder/grid/play group opens Browse, collection Overview, or View.
+Browse shows immediate children as previews or a name list; its filter matches
+names. Overview includes descendant media; selecting an item opens View. View's
+thumbnail button shows or hides the tray. Sizing, thumbnail visibility, and
+thumbnail size are remembered for the tab session; viewer URLs restore their
+own presentation. Browse restores the opening folder, filter, layout, position,
+and focus. Breadcrumbs navigate to another folder. Back/Forward restores screen
+and grid position; Refresh picks up filesystem changes.
 
 Supports JPG, JPEG, PNG, GIF, WebP, and BMP, including images inside ZIP and CBZ
 archives. Loose MP4, M4V, WebM, OGV, and MOV videos use native browser playback

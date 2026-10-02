@@ -9,7 +9,7 @@
 </head>
 <body>
     <header class="app-header">
-        <button id="read-folder" data-icon="play" class="mode-action" aria-label="View folder images" title="View folder images"></button>
+        <nav class="mode-navigation choice-group" aria-label="Screens"></nav>
         <div id="browse-location" class="item-location">
             <div class="path-copy"></div>
             <nav id="breadcrumbs" class="breadcrumbs" aria-label="Folder path"></nav>
@@ -33,7 +33,7 @@
 
     <section id="viewer" class="viewer" role="dialog" aria-modal="true" aria-label="Image viewer" hidden>
         <header class="viewer-header">
-            <button id="viewer-close" data-icon="back" class="mode-action" aria-label="Return to folder" title="Return to folder (Escape)"></button>
+            <nav class="mode-navigation choice-group" aria-label="Screens"></nav>
             <div id="viewer-location" class="item-location">
                 <div class="path-copy"></div>
                 <nav id="viewer-path" class="breadcrumbs" aria-label="Image path"></nav>
@@ -53,11 +53,7 @@
                         </div>
                     </div>
                 </div>
-                <div class="choice-group viewer-layouts" role="group" aria-label="Viewing layout">
-                    <button id="view-grid" data-view-layout="grid" data-icon="grid" title="Collection overview" aria-label="Collection overview" aria-pressed="false"></button>
-                    <button id="view-strip" data-view-layout="strip" data-icon="thumbnails" title="Image with thumbnails (T)" aria-label="Image with thumbnails" aria-pressed="true"></button>
-                    <button id="view-single" data-view-layout="single" data-icon="image" title="Image only (T)" aria-label="Image only" aria-pressed="false"></button>
-                </div>
+                <button id="view-strip" data-icon="thumbnails" title="Thumbnails (T)" aria-label="Thumbnails" aria-pressed="true" aria-controls="viewer-strip"></button>
             </div>
             <div id="viewer-actions" class="item-actions"></div>
         </header>

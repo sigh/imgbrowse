@@ -27,7 +27,6 @@ export class ImageViewer {
         this.wheel = new WheelGesture();
         this.strip = byId('viewer-strip');
         this.status = byId('viewer-status');
-        this.closeButton = byId('viewer-close');
         this.previousButton = byId('viewer-prev');
         this.nextButton = byId('viewer-next');
         this.rootName = 'Collection';
@@ -52,7 +51,6 @@ export class ImageViewer {
         byId('viewer-zoom-in').addEventListener('click', () => this.zoom(1));
         byId('viewer-zoom-out').addEventListener('click', () => this.zoom(-1));
         byId('viewer-retry').addEventListener('click', () => this.refresh());
-        this.closeButton.addEventListener('click', this.close);
         this.previousButton.addEventListener('click', () => this.requestMove(true));
         this.nextButton.addEventListener('click', () => this.requestMove(false));
         document.addEventListener('keydown', event => this.onKey(event));
@@ -134,6 +132,7 @@ export class ImageViewer {
     }
 
     show(state, force = false, entry = 'top') {
+        const wasOverview = this.state?.overview;
         const folderChanged = this.state?.folder !== state.folder;
         const layoutChanged = this.state?.layout !== state.layout;
         const anchor = layoutChanged && this.viewport.ready ? this.viewport.point() : null;
@@ -169,13 +168,12 @@ export class ImageViewer {
             this.viewport.clear();
             this.filmstrip.stop();
             this.setSizeMenu(false, false);
-            if (wasOpen) {
-                const target = this.opener?.isConnected && this.opener !== document.body && this.opener.getClientRects().length
-                    ? this.opener : byId('grid-viewport');
-                target.focus({preventScroll: true});
-            }
             return;
         }
+        if (!wasOpen) {
+            closeMetadata();
+            if (!state.overview) this.canvas.focus({preventScroll: true});
+        } else if (wasOverview && !state.overview) this.canvas.focus({preventScroll: true});
         if (state.overview) {
             this.updateControls();
             this.prefetchScope?.dispose();
@@ -185,12 +183,6 @@ export class ImageViewer {
             this.setSizeMenu(false, false);
             this.updateCollectionLabel();
             return;
-        }
-        if (!wasOpen) {
-            closeMetadata();
-            this.opener = this.openingFocus || document.activeElement;
-            this.openingFocus = null;
-            this.canvas.focus({preventScroll: true});
         }
         if (force || this.nearbyCollection !== state.collection) this.nearbyImages = [];
         this.updateCollectionLabel();
@@ -347,10 +339,6 @@ export class ImageViewer {
             else this.close();
             return;
         }
-        if (this.state.overview) {
-            if (event.key.toLowerCase() === 't') this.changeLayout('strip');
-            return;
-        }
         if (event.composedPath().includes(this.video.element)) return;
         if (event.key === 'Tab') {
             const controls = [...this.container.querySelectorAll('a[href], button, select, [tabindex="0"]')]
@@ -361,6 +349,7 @@ export class ImageViewer {
             controls[next]?.focus();
             return;
         }
+        if (this.state.overview) return;
         if (event.target instanceof Element && event.target.matches('select, input, textarea')) return;
         if (!byId('size-menu').hidden) return;
         const vertical = ['ArrowUp', 'ArrowDown'].includes(event.key);

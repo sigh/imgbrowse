@@ -2,19 +2,38 @@ import {renderItemHeader} from './static/folder-path.js';
 import {getInfo, refreshScope} from './static/api.js';
 import {icon} from './static/icons.js';
 import {originals} from './static/media-cache.js';
-import {byId, element} from './static/dom.js';
+import {byId, element, setButtonLabel} from './static/dom.js';
 import {FolderGrid} from './static/folder-grid.js';
 import {ImageViewer} from './static/image-viewer.js';
 import {PreviewLoader} from './static/preview-loader.js';
-import {filename, revealInBrowse, readState, stateUrl} from './static/state.js';
+import {filename, imageSize, readState, stateUrl} from './static/state.js';
 
 const FILTER_DELAY = 150;
+const browseId = () => Date.now().toString(36) + Math.random().toString(36).slice(2);
+const screen = state => !state.viewing ? 'browse' : state.overview ? 'overview' : 'view';
+const MODES = [
+    {mode: 'browse', icon: 'folder', label: 'Browse', ids: ['browse-folder', 'viewer-close']},
+    {mode: 'overview', icon: 'grid', label: 'Collection overview', ids: ['overview-folder', 'view-grid']},
+    {mode: 'view', icon: 'play', label: 'View', ids: ['read-folder', 'viewer-read']},
+];
+
+function focusTarget(node) {
+    if (node?.id) return {id: node.id};
+    const card = node?.closest('.card');
+    if (!card) return {id: 'grid-viewport'};
+    const selector = ['list-read', 'list-name', 'picture', 'image-name'].find(name => node.classList.contains(name));
+    return {path: card.dataset.path, selector: selector ? '.' + selector : '.card-caption button'};
+}
 
 /** Coordinates browser history and independent folder/reader views. */
 class GalleryApp {
     constructor() {
         this.rootName = 'Collection';
-        this.readingSize = 'page';
+        this.preferences = {
+            layout: sessionStorage.getItem('readingLayout') === 'single' ? 'single' : 'strip',
+            size: imageSize(sessionStorage.getItem('readingSize')),
+        };
+        this.buildNavigation();
         this.previews = new PreviewLoader(byId('grid-viewport'), byId('viewer'));
         this.grid = new FolderGrid(this.previews, {
             folderLink: (path, label) => this.folderLink(path, label),
@@ -24,7 +43,7 @@ class GalleryApp {
         });
         this.viewer = new ImageViewer(this.previews, {
             selectImage: (image, entry) => this.navigate({image}, true, entry),
-            changeSize: size => this.navigate({size}, true),
+            changeSize: size => this.changeSize(size),
             changeLayout: layout => this.changeLayout(layout),
             close: () => this.closeViewer(),
             refresh: () => this.refresh(),
@@ -36,6 +55,20 @@ class GalleryApp {
         getInfo().then(info => this.folderLoaded(info.root_name)).catch(() => {});
     }
 
+    buildNavigation() {
+        document.querySelectorAll('.mode-navigation').forEach((group, index) => {
+            for (const {mode, icon: name, label, ids} of MODES) {
+                const button = element('button');
+                button.id = ids[index];
+                button.dataset.mode = mode;
+                button.dataset.icon = name;
+                setButtonLabel(button, label);
+                if (mode === 'browse') button.title = 'Browse (Escape)';
+                group.append(button);
+            }
+        });
+    }
+
     bindControls() {
         for (const button of document.querySelectorAll('[data-icon]')) {
             button.append(icon(button.dataset.icon));
@@ -43,9 +76,10 @@ class GalleryApp {
         for (const button of document.querySelectorAll('[data-layout]')) {
             button.addEventListener('click', () => this.navigate({compact: button.dataset.layout === 'list'}, true));
         }
-        for (const button of document.querySelectorAll('[data-view-layout]')) {
-            button.addEventListener('click', () => this.changeLayout(button.dataset.viewLayout));
+        for (const button of document.querySelectorAll('[data-mode]')) {
+            button.addEventListener('click', () => this.setMode(button.dataset.mode, button));
         }
+        byId('view-strip').addEventListener('click', () => this.changeLayout(this.state.layout === 'strip' ? 'single' : 'strip'));
         this.grid.viewport.addEventListener('scroll', () => {
             clearTimeout(this.positionTimer);
             this.positionTimer = setTimeout(() => this.savePosition(), 120);
@@ -55,7 +89,6 @@ class GalleryApp {
             clearTimeout(this.filterTimer);
             this.filterTimer = setTimeout(() => this.navigate({filter}, true), FILTER_DELAY);
         });
-        byId('read-folder').addEventListener('click', event => this.openViewer(history.state?.selection || null, this.state.folder, event.currentTarget));
         window.addEventListener('popstate', () => this.render(false, true));
     }
 
@@ -83,53 +116,103 @@ class GalleryApp {
             ...(this.state.overview ? {overviewImage: this.state.image} : {})}, '');
     }
 
+    readingOptions() {
+        if (!this.state.viewing) return this.preferences;
+        return {
+            layout: this.state.overview ? history.state?.readingLayout || this.preferences.layout : this.state.layout,
+            size: this.state.size,
+        };
+    }
+
     openViewer(image, collection, opener) {
         if (this.state.overview && image) {
             this.state = {...this.state, image};
             history.replaceState({...history.state, overviewImage: image}, '', stateUrl(this.state));
         }
-        this.viewer.openingFocus = opener || document.activeElement;
-        const changes = {viewing: true, layout: 'strip', overview: false, recursive: false, image, collection, folder: collection, size: this.readingSize};
-        if (collection !== this.state.folder) changes.filter = '';
-        this.navigate(changes);
+        this.navigate({viewing: true, ...this.readingOptions(), overview: false, recursive: false, image, collection},
+            false, 'top', opener);
     }
 
     closeViewer() {
-        if (this.state.viewing) this.navigate({viewing: false, overview: false, recursive: false, image: null});
+        if (!this.state.viewing || this.returning) return;
+        if (history.state?.browseOrigin) {
+            // Every owned viewing entry records its distance from the opener.
+            // Return reverses those entries; it never adds a synthetic close entry.
+            this.returning = true;
+            history.go(-history.state.viewerDepth);
+        } else {
+            // A bookmarked viewer has no owned Browse entry to traverse to.
+            this.navigate({viewing: false, layout: 'strip', overview: false, recursive: false, image: null}, true);
+        }
     }
 
     changeLayout(layout) {
-        const overview = layout === 'grid';
-        this.navigate({layout, overview, recursive: overview});
+        if (screen(this.state) !== 'view') return;
+        this.preferences.layout = layout;
+        sessionStorage.setItem('readingLayout', layout);
+        this.navigate({layout}, true);
     }
 
-    updateLayoutButtons() {
-        for (const button of document.querySelectorAll('[data-view-layout]')) {
-            button.setAttribute('aria-pressed', String(button.dataset.viewLayout === this.state.layout));
+    changeSize(size) {
+        if (screen(this.state) !== 'view') return;
+        this.preferences.size = imageSize(size);
+        sessionStorage.setItem('readingSize', this.preferences.size);
+        this.navigate({size: this.preferences.size}, true);
+    }
+
+    setMode(mode, opener) {
+        if (mode === screen(this.state)) return;
+        if (mode === 'browse') { this.closeViewer(); return; }
+        const image = this.state.viewing ? this.state.image : history.state?.selection || null;
+        const collection = this.state.viewing ? this.state.collection : this.state.folder;
+        if (mode === 'view') { this.openViewer(image, collection, opener); return; }
+        this.navigate({viewing: true, layout: 'grid', overview: true, recursive: true,
+            collection, image, size: this.readingOptions().size}, false, 'top', opener);
+    }
+
+    updateControls() {
+        for (const button of document.querySelectorAll('[data-mode]')) {
+            button.setAttribute('aria-pressed', String(button.dataset.mode === screen(this.state)));
         }
+        document.querySelector('.viewer-tools').hidden = screen(this.state) !== 'view';
+        byId('view-strip').setAttribute('aria-pressed', String(this.state.layout === 'strip'));
     }
 
-    navigate(changes, replace = false, entry = 'top') {
+    navigate(changes, replace = false, entry = 'top', opener = document.activeElement) {
         clearTimeout(this.filterTimer);
+        // Keep the text already entered in Browse when opening before debounce.
+        if (!this.state.viewing && changes.viewing && byId('filter').value !== this.state.filter) {
+            this.navigate({filter: byId('filter').value}, true);
+        }
         this.savePosition();
-        let next = {...this.state, ...changes};
+        const next = {...this.state, ...changes};
         if (!replace && stateUrl(next) === stateUrl(this.state)) return;
         const sameFolder = next.folder === this.state.folder;
-        let position = sameFolder ? (this.state.overview ? history.state?.position : this.grid.position()) : null;
+        const position = sameFolder ? history.state?.position : null;
         const selection = next.viewing ? next.image : sameFolder
             ? this.state.image || history.state?.selection || null : null;
-        if (this.state.viewing && !next.viewing) {
-            ({state: next, position} = revealInBrowse(next, this.state.image));
+        const sameCollection = next.collection === this.state.collection;
+        const overviewPosition = sameFolder && sameCollection
+            ? (this.state.overview ? this.grid.position() : history.state?.overviewPosition) : null;
+        const overviewImage = sameCollection ? (this.state.overview ? next.image : history.state?.overviewImage) : null;
+        const readingLayout = next.overview ? this.readingOptions().layout : next.layout;
+        const metadata = {...history.state, position, selection, overviewPosition, overviewImage, readingLayout};
+        if (next.viewing && !this.state.viewing) {
+            metadata.browseOrigin = {id: history.state.browseId, focus: focusTarget(opener)};
+            metadata.viewerDepth = 1;
+        } else if (next.viewing && metadata.browseOrigin && !replace) {
+            metadata.viewerDepth++;
+        } else if (!next.viewing) {
+            delete metadata.browseOrigin;
+            delete metadata.viewerDepth;
+            if (!sameFolder || this.state.viewing) metadata.browseId = browseId();
         }
-        const overviewPosition = sameFolder ? (this.state.overview ? this.grid.position() : history.state?.overviewPosition) : null;
-        const overviewImage = this.state.overview ? next.image : history.state?.overviewImage;
-        const metadata = {position, selection, overviewPosition, overviewImage};
         history[replace ? 'replaceState' : 'pushState'](metadata, '', stateUrl(next));
         if (this.state.viewing && next.viewing && !this.state.overview && !next.overview && sameFolder
             && next.recursive === this.state.recursive && next.compact === this.state.compact) {
             this.state = next;
-            this.readingSize = next.size;
-            this.updateLayoutButtons();
+            this.entry = metadata;
+            this.updateControls();
             this.viewer.show(next, false, entry);
         } else this.render(false, true, entry);
     }
@@ -163,14 +246,18 @@ class GalleryApp {
     render(force = false, restore = false, entry = 'top') {
         clearTimeout(this.filterTimer);
         const previous = this.state;
+        const origin = this.entry?.browseOrigin;
         this.state = readState();
-        if (previous?.viewing && !this.state.viewing && previous.folder === this.state.folder) {
-            const result = revealInBrowse(this.state, previous.image);
-            this.state = result.state;
-            const position = result.position;
-            history.replaceState({...history.state, position, selection: previous.image}, '', stateUrl(this.state));
+        this.returning = false;
+        let returningFocus;
+        if (!this.state.viewing) {
+            const returningToOrigin = previous?.viewing && origin?.id === history.state?.browseId;
+            if (returningToOrigin) returningFocus = origin.focus;
+            else if (previous?.viewing) returningFocus = {id: 'grid-viewport'};
+            history.replaceState({...history.state, browseId: history.state?.browseId || browseId(),
+                ...(returningToOrigin ? {selection: previous.image} : {})}, '');
         }
-        if (this.state.viewing) this.readingSize = this.state.size;
+        this.entry = history.state;
         for (const button of document.querySelectorAll('[data-layout]')) {
             button.setAttribute('aria-pressed', String((button.dataset.layout === 'list') === this.state.compact));
         }
@@ -189,7 +276,7 @@ class GalleryApp {
         this.previews.setViewerOpen(this.state.viewing);
         host.hidden = !overview;
         byId('viewer-stage').hidden = overview;
-        this.updateLayoutButtons();
+        this.updateControls();
         let position = restore ? history.state?.position : null;
         if (overview) {
             position = history.state?.overviewImage === this.state.image ? history.state?.overviewPosition : null;
@@ -197,8 +284,15 @@ class GalleryApp {
         }
         this.viewer.show(this.state, force, entry);
         if (overview) document.querySelector('.strip-frame').hidden = true;
+        if (returningFocus?.path) {
+            this.grid.focusPath = returningFocus.path;
+            this.grid.focusSelector = returningFocus.selector;
+        }
         this.grid.show(overview ? {...this.state, folder: this.state.collection, viewing: false, recursive: true, compact: false, filter: ''}
             : {...this.state, recursive: false}, force, position);
+        if (overview && !previous?.overview) this.grid.viewport.focus({preventScroll: true});
+        if (returningFocus?.path && this.grid.focusPath) this.grid.viewport.focus({preventScroll: true});
+        if (returningFocus?.id) (byId(returningFocus.id) || this.grid.viewport).focus({preventScroll: true});
     }
 }
 

@@ -15,12 +15,14 @@ const requests = [];
 const held = [];
 let pauseImages = false;
 let pauseWalk = false;
+let pauseFolders = false;
 socket.addEventListener('message', event => {
     const message = JSON.parse(event.data);
     if (message.method === 'Network.requestWillBeSent') requests.push(message.params.request.url);
     if (message.method === 'Fetch.requestPaused') {
         const {requestId, request} = message.params;
-        if ((pauseImages && request.url.includes('/image?')) || (pauseWalk && request.url.includes('/api/walk'))) held.push(requestId);
+        if ((pauseImages && request.url.includes('/image?')) || (pauseWalk && request.url.includes('/api/walk'))
+            || (pauseFolders && request.url.includes('/api/folder'))) held.push(requestId);
         else call('Fetch.continueRequest', {requestId}).catch(() => {});
     }
     if (message.method === 'Runtime.exceptionThrown') exceptions.push(message.params.exceptionDetails);
@@ -119,7 +121,7 @@ assert.equal(await evaluate("getComputedStyle(document.querySelector('.card-capt
 await call('Input.dispatchMouseEvent', {type:'mouseMoved', x:700, y:450});
 
 assert.equal(await evaluate("document.getElementById('read-folder').textContent.trim()"), '', 'Opening the viewer uses one icon action');
-assert.equal(await evaluate("document.querySelectorAll('.mode-switch').length"), 0, 'No disabled current-mode controls');
+assert.ok(await evaluate("[...document.querySelectorAll('.mode-navigation')].every(group => [...group.querySelectorAll('button')].map(button => button.dataset.mode).join(',') === 'browse,overview,view' && group.querySelectorAll('[aria-pressed=true]').length === 1 && !group.querySelector('button:disabled'))"), 'Every screen uses the same fixed navigation group with one selected destination');
 assert.ok(await evaluate("[...document.querySelectorAll('[data-layout]')].every(button => button.textContent.trim()==='' && button.querySelector('svg') && button.getAttribute('aria-label') && button.title)"), 'Layout choices use named icons');
 await pause(150);
 const visibleCards = await evaluate(`(() => {
@@ -189,7 +191,150 @@ const historyBeforeSameLayout = await evaluate('history.length');
 await click('layout-list');
 assert.equal(await evaluate('history.length'), historyBeforeSameLayout);
 
-// Mode switching reveals the current item and resumes it; Back retraces mode changes.
+// Each navigation control has a fixed destination; presentation never navigates.
+await open('/?folder=Album');
+await waitFor("document.querySelectorAll('.card').length === 2");
+const browseOverviewAction = await evaluate("document.getElementById('overview-folder').getBoundingClientRect().toJSON()");
+const originalsBeforeOverview = requests.filter(url => new URL(url).pathname === '/image').length;
+assert.ok(await evaluate("document.getElementById('overview-folder').closest('.mode-navigation')"));
+await click('overview-folder');
+await waitFor("!document.getElementById('overview').hidden && document.querySelectorAll('#overview .card').length === 3");
+assert.ok(await evaluate("document.getElementById('viewer-image').hidden && document.activeElement === document.getElementById('grid-viewport')"));
+assert.equal(requests.filter(url => new URL(url).pathname === '/image').length, originalsBeforeOverview, 'Direct overview entry loads previews without loading an original');
+assert.deepEqual(await evaluate("document.getElementById('view-grid').getBoundingClientRect().toJSON()"), browseOverviewAction, 'Overview has the same position in Browse and the viewer');
+assert.ok(await evaluate("document.getElementById('view-grid').getAttribute('aria-pressed') === 'true' && document.querySelector('.viewer-tools').hidden"));
+const overviewEntry = await evaluate('({url:location.href,length:history.length})');
+await click('view-grid');
+await key('t');
+assert.deepEqual(await evaluate('({url:location.href,length:history.length})'), overviewEntry, 'Current screen and presentation shortcuts do not leave Overview');
+await key('Tab');
+assert.ok(await evaluate("document.activeElement.closest('#viewer') && document.activeElement.getClientRects().length"));
+await screenshot('overview-entry');
+await evaluate(`document.querySelector('#overview [data-path="${first}"] .picture').click()`);
+await readyImage(first);
+assert.equal(await evaluate("document.getElementById('view-grid').getAttribute('aria-pressed')"), 'false');
+assert.ok(await evaluate("document.activeElement === document.getElementById('viewer-canvas')"));
+const viewEntry = await evaluate('({url:location.href,length:history.length})');
+await click('viewer-read');
+assert.deepEqual(await evaluate('({url:location.href,length:history.length})'), viewEntry, 'The selected View button does nothing');
+await click('view-strip');
+assert.equal(await evaluate('history.length'), viewEntry.length, 'The thumbnail toggle changes presentation without a navigation entry');
+assert.ok(await evaluate("document.getElementById('viewer-read').getAttribute('aria-pressed') === 'true' && document.getElementById('overview').hidden"));
+await click('viewer-zoom');
+await evaluate("document.querySelector('[data-size=width]').click()");
+assert.equal(await evaluate("sessionStorage.getItem('readingLayout')"), 'single');
+assert.equal(await evaluate("sessionStorage.getItem('readingSize')"), 'width');
+await click('view-grid');
+await waitFor("!document.getElementById('overview').hidden");
+await call('Page.reload');
+await waitFor("!document.getElementById('overview')?.hidden && document.querySelectorAll('#overview .card').length === 3");
+await click('viewer-read');
+await readyImage(first);
+assert.equal(await evaluate("new URLSearchParams(location.search).get('view')"), 'single', 'Reloading overview retains its underlying reading layout');
+assert.equal(await evaluate("document.getElementById('viewer-zoom').dataset.size"), 'width');
+await click('viewer-close');
+await waitFor("document.getElementById('viewer').hidden");
+await call('Page.reload');
+await waitFor("document.querySelectorAll('.card').length === 2 && document.getElementById('viewer').hidden");
+await click('read-folder');
+await readyImage(first);
+assert.equal(await evaluate("new URLSearchParams(location.search).get('view')"), 'single', 'Entering from Browse reuses the session reading layout');
+assert.equal(await evaluate("document.getElementById('viewer-zoom').dataset.size"), 'width');
+await open(viewerUrl(second));
+await readyImage(second);
+assert.ok(await evaluate("!document.getElementById('viewer-strip').hidden && document.getElementById('viewer-zoom').dataset.size === 'page'"), 'Viewer URLs override session defaults');
+assert.equal(await evaluate("sessionStorage.getItem('readingLayout')"), 'single', 'Opening a viewer URL does not rewrite preferences');
+await click('view-grid');
+await waitFor("!document.getElementById('overview').hidden");
+await click('viewer-read');
+await readyImage(second);
+assert.ok(await evaluate("!document.getElementById('viewer-strip').hidden"), 'Overview returns to the actual bookmarked reading layout');
+await open('/?folder=Single');
+await waitFor("document.querySelector('[data-path=\"Single/only.jpg\"]')");
+await evaluate("document.querySelector('[data-path=\"Single/only.jpg\"] .picture').click()");
+await readyImage('Single/only.jpg');
+assert.ok(await evaluate("document.getElementById('viewer-strip').hidden && document.getElementById('viewer-zoom').dataset.size === 'width'"), 'Opening another folder uses the remembered presentation');
+// Restore defaults through the real controls for the rest of the smoke scenarios.
+await click('view-strip');
+await click('viewer-zoom');
+await evaluate("document.querySelector('[data-size=page]').click()");
+
+// Return restores filtered List, its scroll anchor and disposed opener after reload.
+// Back leaves the restored Browse entry; Forward can revisit the viewing entries.
+await open('/?folder=Album');
+await waitFor("document.querySelectorAll('.card').length === 2");
+await evaluate("document.querySelector('#breadcrumbs a').click()");
+await waitFor("!new URLSearchParams(location.search).has('folder') && document.querySelectorAll('.card').length > 5");
+await click('layout-list');
+await evaluate("{const input=document.getElementById('filter'); input.value='root1'; input.dispatchEvent(new Event('input'));}");
+await waitFor("new URLSearchParams(location.search).get('filter') === 'root1'");
+await evaluate("document.getElementById('grid-viewport').scrollTop=650");
+await pause(160);
+const browseContext = await evaluate(`(() => {
+    const viewport=document.getElementById('grid-viewport');
+    const opener=[...document.querySelectorAll('.list-name')].find(node => node.getBoundingClientRect().top >= viewport.getBoundingClientRect().top);
+    window.browseOpener=opener;
+    return {url:location.search, position:history.state.position, scroll:viewport.scrollTop, path:opener.closest('.card').dataset.path};
+})()`);
+await evaluate('browseOpener.focus(); browseOpener.click()');
+await readyImage(browseContext.path);
+await click('view-grid');
+await waitFor("!document.getElementById('overview').hidden");
+await click('viewer-read');
+await readyImage(browseContext.path);
+await call('Page.reload');
+await readyImage(browseContext.path);
+const historyBeforeReturn = await evaluate('history.length');
+await call('Fetch.enable', {patterns:[{urlPattern:'*/api/folder*'}]});
+pauseFolders = true;
+await click('viewer-close');
+await waitFor("document.getElementById('viewer').hidden && document.getElementById('grid-viewport').getAttribute('aria-busy') === 'true' && document.activeElement.id === 'grid-viewport'");
+pauseFolders = false;
+for (const requestId of held.splice(0)) await call('Fetch.continueRequest', {requestId}).catch(() => {});
+await call('Fetch.disable');
+await waitFor(`document.getElementById('viewer').hidden && document.activeElement.closest('.card')?.dataset.path === ${JSON.stringify(browseContext.path)}`);
+assert.equal(await evaluate('location.search'), browseContext.url);
+assert.equal(await evaluate('history.length'), historyBeforeReturn, 'Browse reverses viewing transitions without adding a close entry');
+assert.deepEqual(await evaluate('history.state.position'), browseContext.position);
+assert.ok(Math.abs(await evaluate("document.getElementById('grid-viewport').scrollTop") - browseContext.scroll) < 2);
+assert.ok(await evaluate("document.activeElement.matches('.list-name') && document.getElementById('filter').value === 'root1'"));
+await screenshot('browse-restored');
+await evaluate('history.back()');
+await waitFor("document.getElementById('viewer').hidden && location.search === '?folder=Album'");
+await evaluate('history.forward()');
+await waitFor("document.getElementById('viewer').hidden && new URLSearchParams(location.search).get('filter') === 'root1'");
+await evaluate('history.forward()');
+await readyImage(browseContext.path);
+await click('viewer-close');
+await waitFor("document.getElementById('viewer').hidden && new URLSearchParams(location.search).get('filter') === 'root1'");
+
+// Traversing beyond the opening filter must not widen Browse on return.
+await open('/?folder=Album&compact=1');
+await waitFor("document.querySelectorAll('.list-item').length === 2");
+await evaluate("{const input=document.getElementById('filter'); input.value='Chapter 1'; input.dispatchEvent(new Event('input')); document.getElementById('read-folder').focus(); document.getElementById('read-folder').click();}");
+await readyImage(first);
+await click('viewer-next');
+await readyImage(second);
+await click('viewer-next');
+await readyImage(last);
+await key('Escape');
+await waitFor("document.getElementById('viewer').hidden && document.activeElement.id === 'read-folder'");
+assert.equal(await evaluate('location.search'), '?folder=Album&compact=1&filter=Chapter+1', 'Opening before filter debounce retains the entered text');
+assert.equal(await evaluate("document.getElementById('filter').value"), 'Chapter 1');
+assert.equal(await evaluate("document.querySelectorAll('.list-item').length"), 1);
+
+// A direct viewer URL has no owned opener and replaces itself with Browse.
+await open(viewerUrl(last));
+await readyImage(last);
+assert.ok(await evaluate('!history.state?.browseOrigin'));
+const directHistory = await evaluate('history.length');
+await click('viewer-close');
+await waitFor("document.getElementById('viewer').hidden && location.search === '?folder=Album'");
+assert.equal(await evaluate('history.length'), directHistory);
+assert.equal(await evaluate("document.activeElement.id"), 'grid-viewport');
+
+// Browse restores its opener; viewing resumes the most recently selected media.
+await open('/');
 await open('/?folder=Album');
 await waitFor("document.querySelectorAll('.card').length === 2");
 await click('read-folder');
@@ -204,7 +349,7 @@ await click('viewer-next');
 await readyImage(second);
 await click('viewer-close');
 await waitFor("document.getElementById('viewer').hidden");
-await waitFor("document.activeElement.closest('.card')?.dataset.path === 'Album/Chapter 1'");
+await waitFor("document.activeElement.id === 'read-folder'");
 await click('read-folder');
 await readyImage(second);
 assert.ok(await evaluate("(() => { const image = document.getElementById('viewer-image'); return !image.hidden && image.naturalWidth > 0 && image.getBoundingClientRect().width > 0; })()"), 'Reopening a cached image must display decoded pixels');
@@ -226,11 +371,13 @@ await open('/?folder=Album&compact=1');
 await waitFor("document.querySelector('.list-read')");
 await evaluate("document.querySelector('.list-read').click()");
 await readyImage(first);
-assert.equal(await evaluate("new URLSearchParams(location.search).get('folder')"), 'Album/Chapter 1');
+assert.equal(await evaluate("new URLSearchParams(location.search).get('folder')"), 'Album');
+assert.equal(await evaluate("new URLSearchParams(location.search).get('collection')"), 'Album/Chapter 1');
 await click('viewer-next');
 await readyImage(second);
 await click('viewer-close');
-await waitFor("document.activeElement.closest('.card')?.dataset.path === 'Album/Chapter 1/page10.jpg'");
+await waitFor("document.activeElement.matches('.list-read') && document.activeElement.closest('.card')?.dataset.path === 'Album/Chapter 1'");
+assert.equal(await evaluate('location.search'), '?folder=Album&compact=1', 'Child View returns to its parent Browse layout');
 await call('Page.reload');
 await waitFor("document.querySelector('.list-name')");
 await click('read-folder');
@@ -242,6 +389,10 @@ assert.equal(await evaluate('history.state.selection'), null);
 // Recursive paging and Back reuse discovered items without rebuilding the traversal.
 await open('/?view=grid');
 await waitFor("document.getElementById('summary').textContent.includes('60 items')");
+assert.ok(await evaluate("document.activeElement.id === 'grid-viewport' && !document.getElementById('view-grid').matches(':focus-visible')"), 'Opening Overview focuses its contents without outlining the selected navigation button');
+await screenshot('overview-new-page');
+await nativeKey('Tab', 9);
+assert.ok(await evaluate("document.activeElement.matches('a[href]:focus-visible, button:focus-visible') && getComputedStyle(document.activeElement).outlineStyle === 'solid'"), 'Keyboard navigation retains a visible focus outline');
 for (let page=0; page<5; page++) {
     await evaluate("document.getElementById('grid-viewport').scrollTop = document.getElementById('grid-viewport').scrollHeight");
     await pause(100);
@@ -259,16 +410,18 @@ assert.equal(await evaluate('history.state.overviewPosition.path'), recursiveAnc
 // The layout choice keeps the header geometry fixed and survives history and reload.
 await open(viewerUrl(first));
 await readyImage(first);
-const headerPositions = () => evaluate(`(() => ({
-    mode: document.getElementById('viewer-close').getBoundingClientRect().toJSON(),
-    copy: document.querySelector('#viewer-location .copy-path').getBoundingClientRect().toJSON(),
-    info: document.querySelector('#viewer-actions .item-info').getBoundingClientRect().toJSON(),
-    layouts: document.querySelector('.viewer-layouts').getBoundingClientRect().x,
-    size: document.querySelector('.size-control').getBoundingClientRect().x,
-    width: document.querySelector('.size-control').getBoundingClientRect().width,
-}))()`);
+const headerPositions = (viewing = true) => evaluate(`(() => {
+    const header = document.querySelector(${JSON.stringify(viewing ? '.viewer-header' : '.app-header')});
+    return {
+        navigation: header.querySelector('.mode-navigation').getBoundingClientRect().toJSON(),
+        modes: [...header.querySelectorAll('[data-mode]')].map(button => button.getBoundingClientRect().toJSON()),
+        height: header.offsetHeight,
+        copy: header.querySelector('.copy-path').getBoundingClientRect().toJSON(),
+        info: header.querySelector('.item-info').getBoundingClientRect().toJSON(),
+    };
+})()`);
 const initialPositions = await headerPositions();
-await click('view-single');
+await click('view-strip');
 assert.equal(await evaluate("new URLSearchParams(location.search).get('view')"), 'single');
 assert.ok(await evaluate("document.getElementById('viewer-strip').hidden && document.getElementById('viewer-image').dataset.path === 'Album/Chapter 1/page2.jpg'"));
 assert.deepEqual(await headerPositions(), initialPositions);
@@ -276,14 +429,14 @@ assert.equal(await evaluate("document.getElementById('viewer-canvas').getBoundin
 assert.equal(await evaluate("getComputedStyle(document.querySelector('.viewer-feedback')).display"), 'none', 'Empty feedback takes no space');
 await call('Page.reload');
 await readyImage(first);
-assert.equal(await evaluate("document.getElementById('view-single').getAttribute('aria-pressed')"), 'true');
+assert.equal(await evaluate("document.getElementById('view-strip').getAttribute('aria-pressed')"), 'false');
 await key('t');
 await waitFor("!new URLSearchParams(location.search).has('view') && !document.getElementById('viewer-strip').hidden");
 assert.deepEqual(await headerPositions(), initialPositions);
 await click('view-grid');
 await waitFor("!document.getElementById('overview').hidden");
 assert.equal(await evaluate("new URLSearchParams(location.search).get('view')"), 'grid');
-assert.ok(await evaluate("document.querySelector('.size-control').classList.contains('unavailable')"));
+assert.ok(await evaluate("document.querySelector('.viewer-tools').hidden"));
 assert.deepEqual(await headerPositions(), initialPositions);
 await evaluate('history.back()');
 await waitFor("document.getElementById('view-strip').getAttribute('aria-pressed') === 'true' && !document.getElementById('viewer-strip').hidden");
@@ -302,8 +455,9 @@ await waitFor("window.copiedPath");
 assert.equal(await evaluate('window.copiedPath'), absoluteRoot + '/' + first);
 await evaluate('document.execCommand=window.originalExecCommand');
 assert.equal(await evaluate("getComputedStyle(document.querySelector('#viewer-strip button.selected')).borderColor"), await evaluate("getComputedStyle(document.getElementById('layout-previews')).borderColor"), 'Current thumbnails and layout choices share the selection accent');
-const returnAction = await evaluate("document.getElementById('viewer-close').getBoundingClientRect().toJSON()");
-assert.deepEqual(returnAction, folderModeAction, 'Open and return actions have identical positions and dimensions');
+const viewAction = await evaluate("document.getElementById('viewer-read').getBoundingClientRect().toJSON()");
+assert.deepEqual(viewAction, folderModeAction, 'View has identical geometry on every screen');
+assert.equal(await evaluate("document.getElementById('viewer-close').getBoundingClientRect().width"), 32);
 assert.equal(folderModeAction.width, 64, 'The primary View action has a wider target');
 assert.ok(await evaluate("[...document.querySelectorAll('.viewer-nav')].every(button => button.textContent.trim()==='' && button.querySelector('svg') && button.getAttribute('aria-label') && button.title && button.getBoundingClientRect().height >= 60)"), 'Navigation has no visible labels and keeps generous click targets');
 const viewerFrame = await evaluate("({header:document.querySelector('.viewer-header').offsetHeight, canvas:document.getElementById('viewer-canvas').getBoundingClientRect().toJSON()})");
@@ -434,7 +588,7 @@ await waitFor("import('/gallery.js').then(({app})=>app.viewer.viewport.box.heigh
 // Hidden filmstrip cancels preview work and does not request thumbnails on later pages.
 await evaluate("document.getElementById('viewer-canvas').scrollTop = 450");
 const beforeStrip = await sourcePoint();
-await click('view-single');
+await click('view-strip');
 assert.equal(await evaluate("new URLSearchParams(location.search).get('view')"), 'single');
 await pause(150);
 assert.ok(Math.abs(await sourcePoint() - beforeStrip) < 3);
@@ -538,6 +692,15 @@ for (const requestId of held.splice(0)) await call('Fetch.continueRequest',{requ
 await waitFor("document.getElementById('viewer-status').textContent.includes('No images')");
 assert.ok(await evaluate("document.getElementById('viewer-zoom').disabled"));
 await call('Fetch.disable');
+await click('viewer-close');
+await waitFor("document.getElementById('viewer').hidden && document.getElementById('grid-status').textContent.includes('no visible')");
+await click('overview-folder');
+await waitFor("!document.getElementById('overview').hidden && document.getElementById('grid-status').textContent.includes('No images')");
+await click('viewer-read');
+await waitFor("document.getElementById('overview').hidden && document.getElementById('viewer-status').textContent.includes('No images')");
+assert.equal(await evaluate("document.getElementById('viewer-read').getAttribute('aria-pressed')"), 'true');
+await click('viewer-close');
+await waitFor("document.getElementById('viewer').hidden && location.search === '?folder=Empty'");
 await open('/?folder=Single&viewer=1');
 await readyImage('Single/only.jpg');
 await waitFor("document.getElementById('viewer-prev').disabled && document.getElementById('viewer-next').disabled");
@@ -560,7 +723,7 @@ await pause(100);
 assert.ok(await evaluate("Number(new URLSearchParams(location.search).get('image').match(/root(\\d+)/)[1]) >= 4"));
 
 // A visible strip retains buttons and their order as pages turn; discovery is demand driven.
-await click('view-strip');
+if (await evaluate("document.getElementById('view-strip').getAttribute('aria-pressed') === 'false'")) await click('view-strip');
 await waitFor("document.querySelectorAll('#viewer-strip button').length >= 16");
 await evaluate("window.retainedThumbnail=document.querySelector('#viewer-strip button')");
 const stripPaths = await evaluate("Array.from(document.querySelectorAll('#viewer-strip button'),button=>button.dataset.path)");
@@ -602,7 +765,7 @@ assert.equal(await evaluate("document.querySelectorAll('#size-menu > button').le
 await screenshot('sizing');
 await key('Escape');
 assert.ok(await evaluate("document.getElementById('size-menu').hidden && !document.getElementById('viewer').hidden"));
-await click('view-single');
+await click('view-strip');
 
 // Breadcrumbs leave the reader for the image's actual folder, preserving the grid layout.
 await open(viewerUrl(first));
@@ -637,7 +800,7 @@ await waitFor("document.getElementById('viewer').hidden && new URLSearchParams(l
 
 // Special filenames and narrow screens retain controls, full names, and a visible focus target.
 // Collection identity follows traversal, even when the URL's browsing folder differs.
-await open(stateUrl({...readState(''), viewing:true, folder:'Album', collection:'Album/Chapter 2', image:last}));
+await open(stateUrl({...readState(''), viewing:true, folder:'Album', collection:'Album/Chapter 2', image:last, filter:'Chapter'}));
 await readyImage(last);
 assert.equal(await evaluate("document.querySelector('#viewer-path .selected-folder').textContent"), 'Chapter 2');
 assert.equal(await evaluate("document.getElementById('view-grid').title"), 'Collection overview');
@@ -645,9 +808,10 @@ assert.equal(await evaluate("document.getElementById('view-grid').getAttribute('
 await click('view-grid');
 await waitFor("!document.getElementById('overview').hidden");
 assert.equal(await evaluate("document.querySelector('#viewer-path .selected-folder').textContent"), 'Chapter 2');
-await click('view-single');
+await click('viewer-read');
 await readyImage(last);
 assert.equal(await evaluate("new URLSearchParams(location.search).get('collection')"), 'Album/Chapter 2');
+assert.equal(await evaluate("new URLSearchParams(location.search).get('filter')"), 'Chapter', 'Reading from overview retains the independent browsing context');
 
 // A scrolling path retains the collection and filename without moving header actions.
 await call('Emulation.setDeviceMetricsOverride', {width:320,height:844,deviceScaleFactor:1,mobile:true});
@@ -664,6 +828,26 @@ assert.ok(await evaluate(`(() => {
 })()`), 'The collection and filename remain visible at the end of an overflowing path');
 assert.deepEqual(await headerPositions(), beforePathScroll);
 await screenshot('pinned-collection-mobile');
+assert.equal(beforePathScroll.height, 85);
+assert.deepEqual(beforePathScroll.modes.map(rect => [rect.width, rect.height]), [[32,32], [32,32], [64,32]]);
+const readingTools = await evaluate("[...document.querySelectorAll('#viewer-zoom, #view-strip')].map(button => button.getBoundingClientRect().toJSON())");
+assert.ok(readingTools.every(rect => rect.x >= beforePathScroll.navigation.right && rect.right <= 320));
+await click('view-strip');
+assert.deepEqual(await headerPositions(), beforePathScroll);
+assert.deepEqual(await evaluate("[...document.querySelectorAll('#viewer-zoom, #view-strip')].map(button => button.getBoundingClientRect().toJSON())"), readingTools);
+await screenshot('mobile-320-image-only');
+await click('view-grid');
+await waitFor("!document.getElementById('overview').hidden && document.querySelector('#overview .card')");
+assert.deepEqual(await headerPositions(), beforePathScroll, 'All navigation and item actions keep their anchors at 320px');
+assert.ok(await evaluate("document.querySelector('.viewer-tools').hidden && document.documentElement.scrollWidth <= innerWidth"));
+await screenshot('mobile-320-overview');
+await click('viewer-close');
+await waitFor("document.getElementById('viewer').hidden && document.querySelectorAll('.folder-card').length === 2");
+assert.deepEqual(await headerPositions(false), beforePathScroll, 'Browse uses the same navigation, Copy and Info anchors');
+await screenshot('mobile-320-browse');
+const currentBrowseEntry = await evaluate('({url:location.href,length:history.length})');
+await click('browse-folder');
+assert.deepEqual(await evaluate('({url:location.href,length:history.length})'), currentBrowseEntry);
 await call('Emulation.setDeviceMetricsOverride', {width:1440,height:900,deviceScaleFactor:1,mobile:false});
 await open(viewerUrl('Odd & #/a ?#%.jpg', 'page', 'Odd & #'));
 await readyImage('Odd & #/a ?#%.jpg');
@@ -677,7 +861,7 @@ assert.ok(await evaluate("document.getElementById('viewer-close').getBoundingCli
 assert.ok(await evaluate("document.querySelector('.viewer-header').getBoundingClientRect().height <= 85"));
 assert.ok(await evaluate("document.getElementById('viewer-close').scrollWidth <= document.getElementById('viewer-close').clientWidth"));
 await screenshot('mobile-viewer');
-const mobileModeAction = await evaluate("document.getElementById('viewer-close').getBoundingClientRect().toJSON()");
+const mobileModeAction = await evaluate("document.getElementById('viewer-read').getBoundingClientRect().toJSON()");
 const mobileActions = await evaluate("document.getElementById('viewer-actions').getBoundingClientRect().toJSON()");
 const mobileFrame = await evaluate("document.getElementById('viewer-canvas').getBoundingClientRect().toJSON()");
 await evaluate("document.querySelector('#viewer-actions .item-info').click()");
@@ -692,7 +876,7 @@ await key('Tab');
 assert.ok(await evaluate("document.activeElement.getClientRects().length > 0"));
 await open('/?folder=Names&compact=1');
 await waitFor("document.querySelector('.list-name')");
-assert.deepEqual(await evaluate("document.getElementById('read-folder').getBoundingClientRect().toJSON()"), mobileModeAction, 'Open and return actions have identical geometry on narrow screens');
+assert.deepEqual(await evaluate("document.getElementById('read-folder').getBoundingClientRect().toJSON()"), mobileModeAction, 'View keeps identical geometry on narrow screens');
 assert.deepEqual(await evaluate("document.getElementById('browse-actions').getBoundingClientRect().toJSON()"), mobileActions, 'The narrow layout uses the same action position in Browse and View');
 assert.ok(await evaluate("document.querySelector('.list-name').getBoundingClientRect().bottom <= document.querySelector('.list-item').getBoundingClientRect().bottom"));
 assert.ok(await evaluate("document.querySelector('.list-read').getBoundingClientRect().right < document.querySelector('.list-name').getBoundingClientRect().left"));

@@ -89,14 +89,13 @@ function renderFolderPath(container, folder, rootName, folderLink, {currentLink,
 /** Actions belong next to the item they describe. */
 function renderItemActions(container, target, kind) {
     const focused = container.contains(document.activeElement) ? document.activeElement.className : null;
-    container.replaceChildren();
     const info = element('button', 'item-info');
     info.type = 'button';
     setButtonLabel(info, `${kind[0].toUpperCase() + kind.slice(1)} info`);
     info.setAttribute('aria-controls', 'metadata-popover');
     info.append(icon('info'));
     info.addEventListener('click', () => toggleMetadata(target, info, container));
-    container.append(info);
+    container.replaceChildren(info);
     updateMetadataTarget(target, info, container);
     if (focused === info.className) info.focus({preventScroll: true});
 }
