@@ -114,9 +114,8 @@ def main():
                 time.sleep(.1)
             debug_port = port_file.read_text().splitlines()[0]
             check_http(base)
-            command = ['node', str(Path(__file__).with_suffix('.mjs')), debug_port, base]
-            if args.screenshots:
-                command.append(str(args.screenshots.resolve()))
+            command = ['node', str(Path(__file__).with_suffix('.mjs')), debug_port, base,
+                       str(args.screenshots.resolve()) if args.screenshots else '', str(root)]
             subprocess.run(command, check=True, timeout=60)
             if args.performance:
                 large = root / 'Large'

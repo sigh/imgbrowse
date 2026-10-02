@@ -1,10 +1,10 @@
 /** End-to-end checks through Chrome's DevTools protocol; no browser library needed. */
 import assert from 'node:assert/strict';
-import {writeFileSync} from 'node:fs';
+import {mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync} from 'node:fs';
 import {join} from 'node:path';
 import {readState, stateUrl} from '../image_browser/web/static/state.js';
 
-const [debugPort, base, screenshots] = process.argv.slice(2);
+const [debugPort, base, screenshots, fixtureRoot] = process.argv.slice(2);
 const targets = await (await fetch(`http://127.0.0.1:${debugPort}/json/list`)).json();
 const socket = new WebSocket(targets.find(target => target.type === 'page').webSocketDebuggerUrl);
 await new Promise(resolve => socket.addEventListener('open', resolve, {once: true}));
@@ -406,6 +406,81 @@ await waitFor("!document.getElementById('viewer-stage').hidden");
 await evaluate('history.back()');
 await waitFor("!document.getElementById('overview').hidden");
 assert.equal(await evaluate('history.state.overviewPosition.path'), recursiveAnchor);
+
+// Files can disappear while reading. Return uses distance in the original
+// filtered order, preferring the following item when both sides are equally near.
+const returnImage = readFileSync(join(fixtureRoot, 'root2.jpg'));
+for (const scenario of [
+    {name: 'next', removed: [0], expected: 1},
+    {name: 'previous', removed: [0, 1], expected: -1},
+    {name: 'second-next', removed: [0, 1, -1], expected: 2},
+    {name: 'rename', removed: [0], expected: 1, rename: true},
+    {name: 'preview-next', removed: [0], expected: 1, previews: true},
+    {name: 'resize', removed: [], expected: 0, previews: true, narrow: true},
+    {name: 'no-neighbors', removed: Array.from({length:17}, (_, index) => index - 8), expected: null},
+]) {
+    const folder = 'Return ' + scenario.name;
+    const directory = join(fixtureRoot, folder);
+    mkdirSync(directory);
+    const names = Array.from({length:60}, (_, index) => 'page' + String(index).padStart(2, '0') + '.jpg');
+    for (const name of [...names, 'excluded.jpg']) writeFileSync(join(directory, name), returnImage);
+    await open(stateUrl({...readState(''), folder, filter:'page', compact:!scenario.previews}));
+    await waitFor("document.getElementById('summary').textContent.includes('60 matches')");
+    await evaluate(`import('/gallery.js').then(({app}) => {
+        const row = app.grid.layout.byPath.get('item:' + ${JSON.stringify(folder + '/page20.jpg')});
+        app.grid.viewport.scrollTop = row.top + 11;
+    })`);
+    await pause(160);
+    const context = await evaluate(`import('/gallery.js').then(({app}) => ({
+        position: app.grid.position(), items: app.grid.items.map(item => item.path),
+        url: location.search, header: document.querySelector('.app-header').offsetHeight,
+    }))`);
+    const anchorIndex = context.items.indexOf(context.position.path);
+    assert.deepEqual(context.position.neighbors.slice(0, 4), [1,-1,2,-2].map(offset => context.items[anchorIndex + offset]));
+    assert.equal(context.position.neighbors.length, 16, 'Return metadata stores a bounded neighborhood');
+    if (scenario.name === 'next') await screenshot('return-before-deletion');
+    if (scenario.name === 'preview-next') await screenshot('return-previews-before-deletion');
+    await evaluate(`{
+        const card = [...document.querySelectorAll('#grid .card')].find(node => node.dataset.path === ${JSON.stringify(context.position.path)});
+        const opener = card.querySelector('.list-name, .picture');
+        opener.focus({preventScroll:true}); opener.click();
+    }`);
+    await readyImage(context.position.path);
+    for (const offset of scenario.removed) {
+        const file = join(directory, context.items[anchorIndex + offset].split('/').pop());
+        if (scenario.rename) renameSync(file, join(directory, 'page99-renamed.jpg'));
+        else unlinkSync(file);
+    }
+    if (scenario.narrow) await call('Emulation.setDeviceMetricsOverride', {width:390,height:844,deviceScaleFactor:1,mobile:true});
+    // Reload drops the client listing and refreshes the server snapshot while
+    // retaining the opening Browse history entry and its original neighbors.
+    await call('Page.reload');
+    if (scenario.removed.length) await waitFor("!document.getElementById('viewer')?.hidden && !document.getElementById('viewer-retry')?.hidden");
+    else await readyImage(context.position.path);
+    await click('viewer-close');
+    await waitFor("document.getElementById('viewer').hidden && document.querySelector('#grid .card') && document.getElementById('grid-viewport').getAttribute('aria-busy') === 'false'");
+    await pause(160);
+    const restored = await evaluate(`import('/gallery.js').then(({app}) => ({
+        position: app.grid.position(), url: location.search, scroll: app.grid.viewport.scrollTop,
+        focus: document.activeElement.id || document.activeElement.closest('.card')?.dataset.path,
+        filtered: app.grid.items.every(item => item.path.split('/').pop().startsWith('page')),
+        header: document.querySelector('.app-header').offsetHeight,
+    }))`);
+    assert.equal(restored.url, context.url, 'Return keeps the opening folder, filter and layout');
+    assert.ok(restored.filtered);
+    if (scenario.expected === null) assert.equal(restored.scroll, 0, 'No surviving saved anchors falls back to the start');
+    else assert.equal(restored.position.path, context.items[anchorIndex + scenario.expected], scenario.name);
+    if (scenario.removed.length) assert.equal(restored.focus, 'grid-viewport', 'A deleted opener returns focus to folder contents');
+    if (!scenario.narrow) assert.equal(restored.header, context.header);
+    if (scenario.name === 'next') await screenshot('return-after-deletion');
+    if (scenario.name === 'preview-next') await screenshot('return-previews-after-deletion');
+    if (scenario.name === 'previous') await screenshot('return-after-two-deletions');
+    if (scenario.narrow) {
+        assert.ok(await evaluate('document.documentElement.scrollWidth <= innerWidth'));
+        await screenshot('return-after-resize');
+        await call('Emulation.setDeviceMetricsOverride', {width:1440,height:900,deviceScaleFactor:1,mobile:false});
+    }
+}
 
 // The layout choice keeps the header geometry fixed and survives history and reload.
 await open(viewerUrl(first));

@@ -40,6 +40,7 @@ export class GridLayout {
         this.rootName = rootName;
         this.rows = [];
         this.byPath.clear();
+        this.itemCount = 0;
         this.height = 0;
         this.append(items);
     }
@@ -90,11 +91,12 @@ export class GridLayout {
                 previousFolder = folder;
             }
             if (!current || current.items.length === this.columns) {
-                current = {top: this.height, height: this.minHeight, items: []};
+                current = {top: this.height, height: this.minHeight, items: [], startIndex: this.itemCount};
                 this.rows.push(current);
                 this.height += current.height;
             }
             current.items.push(item);
+            this.itemCount++;
             this.byPath.set('item:' + item.path, current);
             const isFolder = item.type === 'folder';
             const controlsWidth = this.compact ? (isFolder ? 108 : isVideo(item.path) ? 100 : 48)

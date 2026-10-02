@@ -8,6 +8,7 @@ import {filename, joinPath, parentPath} from './state.js';
 const OVERSCAN = 230;
 const DISCOVERY_MARGIN = 400;
 const MAX_RECURSIVE_IMAGES = 2000;
+const RETURN_NEIGHBORS = 8;
 
 /** Owns folder loading, incremental discovery, and the lifetime of visible rows. */
 export class FolderGrid {
@@ -71,14 +72,31 @@ export class FolderGrid {
     position() {
         const [index] = this.layout.visibleRange(this.viewport.scrollTop + 1, this.viewport.scrollTop + 1);
         const row = this.layout.rows[index];
-        return row ? {path: row.items?.[0].path ?? row.path, heading: !row.items,
-            offset: this.viewport.scrollTop - row.top, rowHeight: row.height} : null;
+        if (!row) return null;
+        const position = {path: row.items?.[0].path ?? row.path, heading: !row.items,
+            offset: this.viewport.scrollTop - row.top, rowHeight: row.height};
+        if (!this.state.recursive && row.items) {
+            // Original filtered order: next item wins ties with the previous one.
+            position.neighbors = [];
+            for (let distance = 1; distance <= RETURN_NEIGHBORS; distance++) {
+                for (const index of [row.startIndex + distance, row.startIndex - distance]) {
+                    if (this.items[index]) position.neighbors.push(this.items[index].path);
+                }
+            }
+        }
+        return position;
     }
 
     restore() {
         if (!this.restorePosition || this.loadingFolder) return;
         const {path, heading, offset, rowHeight} = this.restorePosition;
         let row = this.layout.byPath.get((heading ? 'heading:' : 'item:') + path);
+        if (!row && !this.state.recursive) {
+            for (const neighbor of this.restorePosition.neighbors || []) {
+                row = this.layout.byPath.get('item:' + neighbor);
+                if (row) break;
+            }
+        }
         if (!row && this.restorePosition.reveal && this.state.recursive && this.directory) {
             // Start a bounded window at the known image, rather than scanning from the root.
             this.scope?.dispose(); this.scope = new TaskScope(); this.loadingPage = false;
