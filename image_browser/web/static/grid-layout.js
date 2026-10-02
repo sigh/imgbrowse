@@ -1,5 +1,5 @@
 import {isVideo} from './media-kind.js';
-import {filename, parentPath} from './state.js';
+import {filename, parentPath, ItemType} from './state.js';
 
 /** Row metadata for a virtual grid. Appending a page only changes its last row. */
 export class GridLayout {
@@ -26,11 +26,17 @@ export class GridLayout {
         this.headingFont = number('--folder-label-font-size');
         this.imageHeight = number('--card-image-height');
         this.captionPadding = number('--card-caption-padding');
+        this.folderActionsWidth = 3 * number('--control-height');
+        this.captionGap = number('--space-md');
+        this.folderIconWidth = number('--control-icon-size') + number('--space-sm');
+        this.listGap = number('--list-gap');
+        this.listBaseWidth = this.captionPadding * 2 + number('--list-kind-width') + this.listGap;
+        this.listDurationWidth = number('--list-duration-width');
         this.rowPadding = number('--grid-row-padding');
         this.fontFamily = style.fontFamily;
         this.compact = this.viewport.classList.contains('compact');
         this.columns = this.compact ? 1 : Math.max(1, Math.floor(this.width / number('--grid-min-column-width')));
-        const media = items.filter(item => item.type !== 'folder');
+        const media = items.filter(item => item.type !== ItemType.FOLDER);
         if (!recursive && !this.compact && media.length && media.every(item => isVideo(item.path))) {
             const cardWidth = (this.contentWidth - (this.columns - 1) * this.gap) / this.columns;
             this.imageHeight = cardWidth * 9 / 16;
@@ -98,9 +104,11 @@ export class GridLayout {
             current.items.push(item);
             this.itemCount++;
             this.byPath.set('item:' + item.path, current);
-            const isFolder = item.type === 'folder';
-            const controlsWidth = this.compact ? (isFolder ? 108 : isVideo(item.path) ? 100 : 48)
-                : this.captionPadding * 2 + 2 + (isFolder ? 80 : 0);
+            const isFolder = item.type === ItemType.FOLDER;
+            const controlsWidth = this.compact
+                ? this.listBaseWidth + (isFolder ? this.folderActionsWidth + this.listGap
+                    : isVideo(item.path) ? this.listDurationWidth + this.listGap : 0)
+                : this.captionPadding * 2 + 2 + (isFolder ? this.folderActionsWidth + this.captionGap + this.folderIconWidth : 0);
             const labelWidth = cardWidth - controlsWidth;
             const contentHeight = this.compact
                 ? this.labelHeight(filename(item.path), labelWidth, this.cardFont) + 16

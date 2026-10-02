@@ -31,7 +31,7 @@
     </main>
     <footer id="summary" aria-live="polite"></footer>
 
-    <section id="viewer" class="viewer" role="dialog" aria-modal="true" aria-label="Image viewer" hidden>
+    <section id="viewer" class="viewer" role="region" aria-label="Media viewer" hidden>
         <header class="viewer-header">
             <nav class="mode-navigation choice-group" aria-label="Screens"></nav>
             <div id="viewer-location" class="item-location">
@@ -43,8 +43,8 @@
                 <div class="size-control">
                     <button id="viewer-zoom" aria-expanded="false" aria-controls="size-menu">Fit ▾</button>
                     <div id="size-menu" role="group" aria-label="Image size" hidden>
-                        <button data-size="page">Fit page</button>
-                        <button data-size="width">Fit width</button>
+                        <button data-size="page" title="Fit page (F)">Fit page</button>
+                        <button data-size="width" title="Fit width (W)">Fit width</button>
                         <button data-size="1">Actual size</button>
                         <div class="zoom-controls">
                             <button id="viewer-zoom-out" aria-label="Zoom out" title="Zoom out (−)">−</button>
@@ -69,9 +69,9 @@
                 <button id="viewer-retry" hidden>Retry</button>
             </div>
         </div>
-        <div id="viewer-strip" class="viewer-strip" aria-label="Collection thumbnails" tabindex="0" hidden></div>
+        <div id="viewer-strip" class="viewer-strip" role="group" aria-label="Collection thumbnails" hidden></div>
     </section>
-    <section id="metadata-popover" popover="manual" role="region" aria-labelledby="metadata-title">
+    <section id="metadata-popover" popover="manual" tabindex="0" role="region" aria-labelledby="metadata-title">
         <header class="metadata-header">
             <h2 id="metadata-title">Info</h2>
         </header>

@@ -1,5 +1,7 @@
 /** Small DOM helpers and explicit ownership of abortable work and blob URLs. */
 export const byId = id => document.getElementById(id);
+export const plainClick = event => event.button === 0 && !event.ctrlKey && !event.metaKey
+    && !event.shiftKey && !event.altKey && !event.defaultPrevented;
 
 export function element(tag, className = '', text) {
     const node = document.createElement(tag);

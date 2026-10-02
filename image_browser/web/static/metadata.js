@@ -45,7 +45,7 @@ function positionMetadata() {
     panel.style.maxHeight = `${Math.max(48, innerHeight - top - 12)}px`;
 }
 
-// Rebind to the current item's button when navigation redraws the header.
+// Keep an open panel in sync with the persistent header action.
 export function updateMetadataTarget(path, button, container) {
     button.setAttribute('aria-expanded', 'false');
     if (!metadataOpen() || context?.container !== container) return;
@@ -59,13 +59,15 @@ export function updateMetadataTarget(path, button, container) {
 
 export function toggleMetadata(path, button, container) {
     if (metadataOpen() && context?.container === container) {
-        closeMetadata();
+        closeMetadata(true);
         return;
     }
     closeMetadata();
     context = {path, button, container};
     button.setAttribute('aria-expanded', 'true');
+    container.append(popover());
     popover().showPopover();
+    popover().focus({preventScroll: true});
     positionMetadata();
     requestAnimationFrame(positionMetadata);
     loadMetadata(path);
@@ -90,6 +92,7 @@ async function loadMetadata(path) {
     const status = byId('metadata-status');
     request?.abort();
     const controller = request = new AbortController();
+    if (status.contains(document.activeElement)) popover().focus({preventScroll: true});
     details.replaceChildren();
     byId('metadata-title').textContent = path.split('/').pop() || 'Folder info';
     status.textContent = 'Loading…';
@@ -97,8 +100,8 @@ async function loadMetadata(path) {
         const data = await getMetadata(path, controller.signal);
         if (controller.signal.aborted) return;
         byId('metadata-title').textContent = data.name;
-        const row = (label, value) => {
-            if (value !== undefined && value !== null) details.append(element('dt', '', label), element('dd', label === 'Path' ? 'metadata-path' : '', String(value)));
+        const row = (label, value, className = '') => {
+            if (value !== undefined && value !== null) details.append(element('dt', '', label), element('dd', className, String(value)));
         };
         if (data.width !== undefined) row('Dimensions', `${data.width} × ${data.height}`);
         if (data.size !== undefined) row('Size', bytes(data.size));
@@ -113,9 +116,14 @@ async function loadMetadata(path) {
         row('Taken', formatMetadataDate(exif.Taken));
         row(data.kind === 'directory' && data.archive_member ? 'Archive date' : 'Modified', formatMetadataDate(data.modified));
         for (const label of ['Artist', 'Copyright']) row(label, exif[label]);
-        row('Path', fullPath(data));
-        status.textContent = data.metadata_error ? 'Image details are unavailable. File information is shown below.' : '';
-    } catch (error) {
-        if (!controller.signal.aborted) status.textContent = error.message;
+        row(data.archive_member ? 'Member path' : data.kind === 'archive' ? 'Archive' : 'Path', fullPath(data), 'metadata-path');
+        status.textContent = data.metadata_error ? 'Image details unavailable.' : '';
+    } catch {
+        if (controller.signal.aborted) return;
+        const retry = element('button', '', 'Retry');
+        retry.type = 'button';
+        retry.addEventListener('click', () => loadMetadata(path));
+        status.textContent = 'Unable to load info. ';
+        status.append(retry);
     }
 }

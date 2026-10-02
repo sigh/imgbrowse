@@ -1,0 +1,123 @@
+/** Shared Chrome protocol and input helpers for browser journeys. */
+import assert from 'node:assert/strict';
+import {writeFileSync} from 'node:fs';
+import {join} from 'node:path';
+import {readState, stateUrl, ScreenMode, ImageSize} from '../image_browser/web/static/state.js';
+
+export async function connectBrowser(port, base, screenshots = '') {
+    const targets = await (await fetch(`http://127.0.0.1:${port}/json/list`)).json();
+    const socket = new WebSocket(targets.find(target => target.type === 'page').webSocketDebuggerUrl);
+    await new Promise(resolve => socket.addEventListener('open', resolve, {once: true}));
+    let sequence = 0;
+    const pending = new Map();
+    const exceptions = [];
+    const requests = [];
+    const held = [];
+    const network = {images: false, walk: false, folders: false, metadata: false};
+    socket.addEventListener('message', event => {
+        const message = JSON.parse(event.data);
+        if (message.method === 'Network.requestWillBeSent') requests.push(message.params.request.url);
+        if (message.method === 'Fetch.requestPaused') {
+            const {requestId, request} = message.params;
+            if ((network.images && request.url.includes('/image?')) || (network.walk && request.url.includes('/api/walk'))
+                || (network.folders && request.url.includes('/api/folder')) || (network.metadata && request.url.includes('/api/metadata'))) held.push(requestId);
+            else call('Fetch.continueRequest', {requestId}).catch(() => {});
+        }
+        if (message.method === 'Runtime.exceptionThrown') exceptions.push(message.params.exceptionDetails);
+        const callback = pending.get(message.id);
+        if (!callback) return;
+        pending.delete(message.id);
+        if (message.error) callback.reject(new Error(JSON.stringify(message.error)));
+        else callback.resolve(message.result);
+    });
+
+    function call(method, params = {}) {
+        return new Promise((resolve, reject) => {
+            pending.set(++sequence, {resolve, reject});
+            socket.send(JSON.stringify({id: sequence, method, params}));
+        });
+    }
+    async function evaluate(expression, userGesture = false) {
+        const response = await call('Runtime.evaluate', {expression, returnByValue: true, awaitPromise: true, userGesture});
+        if (response.exceptionDetails) throw new Error(JSON.stringify(response.exceptionDetails));
+        return response.result.value;
+    }
+    async function waitFor(expression) {
+        for (let attempt = 0; attempt < 160; attempt++) {
+            if (await evaluate(expression)) return;
+            await new Promise(resolve => setTimeout(resolve, 50));
+        }
+        throw new Error('Timed out: ' + expression + '\n' + JSON.stringify(exceptions) + '\n' + await evaluate("document.getElementById('grid-status')?.textContent"));
+    }
+    async function open(path) {
+        const url = new URL(path, base).href;
+        await evaluate('window.__leavingPage = true');
+        await call('Page.navigate', {url});
+        await waitFor("!window.__leavingPage && document.readyState === 'complete'");
+    }
+    const click = id => evaluate(`{ const button=document.getElementById(${JSON.stringify(id)}); button.focus(); button.click(); }`);
+    async function newTab(selector, button = 'middle', modifiers = 0) {
+        const before = new Set((await call('Target.getTargets')).targetInfos.map(target => target.targetId));
+        const current = await evaluate('location.href');
+        const rect = await evaluate(`document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect().toJSON()`);
+        for (const type of ['mousePressed', 'mouseReleased']) {
+            await call('Input.dispatchMouseEvent', {type, button, modifiers, clickCount:1, x:rect.x+rect.width/2, y:rect.y+rect.height/2});
+        }
+        let opened;
+        for (let attempt=0; attempt<100; attempt++) {
+            opened = (await call('Target.getTargets')).targetInfos.find(target => target.type === 'page' && !before.has(target.targetId) && target.url.startsWith(base));
+            if (opened) break;
+            await new Promise(resolve => setTimeout(resolve, 50));
+        }
+        assert.ok(opened, 'Native modified navigation opens another tab: ' + selector);
+        assert.equal(await evaluate('location.href'), current, 'Modified navigation preserves the current tab');
+        await call('Target.closeTarget', {targetId:opened.targetId});
+        return new URL(opened.url).searchParams;
+    }
+    const imageIs = path => `import('/static/state.js').then(({readState}) => readState().image === ${JSON.stringify(path)})`;
+    const waitImage = path => waitFor(imageIs(path));
+    const key = (key, repeat = false) => evaluate(`document.dispatchEvent(new KeyboardEvent('keydown', ${JSON.stringify({key, repeat})}))`);
+    async function nativeKey(key, code) {
+        for (const type of ['keyDown', 'keyUp']) {
+            await call('Input.dispatchKeyEvent', {type, key, code: key, windowsVirtualKeyCode: code});
+            if (type === 'keyDown' && key === 'Enter') await call('Input.dispatchKeyEvent', {type:'char', text:'\r'});
+        }
+    }
+    const wheel = async (deltaY, interval = 70) => { await call('Input.dispatchMouseEvent', {type:'mouseWheel', x:700, y:350, deltaX:0, deltaY}); await new Promise(resolve => setTimeout(resolve, interval)); };
+    async function screenshot(name) {
+        if (screenshots) writeFileSync(join(screenshots, name + '.png'), Buffer.from((await call('Page.captureScreenshot')).data, 'base64'));
+    }
+
+
+    const readyImage = path => waitFor(`(() => { const image = document.getElementById('viewer-image'); return image?.dataset.path === ${JSON.stringify(path)} && !image.hidden && image.naturalWidth > 0 && image.getBoundingClientRect().width > 0 && !document.getElementById('viewer-zoom').disabled; })()`);
+    const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
+    const position = () => evaluate("({top:document.getElementById('viewer-canvas').scrollTop,max:document.getElementById('viewer-canvas').scrollHeight-document.getElementById('viewer-canvas').clientHeight})");
+    const viewerUrl = (image, size = ImageSize.FIT_PAGE, folder = 'Album') => stateUrl({...readState(''), folder, collection: folder, mode: ScreenMode.VIEW, image, size});
+
+    const headerPositions = (viewing = true) => evaluate(`(() => {
+        const header = document.querySelector(${JSON.stringify(viewing ? '.viewer-header' : '.app-header')});
+        return {
+            navigation: header.querySelector('.mode-navigation').getBoundingClientRect().toJSON(),
+            modes: [...header.querySelectorAll('[data-mode]')].map(button => button.getBoundingClientRect().toJSON()),
+            height: header.offsetHeight,
+            copy: header.querySelector('.copy-path').getBoundingClientRect().toJSON(),
+            info: header.querySelector('.item-info').getBoundingClientRect().toJSON(),
+        };
+    })()`);
+
+    async function start(path = '/') {
+        await call('Fetch.disable');
+        network.images = network.walk = network.folders = network.metadata = false;
+        held.length = 0;
+        await call('Emulation.setDeviceMetricsOverride', {width:1440,height:900,deviceScaleFactor:1,mobile:false});
+        await open('/');
+        await evaluate('sessionStorage.clear()');
+        await open(path);
+    }
+    await call('Runtime.enable');
+    await call('Network.enable');
+    await call('Page.enable');
+    return {call, evaluate, waitFor, open, start, click, newTab, imageIs, waitImage, key,
+        nativeKey, wheel, screenshot, readyImage, pause, position, viewerUrl, headerPositions,
+        requests, exceptions, network, held, close: () => socket.close()};
+}

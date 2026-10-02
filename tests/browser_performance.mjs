@@ -1,36 +1,9 @@
 /** Exercise real browser caches and bounded windows with the --performance fixture. */
 import assert from 'node:assert/strict';
+import {connectBrowser} from './browser-harness.mjs';
 const [port, base] = process.argv.slice(2);
-const targets = await (await fetch(`http://127.0.0.1:${port}/json/list`)).json();
-const socket = new WebSocket(targets.find(target => target.type === 'page').webSocketDebuggerUrl);
-await new Promise(resolve => socket.addEventListener('open', resolve, {once: true}));
-let sequence = 0;
-const pending = new Map();
-socket.addEventListener('message', event => {
-    const message = JSON.parse(event.data), task = pending.get(message.id);
-    if (!task) return;
-    pending.delete(message.id);
-    if (message.error) task.reject(Error(JSON.stringify(message.error)));
-    else task.resolve(message.result);
-});
-function call(method, params = {}) {
-    return new Promise((resolve, reject) => {
-        pending.set(++sequence, {resolve, reject}); socket.send(JSON.stringify({id: sequence, method, params}));
-    });
-}
-async function evaluate(expression) {
-    const result = await call('Runtime.evaluate', {expression, awaitPromise: true, returnByValue: true});
-    if (result.exceptionDetails) throw Error(JSON.stringify(result.exceptionDetails));
-    return result.result.value;
-}
-async function wait(expression) {
-    for (let i = 0; i < 200; i++) {
-        if (await evaluate(expression)) return;
-        await new Promise(resolve => setTimeout(resolve, 25));
-    }
-    throw Error('Timed out: ' + expression);
-}
-await call('Page.enable'); await call('Runtime.enable');
+const browser = await connectBrowser(port, base);
+const {call, evaluate, waitFor: wait} = browser;
 await call('Emulation.setDeviceMetricsOverride', {width:1440,height:900,deviceScaleFactor:1,mobile:false});
 await call('Page.navigate', {url:base + '/?folder=Large&view=grid'});
 await wait("document.readyState === 'complete' && document.querySelector('.card')");
@@ -72,18 +45,25 @@ await evaluate(`(async()=>{
 const strip = await evaluate("({paths:testApp.viewer.filmstrip.paths.length,nodes:document.querySelectorAll('#viewer-strip button').length})");
 assert.ok(strip.paths <= 2048,JSON.stringify(strip));
 assert.ok(strip.nodes < 40,JSON.stringify(strip));
+// Tab still reaches the current media after discovery evicts it from the path window.
+assert.ok(await evaluate("!testApp.viewer.filmstrip.paths.includes(testApp.state.image) && testApp.viewer.filmstrip.container.tabIndex === 0"));
+await evaluate("document.querySelector('.strip-resizer').focus()");
+await browser.nativeKey('Tab', 9);
+await wait("document.activeElement.dataset.path === testApp.state.image && document.getElementById('viewer-strip').contains(document.activeElement)");
+assert.equal(await evaluate("document.querySelectorAll('#viewer-strip button[tabindex=\"0\"]').length"), 1);
+
 const media = await evaluate("import('/static/media-cache.js').then(module=>({bytes:module.originals.bytes,entries:module.originals.values.size}))");
 assert.ok(media.bytes <= 96*1024*1024 && media.entries <=4);
 // Return from an image outside the retained grid window without scanning from the start.
 await evaluate("testApp.openViewer('Large/page5.jpg', 'Large')");
 await wait("document.getElementById('viewer-image').dataset.path === 'Large/page5.jpg'");
-await evaluate("testApp.changeLayout('grid')");
-await wait("document.activeElement.closest('.card')?.dataset.path === 'Large/page5.jpg'");
+await evaluate("testApp.setMode('overview')");
+await wait("testApp.state.mode === 'overview' && document.querySelector('.card[data-path=\"Large/page5.jpg\"]')");
 assert.equal(await evaluate('testApp.state.image'), 'Large/page5.jpg');
 assert.ok(await evaluate('testApp.grid.directory.images.length <= 2000'));
-await evaluate("document.getElementById('view-strip').click()");
+await evaluate("testApp.setMode('view')");
 await wait("document.getElementById('viewer-image').dataset.path === 'Large/page5.jpg' && !document.getElementById('viewer-image').hidden");
 await evaluate('testApp.closeViewer()');
-await wait("document.activeElement.closest('.card')?.dataset.path === 'Large/page5.jpg'");
+await wait("testApp.state.mode === 'browse'");
 console.log('Performance browser checks passed:' ,JSON.stringify({grid,strip,media}));
-socket.close();
+browser.close();

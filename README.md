@@ -73,3 +73,9 @@ python3 -B tests/browser_smoke.py --performance
 Set `CHROME_BIN` if Chrome is not in a standard location. The smoke test starts a
 temporary server and browser profile with generated images, then removes them.
 Use `--screenshots /tmp/imgbrowse-check` to retain screenshots.
+
+Browser journeys live in `tests/browser/` and share the Chrome helpers in
+`tests/browser-harness.mjs`. Each journey resets its preferences and viewport.
+Run one independently with `SMOKE_JOURNEY=reader python3 -B tests/browser_smoke.py`
+(also available: `browse`, `navigation-return`, `loading`, `strip-archives`,
+`responsive`, and `video`).

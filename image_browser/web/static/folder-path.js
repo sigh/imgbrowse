@@ -26,7 +26,7 @@ async function copyPath(target) {
 }
 
 /** Shared identity and actions for Browse, reading, and folder overview. */
-export function renderItemHeader(location, actions, {folder, image = null, rootName, folderLink, currentLink = false, collection = null}) {
+export function renderItemHeader(location, actions, {folder, image = null, rootName, folderLink, currentLink = false, collection = null, compact = false}) {
     const name = location.querySelector('.item-name');
     name.hidden = !image;
     name.textContent = image ? filename(image) : '';
@@ -34,18 +34,29 @@ export function renderItemHeader(location, actions, {folder, image = null, rootN
     const breadcrumbs = location.querySelector('.breadcrumbs');
     const changed = breadcrumbs.dataset.folder !== folder || breadcrumbs.dataset.image !== (image || '');
     const scrollLeft = breadcrumbs.scrollLeft;
-    renderFolderPath(breadcrumbs, folder, rootName, folderLink, {currentLink, collection, hasImage: Boolean(image)});
+    const context = JSON.stringify([folder, rootName, currentLink, collection, Boolean(image), compact]);
+    if (breadcrumbs.dataset.context !== context) {
+        renderFolderPath(breadcrumbs, folder, rootName, folderLink, {currentLink, collection, hasImage: Boolean(image)});
+        if (image && folder !== collection) breadcrumbs.append(element('span', '', '/'));
+        breadcrumbs.append(name);
+        breadcrumbs.dataset.context = context;
+    }
     breadcrumbs.dataset.image = image || '';
-    if (image && folder !== collection) breadcrumbs.append(element('span', '', '/'));
-    breadcrumbs.append(name);
     if (image) breadcrumbs.scrollLeft = changed ? breadcrumbs.scrollWidth : scrollLeft;
     const target = image || folder;
     const kind = image ? (isVideo(image) ? 'video' : 'image') : 'folder';
     const holder = location.querySelector('.path-copy');
-    const focused = holder.contains(document.activeElement);
-    const copy = copyPathButton(target, kind);
-    holder.replaceChildren(copy);
-    if (focused) copy.focus({preventScroll: true});
+    let copy = holder.querySelector('.copy-path');
+    if (!copy) copy = copyPathButton(holder);
+    const label = `Copy ${kind} path`;
+    if (copy.dataset.path !== target || copy.dataset.label !== label) {
+        clearTimeout(copy.feedbackTimer);
+        copy.dataset.path = target;
+        copy.dataset.label = label;
+        copy.replaceChildren(icon('copy'));
+        holder.querySelector('.copy-feedback').textContent = '';
+        setButtonLabel(copy, label);
+    }
     renderItemActions(actions, target, kind);
 }
 
@@ -88,36 +99,49 @@ function renderFolderPath(container, folder, rootName, folderLink, {currentLink,
 
 /** Actions belong next to the item they describe. */
 function renderItemActions(container, target, kind) {
-    const focused = container.contains(document.activeElement) ? document.activeElement.className : null;
-    const info = element('button', 'item-info');
-    info.type = 'button';
+    let info = container.querySelector('.item-info');
+    if (!info) {
+        info = element('button', 'item-info');
+        info.type = 'button';
+        info.setAttribute('aria-controls', 'metadata-popover');
+        info.append(icon('info'));
+        info.addEventListener('click', () => toggleMetadata(info.dataset.path, info, container));
+        container.append(info);
+    }
+    info.dataset.path = target;
     setButtonLabel(info, `${kind[0].toUpperCase() + kind.slice(1)} info`);
-    info.setAttribute('aria-controls', 'metadata-popover');
-    info.append(icon('info'));
-    info.addEventListener('click', () => toggleMetadata(target, info, container));
-    container.replaceChildren(info);
     updateMetadataTarget(target, info, container);
-    if (focused === info.className) info.focus({preventScroll: true});
 }
 
 /** Copy stays in the fixed slot immediately left of the displayed path. */
-function copyPathButton(target, kind) {
+function copyPathButton(holder) {
     const copy = element('button', 'copy-path');
     copy.type = 'button';
-    const label = `Copy ${kind} path`;
-    setButtonLabel(copy, label);
     copy.append(icon('copy'));
+    const feedback = element('span', 'copy-feedback');
+    feedback.setAttribute('role', 'status');
+    holder.append(copy, feedback);
     copy.addEventListener('click', async () => {
+        const target = copy.dataset.path;
+        feedback.textContent = '';
+        clearTimeout(copy.feedbackTimer);
+        copy.replaceChildren(icon('copy'));
+        setButtonLabel(copy, copy.dataset.label);
         try {
             await copyPath(target);
+            if (copy.dataset.path !== target) return;
+            clearTimeout(copy.feedbackTimer);
             copy.replaceChildren(icon('check'));
             setButtonLabel(copy, 'Copied');
-            setTimeout(() => {
+            copy.feedbackTimer = setTimeout(() => {
                 copy.replaceChildren(icon('copy'));
-                setButtonLabel(copy, label);
+                setButtonLabel(copy, copy.dataset.label);
             }, 1500);
         } catch {
-            setButtonLabel(copy, 'Unable to copy path. Click to retry.');
+            if (copy.dataset.path === target) {
+                feedback.textContent = 'Copy failed. Try again.';
+                setButtonLabel(copy, 'Copy failed. Try again.');
+            }
         }
     });
     return copy;

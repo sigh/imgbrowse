@@ -18,7 +18,7 @@ export class VideoPlayer {
         video.dataset.path = path;
         video.setAttribute('aria-label', path.split('/').pop());
         video.addEventListener('error', () => {
-            if (!scope.signal.aborted) onError();
+            if (!scope.signal.aborted) onError(video.error);
         });
         const poster = cachedThumbnail(path);
         if (poster?.blob) video.poster = scope.objectUrl(poster.blob);
@@ -41,7 +41,9 @@ export class VideoPlayer {
         this.canvas.classList.add('showing-video');
         this.canvas.append(video);
         fit();
-        video.focus({preventScroll: true});
+        if (document.activeElement === this.canvas || document.activeElement === document.body) {
+            video.focus({preventScroll: true});
+        }
         scope.onDispose(() => {
             this.resume = {path, time: video.currentTime};
             observer.disconnect();

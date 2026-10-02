@@ -1,9 +1,9 @@
 import {isVideo} from './media-kind.js';
 import {getFolder, walkImages, sequence} from './api.js';
-import {byId, element, TaskScope} from './dom.js';
+import {byId, element, plainClick, setButtonLabel, TaskScope} from './dom.js';
 import {icon} from './icons.js';
 import {GridLayout} from './grid-layout.js';
-import {filename, joinPath, parentPath} from './state.js';
+import {filename, joinPath, parentPath, ScreenMode, ItemType} from './state.js';
 
 const OVERSCAN = 230;
 const DISCOVERY_MARGIN = 400;
@@ -12,20 +12,24 @@ const RETURN_NEIGHBORS = 8;
 
 /** Owns folder loading, incremental discovery, and the lifetime of visible rows. */
 export class FolderGrid {
-    constructor(previews, {folderLink, openViewer, folderLoaded, refresh}) {
+    constructor(previews, {folderLink, mediaLink, folderLoaded, refresh}) {
         this.previews = previews;
         this.folderLink = folderLink;
-        this.openViewer = (image, collection, opener) => {
-            if (image && parentPath(image) === this.directory?.path && collection === this.directory.path) {
-                const {images, folders} = this.directory.listing;
-                const index = images.indexOf(filename(image));
-                if (index >= 0) {
-                    const start = Math.max(0, index - 32), end = Math.min(images.length, index + 33);
-                    sequence.seed(collection, images.slice(start, end).map(name => joinPath(collection, name)),
-                        {start: start === 0, end: end === images.length && !folders.length});
+        this.mediaLink = (image, collection, label, mode) => {
+            const link = mediaLink(image, collection, label, mode);
+            link.addEventListener('click', event => {
+                if (!plainClick(event)) return;
+                if (image && parentPath(image) === this.directory?.path && collection === this.directory.path) {
+                    const {images, folders} = this.directory.listing;
+                    const index = images.indexOf(filename(image));
+                    if (index >= 0) {
+                        const start = Math.max(0, index - 32), end = Math.min(images.length, index + 33);
+                        sequence.seed(collection, images.slice(start, end).map(name => joinPath(collection, name)),
+                            {start: start === 0, end: end === images.length && !folders.length});
+                    }
                 }
-            }
-            openViewer(image, collection, opener);
+            }, {capture: true});
+            return link;
         };
         this.folderLoaded = folderLoaded;
         this.refresh = refresh;
@@ -57,8 +61,8 @@ export class FolderGrid {
     show(state, force = false, position = null) {
         const previous = this.state;
         this.state = state;
-        this.viewport.inert = state.viewing;
-        if (state.viewing) return;
+        this.viewport.inert = !state.active;
+        if (!state.active) return;
         if (position) this.restorePosition = position;
         this.viewport.classList.toggle('compact', state.compact);
         if (force || previous?.folder !== state.folder || this.directory?.path !== state.folder) {
@@ -100,7 +104,7 @@ export class FolderGrid {
         if (!row && this.restorePosition.reveal && this.state.recursive && this.directory) {
             // Start a bounded window at the known image, rather than scanning from the root.
             this.scope?.dispose(); this.scope = new TaskScope(); this.loadingPage = false;
-            Object.assign(this.directory, {images: [{type: 'image', path}],
+            Object.assign(this.directory, {images: [{type: ItemType.MEDIA, path}],
                 cursor: {anchor: path, server: null}, done: false, failed: false,
                 trimmedBefore: true, windowed: true});
             this.items = this.directory.images;
@@ -155,57 +159,59 @@ export class FolderGrid {
     }
 
     createListItem(item, scope) {
-        const folder = item.type === 'folder';
+        const folder = item.type === ItemType.FOLDER;
         const node = element('article', 'card list-item');
         node.dataset.path = item.path;
-        node.classList.toggle('selected-media', this.state.overview && this.state.image === item.path);
+        node.classList.toggle('selected-media', this.state.selected === item.path);
         const name = folder ? this.folderLink(item.path, filename(item.path))
-            : element('button', 'list-name', filename(item.path));
+            : this.mediaLink(item.path, this.state.folder, filename(item.path));
         name.classList.add('list-name');
         name.title = item.path;
-        if (!folder) name.addEventListener('click', event => this.openViewer(item.path, this.state.folder, event.currentTarget));
         const kind = icon(folder ? 'folder' : isVideo(item.path) ? 'video' : 'image');
         kind.classList.add('list-kind');
-        kind.setAttribute('aria-label', folder ? 'Folder' : isVideo(item.path) ? 'Video' : 'Image');
+        name.setAttribute('aria-label', `${folder ? 'Open folder' : isVideo(item.path) ? 'View video' : 'View image'} ${filename(item.path)}`);
         node.append(kind, name);
         if (!folder && isVideo(item.path)) {
             const duration = element('span', 'list-duration');
             node.append(duration);
             this.previews.duration(duration, item.path, scope);
         }
-        if (folder) {
-            const read = element('button', 'list-read', 'View');
-            read.setAttribute('aria-label', 'View items in ' + filename(item.path));
-            read.addEventListener('click', event => this.openViewer(null, item.path, event.currentTarget));
-            node.prepend(read);
-        }
+        if (folder) node.prepend(this.folderActions(item.path));
         return node;
+    }
+
+    folderActions(path) {
+        const group = element('div', 'folder-actions choice-group');
+        for (const [mode, name, className] of [[ScreenMode.OVERVIEW, 'grid', 'folder-overview'], [ScreenMode.VIEW, 'play', 'folder-view']]) {
+            const link = this.mediaLink(null, path, undefined, mode);
+            link.classList.add(className);
+            setButtonLabel(link, (mode === ScreenMode.OVERVIEW ? 'Collection overview of ' : 'View items in ') + filename(path));
+            link.append(icon(name));
+            group.append(link);
+        }
+        return group;
     }
 
     createCard(item, scope) {
         if (this.state.compact) return this.createListItem(item, scope);
         const node = element('article', 'card');
         node.dataset.path = item.path;
-        node.classList.toggle('selected-media', this.state.overview && this.state.image === item.path);
-        const isFolder = item.type === 'folder';
-        const picture = isFolder ? this.folderLink(item.path, 'Folder') : element('button', '', 'Loading…');
-        picture.className = 'picture';
-        picture.setAttribute('aria-label', (isFolder ? 'Open folder ' : 'View ') + filename(item.path));
+        node.classList.toggle('selected-media', this.state.selected === item.path);
+        const isFolder = item.type === ItemType.FOLDER;
+        const picture = isFolder ? this.folderLink(item.path, 'Folder') : this.mediaLink(item.path, this.state.folder, 'Loading…');
+        picture.classList.add('picture');
+        picture.setAttribute('aria-label', (isFolder ? 'Open folder ' : isVideo(item.path) ? 'View video ' : 'View image ') + filename(item.path));
         const caption = element('div', 'card-caption');
         let preview;
         if (isFolder) {
-            const read = element('button', '', 'View');
-            read.title = 'View all items in ' + filename(item.path);
-            read.addEventListener('click', event => this.openViewer(null, item.path, event.currentTarget));
             node.classList.add('folder-card');
             const name = this.folderLink(item.path, filename(item.path));
             name.prepend(icon('folder'));
-            caption.append(name, read);
+            caption.append(name, this.folderActions(item.path));
             preview = this.previews.thumbnail(picture, item.path, scope);
         } else {
-            picture.addEventListener('click', event => this.openViewer(item.path, this.state.folder, event.currentTarget));
-            const name = element('button', 'image-name', filename(item.path));
-            name.addEventListener('click', event => this.openViewer(item.path, this.state.folder, event.currentTarget));
+            const name = this.mediaLink(item.path, this.state.folder, filename(item.path));
+            name.classList.add('image-name');
             caption.append(name);
             preview = this.previews.thumbnail(picture, item.path, scope);
         }
@@ -235,7 +241,8 @@ export class FolderGrid {
     }
 
     rowSignature(row) {
-        return JSON.stringify([this.state.compact, this.state.overview ? this.state.image : null, row.items?.map(item => item.path) ?? row.path]);
+        return JSON.stringify([this.state.compact, this.state.linkPresentation,
+            this.state.selected, row.items?.map(item => item.path) ?? row.path]);
     }
 
     renderRows() {
@@ -255,7 +262,7 @@ export class FolderGrid {
         for (let index = first; index < last; index++) {
             if (!this.rowNodes.has(index)) this.createRow(index);
         }
-        if (this.focusPath && !this.state.viewing) {
+        if (this.focusPath && this.state.active) {
             const item = [...this.container.querySelectorAll('.card')].find(node => node.dataset.path === this.focusPath);
             const target = item?.querySelector(this.focusSelector || '.list-name, .card-caption a, .image-name, button');
             (target || item?.querySelector('a, button'))?.focus({preventScroll: true});
@@ -267,10 +274,10 @@ export class FolderGrid {
         }
         this.previews.schedule();
         if (this.state.recursive && this.directory?.trimmedBefore && this.viewport.scrollTop < DISCOVERY_MARGIN
-            && !this.loadingPage && !this.loadingFolder && !this.state.viewing) { this.loadPage(true); return; }
+            && !this.loadingPage && !this.loadingFolder && this.state.active) { this.loadPage(true); return; }
         const needsMore = end >= this.layout.height - DISCOVERY_MARGIN;
         if (needsMore && this.state.recursive && !this.directory?.done && !this.loadingFolder
-            && !this.loadingPage && !this.directory?.failed && !this.state.viewing) this.loadPage();
+            && !this.loadingPage && !this.directory?.failed && this.state.active) this.loadPage();
     }
 
     rememberDirectory() {
@@ -333,8 +340,8 @@ export class FolderGrid {
         const {listing} = this.directory;
         const filter = this.state.filter.toLocaleLowerCase();
         this.items = this.state.recursive ? this.directory.images : [
-            ...listing.folders.map(name => ({type: 'folder', path: joinPath(this.state.folder, name)})),
-            ...listing.images.map(name => ({type: 'image', path: joinPath(this.state.folder, name)})),
+            ...listing.folders.map(name => ({type: ItemType.FOLDER, path: joinPath(this.state.folder, name)})),
+            ...listing.images.map(name => ({type: ItemType.MEDIA, path: joinPath(this.state.folder, name)})),
         ].filter(item => filename(item.path).toLocaleLowerCase().includes(filter));
         this.relayout();
         this.updateSummary();
@@ -369,7 +376,7 @@ export class FolderGrid {
             const result = await walkImages({root: directory.path, reverse,
                 anchor: reverse ? directory.images[0]?.path : null, cursor: reverse ? null : directory.cursor}, scope.signal);
             scope.signal.throwIfAborted();
-            const added = result.images.map(path => ({type: 'image', path}));
+            const added = result.images.map(path => ({type: ItemType.MEDIA, path}));
             const position = this.position();
             if (reverse) {
                 directory.images.unshift(...added.reverse());

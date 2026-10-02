@@ -34,7 +34,17 @@ export class ThumbnailStrip {
             event.preventDefault();
             container.scrollLeft += event.deltaY * (event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? container.clientWidth : 1);
         }, {passive: false});
-        container.addEventListener('keydown', () => { this.followImage = false; });
+        container.addEventListener('focusin', event => {
+            if (event.target === container) {
+                this.show({collection: this.collection, folder: this.labelRoot, image: this.image}, true, true);
+                return;
+            }
+            if (event.target.dataset.path === this.image) {
+                const bounds = event.target.getBoundingClientRect();
+                const viewport = container.getBoundingClientRect();
+                if (bounds.left < viewport.left || bounds.right > viewport.right) this.centerImage();
+            }
+        });
         this.paths = [];
         this.nodes = new Map();
         container.addEventListener('scroll', () => {
@@ -65,7 +75,7 @@ export class ThumbnailStrip {
         handle.setAttribute('role', 'separator');
         handle.setAttribute('aria-label', 'Thumbnail size');
         handle.setAttribute('aria-orientation', 'horizontal');
-        handle.title = 'Drag to resize thumbnails';
+        handle.title = 'Thumbnail size (drag or ↑/↓)';
         this.frame.prepend(handle);
         handle.addEventListener('pointerdown', event => {
             if (event.button !== 0) return;
@@ -143,6 +153,7 @@ export class ThumbnailStrip {
     }
 
     show({collection, folder, image}, visible, force = false) {
+        const hadFocus = this.container.contains(document.activeElement);
         // Collection controls traversal; the URL folder controls displayed paths.
         this.labelRoot = folder;
         if (force || collection !== this.collection || (image && !this.paths.includes(image))) this.reset(collection, image);
@@ -155,6 +166,7 @@ export class ThumbnailStrip {
         if (previous !== image || opening || force) this.followImage = true;
         this.render();
         if (this.followImage) this.centerImage();
+        if (hadFocus) this.nodes.get(image)?.button.focus({preventScroll: true});
         this.discoverEdges();
     }
 
@@ -183,6 +195,8 @@ export class ThumbnailStrip {
 
     render() {
         if (!this.visible || !this.scope) return;
+        // Discovery can move the bounded path window past the current image.
+        this.container.tabIndex = this.paths.includes(this.image) ? -1 : 0;
         const offsets = this.offsets();
         let first = 0;
         while (first < this.paths.length && offsets[first + 1] < this.container.scrollLeft) first++;
@@ -190,7 +204,14 @@ export class ThumbnailStrip {
         while (last < this.paths.length && offsets[last] < this.container.scrollLeft + this.container.clientWidth) last++;
         first = Math.max(0, first - 3);
         last = Math.min(this.paths.length, last + 3);
-        const visible = new Set(this.paths.slice(first, last));
+        const focused = document.activeElement;
+        const indices = new Set(Array.from({length: last - first}, (_, index) => first + index));
+        // Keep the tab stop and focused tile mounted outside the virtual window.
+        for (const path of [this.image, focused?.dataset.path]) {
+            const index = this.paths.indexOf(path);
+            if (index >= 0) indices.add(index);
+        }
+        const visible = new Set([...indices].map(index => this.paths[index]));
         for (const [path, item] of this.nodes) {
             if (!visible.has(path)) { item.scope.dispose(); item.tile.remove(); this.nodes.delete(path); }
         }
@@ -203,13 +224,14 @@ export class ThumbnailStrip {
         this.leading.hidden = first === 0;
         this.trailing.style.width = Math.max(0, offsets.at(-1) - offsets[last] - GAP) + 'px';
         this.trailing.hidden = last === this.paths.length;
-        for (let index = first; index < last; index++) {
+        let cursor = this.leading.nextSibling;
+        for (const index of [...indices].sort((a, b) => a - b)) {
             const path = this.paths[index];
             let item = this.nodes.get(path);
             if (!item) {
                 const button = element('button');
                 button.dataset.path = path; button.title = path;
-                button.setAttribute('aria-label', 'View ' + filename(path));
+                button.setAttribute('aria-label', `View ${isVideo(path) ? 'video' : 'image'} ${filename(path)}`);
                 button.addEventListener('click', () => this.selectImage(path, 'top'));
                 const tile = element('div', 'strip-tile');
                 const label = element('span', 'strip-folder');
@@ -222,6 +244,10 @@ export class ThumbnailStrip {
                 });
             }
             item.tile.style.setProperty('--thumbnail-width', this.tileWidth(path) + 'px');
+            const pinned = index < first || index >= last;
+            item.tile.classList.toggle('pinned', pinned);
+            item.tile.style.setProperty('--thumbnail-offset', offsets[index] + 12 + 'px');
+            item.button.tabIndex = path === this.image ? 0 : -1;
             item.button.classList.toggle('selected', path === this.image);
             if (path === this.image) item.button.setAttribute('aria-current', 'true');
             else item.button.removeAttribute('aria-current');
@@ -240,7 +266,16 @@ export class ThumbnailStrip {
                     ? this.container.clientWidth - 24 - offsets[index] + this.container.scrollLeft : 0;
                 item.label.style.width = Math.max(groupWidth, remainingWidth) + 'px';
             }
-            this.container.insertBefore(item.tile, this.trailing);
+            if (pinned) {
+                if (!item.tile.isConnected) this.container.append(item.tile);
+            } else {
+                while (cursor?.classList.contains('pinned')) cursor = cursor.nextSibling;
+                if (item.tile !== cursor) this.container.insertBefore(item.tile, cursor);
+                cursor = item.tile.nextSibling;
+            }
+        }
+        if (focused?.isConnected && visible.has(focused.dataset.path) && document.activeElement !== focused) {
+            focused.focus({preventScroll: true});
         }
         this.updateEdges();
         this.previews.schedule();

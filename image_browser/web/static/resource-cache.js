@@ -10,13 +10,18 @@ export class ResourceCache {
 
     peek(key) { return this.values.get(key)?.value; }
 
+    getCached(key) {
+        const entry = this.values.get(key);
+        if (entry) {
+            this.values.delete(key); this.values.set(key, entry);
+        }
+        return entry?.value;
+    }
+
     async get(key, load, signal, weight = () => 1) {
         signal?.throwIfAborted();
-        const cached = this.values.get(key);
-        if (cached) {
-            this.values.delete(key); this.values.set(key, cached);
-            return cached.value;
-        }
+        const cached = this.getCached(key);
+        if (cached !== undefined) return cached;
         let task = this.pending.get(key);
         if (!task) {
             const controller = new AbortController();

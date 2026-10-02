@@ -1,10 +1,12 @@
+import {ImageSize} from './state.js';
+
 /** Image geometry: fitting, zoom anchors, scroll edges, and native scrolling. */
 export class ViewerViewport {
     constructor(canvas) {
         this.canvas = canvas;
         this.image = canvas.querySelector('img');
         this.ready = false;
-        this.size = 'page';
+        this.size = ImageSize.FIT_PAGE;
         this.scale = 1;
         this.box = null;
         new ResizeObserver(() => this.resize()).observe(canvas);
@@ -58,8 +60,8 @@ export class ViewerViewport {
         const height = this.canvas.clientHeight;
         const naturalWidth = this.image.naturalWidth;
         const naturalHeight = this.image.naturalHeight;
-        this.scale = this.size === 'page' ? Math.min(1, width / naturalWidth, height / naturalHeight)
-            : this.size === 'width' ? width / naturalWidth : Number(this.size);
+        this.scale = this.size === ImageSize.FIT_PAGE ? Math.min(1, width / naturalWidth, height / naturalHeight)
+            : this.size === ImageSize.FIT_WIDTH ? width / naturalWidth : Number(this.size);
         this.image.width = Math.max(1, Math.floor(naturalWidth * this.scale));
         this.image.height = Math.max(1, Math.floor(naturalHeight * this.scale));
         this.box = {width, height};

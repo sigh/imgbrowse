@@ -1,4 +1,10 @@
 /** URL state is the source of truth for folder and viewer navigation. */
+export const ScreenMode = Object.freeze({BROWSE: 'browse', OVERVIEW: 'overview', VIEW: 'view'});
+export const ReadingLayout = Object.freeze({STRIP: 'strip', SINGLE: 'single'});
+export const FolderLayout = Object.freeze({PREVIEWS: 'previews', LIST: 'list'});
+export const ImageSize = Object.freeze({FIT_PAGE: 'page', FIT_WIDTH: 'width'});
+export const ItemType = Object.freeze({FOLDER: 'folder', MEDIA: 'image'});
+
 export const joinPath = (parent, name) => parent ? parent + '/' + name : name;
 export const parentPath = path => path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : '';
 export const filename = path => path.split('/').pop();
@@ -12,8 +18,10 @@ export function relativePath(base, path) {
     return [...from.slice(shared).map(() => '..'), ...to.slice(shared)].join('/');
 }
 
-export const IMAGE_SIZES = ['page', 'width', '0.1', '0.25', '0.5', '0.75', '1', '1.25', '1.5', '2', '3', '4', '6', '8'];
-export const imageSize = value => IMAGE_SIZES.includes(String(value)) ? String(value) : 'page';
+export const IMAGE_SIZES = [ImageSize.FIT_PAGE, ImageSize.FIT_WIDTH, '0.1', '0.25', '0.5', '0.75', '1', '1.25', '1.5', '2', '3', '4', '6', '8'];
+export const imageSize = value => IMAGE_SIZES.includes(String(value)) ? String(value) : ImageSize.FIT_PAGE;
+
+const OVERVIEW_QUERY_VALUE = 'grid';
 
 function resolveImage(folder, image) {
     const parts = [];
@@ -28,18 +36,17 @@ export function readState(search = location.search) {
     const query = new URLSearchParams(search);
     const folder = query.get('folder') ?? '';
     const image = query.get('image');
-    const layout = ['grid', 'single'].includes(query.get('view')) ? query.get('view') : 'strip';
+    const view = query.get('view');
     return {
         folder,
         size: imageSize(query.get('size')),
-        layout,
-        overview: layout === 'grid',
-        recursive: layout === 'grid',
+        mode: view === OVERVIEW_QUERY_VALUE ? ScreenMode.OVERVIEW
+            : image !== null || query.get('viewer') === '1' || view === ReadingLayout.SINGLE ? ScreenMode.VIEW : ScreenMode.BROWSE,
+        layout: view === ReadingLayout.SINGLE ? ReadingLayout.SINGLE : ReadingLayout.STRIP,
         compact: query.get('compact') === '1',
         filter: query.get('filter') || '',
         image: image === null ? null : resolveImage(folder, image),
         collection: query.get('collection') ?? folder,
-        viewing: image !== null || query.get('viewer') === '1' || layout !== 'strip',
     };
 }
 
@@ -48,12 +55,13 @@ export function stateUrl(next) {
     if (next.folder) query.set('folder', next.folder);
     if (next.compact) query.set('compact', '1');
     if (next.filter) query.set('filter', next.filter);
-    if (next.viewing) {
-        if (next.layout !== 'strip') query.set('view', next.layout);
-        if (imageSize(next.size) !== 'page') query.set('size', imageSize(next.size));
+    if (next.mode !== ScreenMode.BROWSE) {
+        if (next.mode === ScreenMode.OVERVIEW) query.set('view', OVERVIEW_QUERY_VALUE);
+        else if (next.layout === ReadingLayout.SINGLE) query.set('view', ReadingLayout.SINGLE);
+        if (imageSize(next.size) !== ImageSize.FIT_PAGE) query.set('size', imageSize(next.size));
         if (next.collection !== next.folder) query.set('collection', next.collection);
         if (next.image != null) query.set('image', relativePath(next.folder, next.image));
-        else if (next.layout === 'strip') query.set('viewer', '1');
+        else if (next.mode === ScreenMode.VIEW && next.layout === ReadingLayout.STRIP) query.set('viewer', '1');
     }
     return query.size ? '/?' + query : '/';
 }

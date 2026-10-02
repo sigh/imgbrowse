@@ -1,28 +1,27 @@
 import {renderItemHeader} from './static/folder-path.js';
 import {getInfo, refreshScope} from './static/api.js';
 import {icon} from './static/icons.js';
-import {originals} from './static/media-cache.js';
-import {byId, element, setButtonLabel} from './static/dom.js';
+import {clearOriginals} from './static/media-cache.js';
+import {byId, element, plainClick, setButtonLabel} from './static/dom.js';
 import {FolderGrid} from './static/folder-grid.js';
 import {ImageViewer} from './static/image-viewer.js';
 import {PreviewLoader} from './static/preview-loader.js';
-import {filename, imageSize, readState, stateUrl} from './static/state.js';
+import {filename, imageSize, readState, stateUrl, ScreenMode, ReadingLayout, FolderLayout} from './static/state.js';
 
 const FILTER_DELAY = 150;
 const browseId = () => Date.now().toString(36) + Math.random().toString(36).slice(2);
-const screen = state => !state.viewing ? 'browse' : state.overview ? 'overview' : 'view';
 const MODES = [
-    {mode: 'browse', icon: 'folder', label: 'Browse', ids: ['browse-folder', 'viewer-close']},
-    {mode: 'overview', icon: 'grid', label: 'Collection overview', ids: ['overview-folder', 'view-grid']},
-    {mode: 'view', icon: 'play', label: 'View', ids: ['read-folder', 'viewer-read']},
+    {mode: ScreenMode.BROWSE, icon: 'folder', label: 'Browse', ids: ['browse-folder', 'viewer-close']},
+    {mode: ScreenMode.OVERVIEW, icon: 'grid', label: 'Collection overview', ids: ['overview-folder', 'view-grid']},
+    {mode: ScreenMode.VIEW, icon: 'play', label: 'View', ids: ['read-folder', 'viewer-read']},
 ];
 
 function focusTarget(node) {
     if (node?.id) return {id: node.id};
     const card = node?.closest('.card');
     if (!card) return {id: 'grid-viewport'};
-    const selector = ['list-read', 'list-name', 'picture', 'image-name'].find(name => node.classList.contains(name));
-    return {path: card.dataset.path, selector: selector ? '.' + selector : '.card-caption button'};
+    const selector = ['folder-overview', 'folder-view', 'list-name', 'picture', 'image-name'].find(name => node.classList.contains(name));
+    return {path: card.dataset.path, selector: selector ? '.' + selector : '.card-caption a'};
 }
 
 /** Coordinates browser history and independent folder/reader views. */
@@ -30,14 +29,14 @@ class GalleryApp {
     constructor() {
         this.rootName = 'Collection';
         this.preferences = {
-            layout: sessionStorage.getItem('readingLayout') === 'single' ? 'single' : 'strip',
+            layout: sessionStorage.getItem('readingLayout') === ReadingLayout.SINGLE ? ReadingLayout.SINGLE : ReadingLayout.STRIP,
             size: imageSize(sessionStorage.getItem('readingSize')),
         };
         this.buildNavigation();
         this.previews = new PreviewLoader(byId('grid-viewport'), byId('viewer'));
         this.grid = new FolderGrid(this.previews, {
             folderLink: (path, label) => this.folderLink(path, label),
-            openViewer: (image, collection, opener) => this.openViewer(image, collection, opener),
+            mediaLink: (image, collection, label, mode) => this.mediaLink(image, collection, label, mode),
             folderLoaded: name => this.folderLoaded(name),
             refresh: () => this.refresh(),
         });
@@ -58,12 +57,12 @@ class GalleryApp {
     buildNavigation() {
         document.querySelectorAll('.mode-navigation').forEach((group, index) => {
             for (const {mode, icon: name, label, ids} of MODES) {
-                const button = element('button');
+                const button = element('a', 'control-link');
                 button.id = ids[index];
                 button.dataset.mode = mode;
                 button.dataset.icon = name;
                 setButtonLabel(button, label);
-                if (mode === 'browse') button.title = 'Browse (Escape)';
+                if (mode === ScreenMode.BROWSE) button.title = 'Browse (Escape)';
                 group.append(button);
             }
         });
@@ -74,12 +73,16 @@ class GalleryApp {
             button.append(icon(button.dataset.icon));
         }
         for (const button of document.querySelectorAll('[data-layout]')) {
-            button.addEventListener('click', () => this.navigate({compact: button.dataset.layout === 'list'}, true));
+            button.addEventListener('click', () => this.navigate({compact: button.dataset.layout === FolderLayout.LIST}, true));
         }
         for (const button of document.querySelectorAll('[data-mode]')) {
-            button.addEventListener('click', () => this.setMode(button.dataset.mode, button));
+            button.addEventListener('click', event => {
+                if (!plainClick(event)) return;
+                event.preventDefault();
+                this.setMode(button.dataset.mode, button);
+            });
         }
-        byId('view-strip').addEventListener('click', () => this.changeLayout(this.state.layout === 'strip' ? 'single' : 'strip'));
+        byId('view-strip').addEventListener('click', () => this.changeLayout(this.state.layout === ReadingLayout.STRIP ? ReadingLayout.SINGLE : ReadingLayout.STRIP));
         this.grid.viewport.addEventListener('scroll', () => {
             clearTimeout(this.positionTimer);
             this.positionTimer = setTimeout(() => this.savePosition(), 120);
@@ -97,12 +100,12 @@ class GalleryApp {
         this.refreshing = true;
         this.savePosition();
         try {
-            await refreshScope(this.state.viewing ? this.state.collection : this.state.folder);
-            originals.clear();
+            await refreshScope(this.state.mode !== ScreenMode.BROWSE ? this.state.collection : this.state.folder);
+            clearOriginals();
             this.grid.cache.clear();
             this.render(true, true);
         } catch (error) {
-            (this.state.viewing ? this.viewer.status : this.grid.status).textContent = error.message;
+            (this.state.mode !== ScreenMode.BROWSE ? this.viewer.status : this.grid.status).textContent = error.message;
         } finally {
             this.refreshing = false;
         }
@@ -110,31 +113,31 @@ class GalleryApp {
 
     savePosition() {
         clearTimeout(this.positionTimer);
-        if (this.grid.loadingFolder || this.grid.restorePosition || !this.state || (this.state.viewing && !this.state.overview)) return;
-        const key = this.state.overview ? 'overviewPosition' : 'position';
+        if (this.grid.loadingFolder || this.grid.restorePosition || !this.state || this.state.mode === ScreenMode.VIEW) return;
+        const key = this.state.mode === ScreenMode.OVERVIEW ? 'overviewPosition' : 'position';
         history.replaceState({...history.state, [key]: this.grid.position(),
-            ...(this.state.overview ? {overviewImage: this.state.image} : {})}, '');
+            ...(this.state.mode === ScreenMode.OVERVIEW ? {overviewImage: this.state.image} : {})}, '');
     }
 
     readingOptions() {
-        if (!this.state.viewing) return this.preferences;
+        if (this.state.mode === ScreenMode.BROWSE) return this.preferences;
         return {
-            layout: this.state.overview ? history.state?.readingLayout || this.preferences.layout : this.state.layout,
+            layout: this.state.mode === ScreenMode.OVERVIEW ? history.state?.readingLayout || this.preferences.layout : this.state.layout,
             size: this.state.size,
         };
     }
 
     openViewer(image, collection, opener) {
-        if (this.state.overview && image) {
+        if (this.state.mode === ScreenMode.OVERVIEW && image) {
             this.state = {...this.state, image};
             history.replaceState({...history.state, overviewImage: image}, '', stateUrl(this.state));
         }
-        this.navigate({viewing: true, ...this.readingOptions(), overview: false, recursive: false, image, collection},
+        this.navigate(this.destination(ScreenMode.VIEW, image, collection),
             false, 'top', opener);
     }
 
     closeViewer() {
-        if (!this.state.viewing || this.returning) return;
+        if (this.state.mode === ScreenMode.BROWSE || this.returning) return;
         if (history.state?.browseOrigin) {
             // Every owned viewing entry records its distance from the opener.
             // Return reverses those entries; it never adds a synthetic close entry.
@@ -142,74 +145,105 @@ class GalleryApp {
             history.go(-history.state.viewerDepth);
         } else {
             // A bookmarked viewer has no owned Browse entry to traverse to.
-            this.navigate({viewing: false, layout: 'strip', overview: false, recursive: false, image: null}, true);
+            this.navigate({mode: ScreenMode.BROWSE, image: null}, true);
         }
     }
 
     changeLayout(layout) {
-        if (screen(this.state) !== 'view') return;
+        if (this.state.mode !== ScreenMode.VIEW) return;
         this.preferences.layout = layout;
         sessionStorage.setItem('readingLayout', layout);
         this.navigate({layout}, true);
     }
 
     changeSize(size) {
-        if (screen(this.state) !== 'view') return;
+        if (this.state.mode !== ScreenMode.VIEW) return;
         this.preferences.size = imageSize(size);
         sessionStorage.setItem('readingSize', this.preferences.size);
         this.navigate({size: this.preferences.size}, true);
     }
 
     setMode(mode, opener) {
-        if (mode === screen(this.state)) return;
-        if (mode === 'browse') { this.closeViewer(); return; }
-        const image = this.state.viewing ? this.state.image : history.state?.selection || null;
-        const collection = this.state.viewing ? this.state.collection : this.state.folder;
-        if (mode === 'view') { this.openViewer(image, collection, opener); return; }
-        this.navigate({viewing: true, layout: 'grid', overview: true, recursive: true,
-            collection, image, size: this.readingOptions().size}, false, 'top', opener);
+        if (mode === this.state.mode) return;
+        if (mode === ScreenMode.BROWSE) { this.closeViewer(); return; }
+        const image = this.state.mode !== ScreenMode.BROWSE ? this.state.image : history.state?.selection || null;
+        const collection = this.state.mode !== ScreenMode.BROWSE ? this.state.collection : this.state.folder;
+        if (mode === ScreenMode.VIEW) { this.openViewer(image, collection, opener); return; }
+        this.openOverview(collection, opener, image);
+    }
+
+    destination(mode, image, collection) {
+        return {...this.state, ...this.readingOptions(), mode,
+            image: mode === ScreenMode.BROWSE ? null : image, collection};
+    }
+
+    openOverview(collection, opener, image = null) {
+        this.navigate(this.destination(ScreenMode.OVERVIEW, image, collection), false, 'top', opener);
+    }
+
+    mediaLink(image, collection, label, mode = ScreenMode.VIEW) {
+        const link = element('a', 'control-link', label);
+        link.href = stateUrl(this.destination(mode, image, collection));
+        link.addEventListener('click', event => {
+            if (!plainClick(event)) return;
+            event.preventDefault();
+            if (mode === ScreenMode.OVERVIEW) this.openOverview(collection, link, image);
+            else this.openViewer(image, collection, link);
+        });
+        return link;
     }
 
     updateControls() {
         for (const button of document.querySelectorAll('[data-mode]')) {
-            button.setAttribute('aria-pressed', String(button.dataset.mode === screen(this.state)));
+            button.setAttribute('aria-current', button.dataset.mode === this.state.mode ? 'page' : 'false');
+            button.href = button.dataset.mode === ScreenMode.BROWSE && history.state?.browseOrigin?.url
+                ? history.state.browseOrigin.url
+                : stateUrl(this.destination(button.dataset.mode,
+                    this.state.mode !== ScreenMode.BROWSE ? this.state.image : history.state?.selection || null,
+                    this.state.mode !== ScreenMode.BROWSE ? this.state.collection : this.state.folder));
         }
-        document.querySelector('.viewer-tools').hidden = screen(this.state) !== 'view';
-        byId('view-strip').setAttribute('aria-pressed', String(this.state.layout === 'strip'));
+        document.querySelector('.viewer-tools').hidden = this.state.mode !== ScreenMode.VIEW;
+        byId('view-strip').setAttribute('aria-pressed', String(this.state.layout === ReadingLayout.STRIP));
+    }
+
+    /** Calculate return context without writing history or updating the views. */
+    historyEntry(next, replace, opener) {
+        const sameFolder = next.folder === this.state.folder;
+        const position = sameFolder ? history.state?.position : null;
+        const selection = next.mode !== ScreenMode.BROWSE ? next.image : sameFolder
+            ? this.state.image || history.state?.selection || null : null;
+        const sameCollection = next.collection === this.state.collection;
+        const overviewPosition = sameFolder && sameCollection
+            ? (this.state.mode === ScreenMode.OVERVIEW ? this.grid.position() : history.state?.overviewPosition) : null;
+        const overviewImage = sameCollection ? (this.state.mode === ScreenMode.OVERVIEW ? next.image : history.state?.overviewImage) : null;
+        const readingLayout = next.mode === ScreenMode.OVERVIEW ? this.readingOptions().layout : next.layout;
+        const metadata = {...history.state, position, selection, overviewPosition, overviewImage, readingLayout};
+        if (next.mode !== ScreenMode.BROWSE && this.state.mode === ScreenMode.BROWSE) {
+            metadata.browseOrigin = {id: history.state.browseId, focus: focusTarget(opener), url: location.pathname + location.search};
+            metadata.viewerDepth = 1;
+        } else if (next.mode !== ScreenMode.BROWSE && metadata.browseOrigin && !replace) {
+            metadata.viewerDepth++;
+        } else if (next.mode === ScreenMode.BROWSE) {
+            delete metadata.browseOrigin;
+            delete metadata.viewerDepth;
+            if (!sameFolder || this.state.mode !== ScreenMode.BROWSE) metadata.browseId = browseId();
+        }
+        return metadata;
     }
 
     navigate(changes, replace = false, entry = 'top', opener = document.activeElement) {
         clearTimeout(this.filterTimer);
         // Keep the text already entered in Browse when opening before debounce.
-        if (!this.state.viewing && changes.viewing && byId('filter').value !== this.state.filter) {
+        if (this.state.mode === ScreenMode.BROWSE && (changes.mode && changes.mode !== ScreenMode.BROWSE) && byId('filter').value !== this.state.filter) {
             this.navigate({filter: byId('filter').value}, true);
         }
         this.savePosition();
         const next = {...this.state, ...changes};
         if (!replace && stateUrl(next) === stateUrl(this.state)) return;
-        const sameFolder = next.folder === this.state.folder;
-        const position = sameFolder ? history.state?.position : null;
-        const selection = next.viewing ? next.image : sameFolder
-            ? this.state.image || history.state?.selection || null : null;
-        const sameCollection = next.collection === this.state.collection;
-        const overviewPosition = sameFolder && sameCollection
-            ? (this.state.overview ? this.grid.position() : history.state?.overviewPosition) : null;
-        const overviewImage = sameCollection ? (this.state.overview ? next.image : history.state?.overviewImage) : null;
-        const readingLayout = next.overview ? this.readingOptions().layout : next.layout;
-        const metadata = {...history.state, position, selection, overviewPosition, overviewImage, readingLayout};
-        if (next.viewing && !this.state.viewing) {
-            metadata.browseOrigin = {id: history.state.browseId, focus: focusTarget(opener)};
-            metadata.viewerDepth = 1;
-        } else if (next.viewing && metadata.browseOrigin && !replace) {
-            metadata.viewerDepth++;
-        } else if (!next.viewing) {
-            delete metadata.browseOrigin;
-            delete metadata.viewerDepth;
-            if (!sameFolder || this.state.viewing) metadata.browseId = browseId();
-        }
+        const metadata = this.historyEntry(next, replace, opener);
         history[replace ? 'replaceState' : 'pushState'](metadata, '', stateUrl(next));
-        if (this.state.viewing && next.viewing && !this.state.overview && !next.overview && sameFolder
-            && next.recursive === this.state.recursive && next.compact === this.state.compact) {
+        if (this.state.mode === ScreenMode.VIEW && next.mode === ScreenMode.VIEW && next.folder === this.state.folder
+            && next.compact === this.state.compact) {
             this.state = next;
             this.entry = metadata;
             this.updateControls();
@@ -218,7 +252,7 @@ class GalleryApp {
     }
 
     folderLink(path, label) {
-        const changes = {folder: path, collection: path, viewing: false, layout: 'strip', overview: false, recursive: false, image: null, filter: ''};
+        const changes = {folder: path, collection: path, mode: ScreenMode.BROWSE, image: null, filter: ''};
         const link = element('a', '', label);
         link.href = stateUrl({...this.state, ...changes});
         link.addEventListener('click', event => {
@@ -238,7 +272,7 @@ class GalleryApp {
 
     renderBreadcrumbs() {
         renderItemHeader(byId('browse-location'), byId('browse-actions'), {
-            folder: this.state.folder, rootName: this.rootName,
+            folder: this.state.folder, rootName: this.rootName, compact: this.state.compact,
             folderLink: (path, name) => this.folderLink(path, name),
         });
     }
@@ -250,30 +284,32 @@ class GalleryApp {
         this.state = readState();
         this.returning = false;
         let returningFocus;
-        if (!this.state.viewing) {
-            const returningToOrigin = previous?.viewing && origin?.id === history.state?.browseId;
+        if (this.state.mode === ScreenMode.BROWSE) {
+            const returningToOrigin = (previous && previous.mode !== ScreenMode.BROWSE) && origin?.id === history.state?.browseId;
             if (returningToOrigin) returningFocus = origin.focus;
-            else if (previous?.viewing) returningFocus = {id: 'grid-viewport'};
+            else if ((previous && previous.mode !== ScreenMode.BROWSE)) returningFocus = {id: 'grid-viewport'};
             history.replaceState({...history.state, browseId: history.state?.browseId || browseId(),
                 ...(returningToOrigin ? {selection: previous.image} : {})}, '');
         }
         this.entry = history.state;
         for (const button of document.querySelectorAll('[data-layout]')) {
-            button.setAttribute('aria-pressed', String((button.dataset.layout === 'list') === this.state.compact));
+            button.setAttribute('aria-pressed', String((button.dataset.layout === FolderLayout.LIST) === this.state.compact));
         }
         byId('filter').value = this.state.filter;
-        document.querySelector('.toolbar').inert = this.state.viewing;
-        document.querySelector('.app-header').inert = this.state.viewing;
-        this.renderBreadcrumbs();
-        const overview = this.state.viewing && this.state.overview;
+        document.querySelector('.toolbar').inert = this.state.mode !== ScreenMode.BROWSE;
+        document.querySelector('.app-header').inert = this.state.mode !== ScreenMode.BROWSE;
+        if (force || !previous || previous.folder !== this.state.folder || previous.compact !== this.state.compact) this.renderBreadcrumbs();
+        const overview = this.state.mode === ScreenMode.OVERVIEW;
         const host = byId('overview');
-        if (overview) {
+        if (overview && this.grid.viewport.parentNode !== host) {
             host.append(this.grid.viewport, byId('summary'));
-        } else {
+        } else if (!overview && this.grid.viewport.parentNode !== document.body) {
             document.body.insertBefore(this.grid.viewport, byId('viewer'));
             document.body.insertBefore(byId('summary'), byId('viewer'));
         }
-        this.previews.setViewerOpen(this.state.viewing);
+        this.previews.setViewerOpen(this.state.mode !== ScreenMode.BROWSE);
+        this.grid.viewport.hidden = this.state.mode === ScreenMode.VIEW;
+        byId('summary').hidden = this.state.mode === ScreenMode.VIEW;
         host.hidden = !overview;
         byId('viewer-stage').hidden = overview;
         this.updateControls();
@@ -288,9 +324,12 @@ class GalleryApp {
             this.grid.focusPath = returningFocus.path;
             this.grid.focusSelector = returningFocus.selector;
         }
-        this.grid.show(overview ? {...this.state, folder: this.state.collection, viewing: false, recursive: true, compact: false, filter: ''}
-            : {...this.state, recursive: false}, force, position);
-        if (overview && !previous?.overview) this.grid.viewport.focus({preventScroll: true});
+        const gridState = {folder: overview ? this.state.collection : this.state.folder,
+            active: this.state.mode !== ScreenMode.VIEW, recursive: overview,
+            compact: overview ? false : this.state.compact, filter: overview ? '' : this.state.filter,
+            selected: overview ? this.state.image : null};
+        this.grid.show({...gridState, linkPresentation: JSON.stringify(this.readingOptions())}, force, position);
+        if (overview && !(previous?.mode === ScreenMode.OVERVIEW)) this.grid.viewport.focus({preventScroll: true});
         if (returningFocus?.path && this.grid.focusPath) this.grid.viewport.focus({preventScroll: true});
         if (returningFocus?.id) (byId(returningFocus.id) || this.grid.viewport).focus({preventScroll: true});
     }
@@ -300,8 +339,8 @@ class GalleryApp {
 let reloadError;
 if (performance.getEntriesByType('navigation')[0]?.type === 'reload') {
     const state = readState();
-    try { await refreshScope(state.viewing ? state.collection : state.folder); }
+    try { await refreshScope(state.mode !== ScreenMode.BROWSE ? state.collection : state.folder); }
     catch (error) { reloadError = error; }
 }
 export const app = new GalleryApp();
-if (reloadError) (app.state.viewing ? app.viewer.status : app.grid.status).textContent = reloadError.message;
+if (reloadError) (app.state.mode !== ScreenMode.BROWSE ? app.viewer.status : app.grid.status).textContent = reloadError.message;

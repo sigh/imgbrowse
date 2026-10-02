@@ -4,9 +4,9 @@ import {closeMetadata} from './metadata.js';
 import {loadOriginal} from './media-cache.js';
 import {walkImages} from './api.js';
 import {byId, setButtonLabel, TaskScope} from './dom.js';
-import {filename, parentPath, IMAGE_SIZES} from './state.js';
+import {filename, parentPath, IMAGE_SIZES, ScreenMode, ReadingLayout, ImageSize} from './state.js';
 import {ViewerViewport} from './viewer-viewport.js';
-import {WheelGesture} from './wheel-gesture.js';
+import {WheelGesture, WheelMode} from './wheel-gesture.js';
 
 import {ThumbnailStrip} from './thumbnail-strip.js';
 import {VideoPlayer} from './video-player.js';
@@ -34,7 +34,6 @@ export class ImageViewer {
         this.boundaryDirection = null;
         this.nearbyImages = [];
         this.filmstrip = new ThumbnailStrip(this.strip, previews, selectImage);
-        this.lastWheelTurn = -Infinity;
         this.loadingImage = false;
         this.singleImage = false;
         this.bindControls();
@@ -50,7 +49,7 @@ export class ImageViewer {
         });
         byId('viewer-zoom-in').addEventListener('click', () => this.zoom(1));
         byId('viewer-zoom-out').addEventListener('click', () => this.zoom(-1));
-        byId('viewer-retry').addEventListener('click', () => this.refresh());
+        byId('viewer-retry').addEventListener('click', () => this.retryMove ? this.retryMove() : this.refresh());
         this.previousButton.addEventListener('click', () => this.requestMove(true));
         this.nextButton.addEventListener('click', () => this.requestMove(false));
         document.addEventListener('keydown', event => this.onKey(event));
@@ -74,20 +73,20 @@ export class ImageViewer {
 
     setRootName(name) {
         this.rootName = name;
-        if (this.state?.viewing) this.updateCollectionLabel();
+        if (this.state && this.state.mode !== ScreenMode.BROWSE) this.updateCollectionLabel();
     }
 
     updateCollectionLabel() {
-        const image = this.state.overview ? null : this.state.image;
+        const image = this.state.mode === ScreenMode.OVERVIEW ? null : this.state.image;
         const folder = image ? parentPath(image) : this.state.collection;
         renderItemHeader(byId('viewer-location'), byId('viewer-actions'), {
             folder, image, rootName: this.rootName, folderLink: this.folderLink,
-            currentLink: true, collection: this.state.collection,
+            currentLink: true, collection: this.state.collection, compact: this.state.compact,
         });
     }
 
     updateControls() {
-        const unavailable = this.state.overview || isVideo(this.state.image);
+        const unavailable = this.state.mode === ScreenMode.OVERVIEW || isVideo(this.state.image);
         const sizeControl = document.querySelector('.size-control');
         sizeControl.classList.toggle('unavailable', unavailable);
         sizeControl.inert = unavailable;
@@ -98,7 +97,7 @@ export class ImageViewer {
         // Sizing is available only once the requested image is displayed.
         const sizing = this.viewport.ready;
         byId('viewer-zoom').disabled = !sizing;
-        const label = this.state.size === 'page' ? 'Fit' : this.state.size === 'width' ? 'Width' : Math.round(Number(this.state.size) * 100) + '%';
+        const label = this.state.size === ImageSize.FIT_PAGE ? 'Fit' : this.state.size === ImageSize.FIT_WIDTH ? 'Width' : Math.round(Number(this.state.size) * 100) + '%';
         if (byId('viewer-zoom').dataset.size !== this.state.size) {
             byId('viewer-zoom').textContent = label + ' ▾';
         }
@@ -126,23 +125,33 @@ export class ImageViewer {
     }
 
     clearBoundary() {
+        this.retryMove = null;
         this.boundaryDirection = null;
         this.status.textContent = '';
         byId('viewer-retry').hidden = true;
     }
 
+    stopReading() {
+        this.prefetchScope?.dispose();
+        this.prefetchScope = null;
+        this.prefetchPath = null;
+        this.viewport.clear();
+        this.filmstrip.stop();
+        this.setSizeMenu(false, false);
+    }
+
     show(state, force = false, entry = 'top') {
-        const wasOverview = this.state?.overview;
+        const wasOverview = (this.state?.mode === ScreenMode.OVERVIEW);
         const folderChanged = this.state?.folder !== state.folder;
         const layoutChanged = this.state?.layout !== state.layout;
         const anchor = layoutChanged && this.viewport.ready ? this.viewport.point() : null;
         this.state = state;
         if (this.viewport.size !== state.size) this.viewport.setSize(state.size);
-        const key = JSON.stringify([state.viewing, state.collection, state.image, state.overview]);
+        const key = JSON.stringify([state.mode, state.collection, state.image]);
         if (!force && key === this.key) {
             this.updateControls();
-            if (state.viewing && folderChanged) this.updateCollectionLabel();
-            if (state.viewing && (folderChanged || layoutChanged)) {
+            if (state.mode !== ScreenMode.BROWSE && folderChanged) this.updateCollectionLabel();
+            if (state.mode !== ScreenMode.BROWSE && (folderChanged || layoutChanged)) {
                 this.renderStrip();
                 if (anchor) this.viewport.resize(anchor);
             }
@@ -157,30 +166,20 @@ export class ImageViewer {
         this.singleImage = false;
         this.clearBoundary();
         const wasOpen = !this.container.hidden;
-        this.container.hidden = !state.viewing;
-        if (!state.viewing) {
+        this.container.hidden = state.mode === ScreenMode.BROWSE;
+        if (state.mode !== ScreenMode.VIEW) this.stopReading();
+        if (state.mode === ScreenMode.BROWSE) {
             closeMetadata();
-            this.prefetchScope?.dispose();
-            this.prefetchScope = null;
-            this.prefetchPath = null;
             this.nearbyImages = [];
             this.nearbyCollection = null;
-            this.viewport.clear();
-            this.filmstrip.stop();
-            this.setSizeMenu(false, false);
             return;
         }
         if (!wasOpen) {
             closeMetadata();
-            if (!state.overview) this.canvas.focus({preventScroll: true});
-        } else if (wasOverview && !state.overview) this.canvas.focus({preventScroll: true});
-        if (state.overview) {
+            if (state.mode !== ScreenMode.OVERVIEW) this.canvas.focus({preventScroll: true});
+        } else if (wasOverview && state.mode !== ScreenMode.OVERVIEW) this.canvas.focus({preventScroll: true});
+        if (state.mode === ScreenMode.OVERVIEW) {
             this.updateControls();
-            this.prefetchScope?.dispose();
-            this.prefetchPath = null;
-            this.viewport.clear();
-            this.filmstrip.stop();
-            this.setSizeMenu(false, false);
             this.updateCollectionLabel();
             return;
         }
@@ -199,25 +198,30 @@ export class ImageViewer {
     }
 
     async loadImage(path, scope, entry) {
-        // The header and item actions already identify the requested file.
-        this.viewport.clear();
         if (isVideo(path)) {
+            this.viewport.clear();
             this.setSizeMenu(false, false);
-            this.video.show(path, scope, () => {
-                this.status.textContent = 'Unable to play this video. Its format may not be supported by this browser.';
-                byId('viewer-retry').hidden = false;
+            this.video.show(path, scope, error => {
+                const retryable = ![MediaError.MEDIA_ERR_DECODE, MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED].includes(error?.code);
+                this.status.textContent = retryable ? 'Unable to load this video.' : 'Unable to play this video.';
+                byId('viewer-retry').hidden = !retryable;
             });
             this.updateControls();
             return;
         }
-        this.loadingImage = true;
-        this.updateControls();
-        const timer = setTimeout(() => {
-            if (!scope.signal.aborted) this.status.textContent = 'Loading ' + filename(path) + '…';
-        }, LOADING_DELAY);
-        scope.onDispose(() => clearTimeout(timer));
+        let timer;
         try {
-            const {image} = await loadOriginal(path, scope.signal);
+            const original = loadOriginal(path, scope.signal);
+            if (original instanceof Promise) {
+                this.viewport.clear();
+                this.loadingImage = true;
+                this.updateControls();
+                timer = setTimeout(() => {
+                    if (!scope.signal.aborted) this.status.textContent = 'Loading ' + filename(path) + '…';
+                }, LOADING_DELAY);
+                scope.onDispose(() => clearTimeout(timer));
+            }
+            const {image} = original instanceof Promise ? await original : original;
             scope.signal.throwIfAborted();
             this.viewport.show(image, this.state.size, entry);
             if (this.boundaryDirection === null && !this.moveScope) this.status.textContent = '';
@@ -237,6 +241,8 @@ export class ImageViewer {
     }
 
     loadNeighbors(image, collection, scope) {
+        const index = this.nearbyCollection === collection ? this.nearbyImages.indexOf(image) : -1;
+        if (index > 1 && index < this.nearbyImages.length - 2) return;
         const results = new Map();
         for (const reverse of [true, false]) {
             walkImages({root: collection, anchor: image, reverse, limit: NEARBY_COUNT}, scope.signal)
@@ -255,30 +261,29 @@ export class ImageViewer {
     }
 
     prefetchNext() {
-        if (this.loadingImage || !this.state.viewing) return;
+        if (this.loadingImage || this.state.mode === ScreenMode.BROWSE) return;
         const index = this.nearbyImages.indexOf(this.state.image);
         const next = index < 0 ? null : this.nearbyImages[index + (this.readingReverse ? -1 : 1)];
         if (!next || isVideo(next) || this.prefetchPath === next) return;
         this.prefetchScope?.dispose();
         this.prefetchScope = new TaskScope();
         this.prefetchPath = next;
-        loadOriginal(next, this.prefetchScope.signal, true).catch(() => {
+        Promise.resolve(loadOriginal(next, this.prefetchScope.signal, true)).catch(() => {
             if (this.prefetchPath === next) this.prefetchPath = null;
         });
     }
 
     renderStrip(force = false) {
-        this.filmstrip.show(this.state, this.state.layout === 'strip', force);
+        this.filmstrip.show(this.state, this.state.mode === ScreenMode.VIEW && this.state.layout === ReadingLayout.STRIP, force);
     }
 
-    requestMove(reverse, fresh = true, source = 'explicit') {
-        if (!this.state.viewing || this.moveScope || this.singleImage) return;
+    requestMove(reverse, fresh = true, entry = 'top') {
+        if (this.state.mode === ScreenMode.BROWSE || this.moveScope || this.singleImage) return;
         this.readingReverse = reverse;
-        if (this.loadingImage && !fresh) return;
         const wrap = this.boundaryDirection === reverse;
         if (wrap && !fresh) return;
         this.clearBoundary();
-        this.moveImage(reverse, wrap, source === 'wheel' && reverse ? 'bottom' : 'top');
+        this.moveImage(reverse, wrap, entry);
     }
 
     async moveImage(reverse = false, wrap = false, entry = 'top') {
@@ -290,7 +295,7 @@ export class ImageViewer {
         }
         const scope = this.moveScope = new TaskScope();
         this.updateControls();
-        scope.delay(() => { this.status.textContent = 'Finding the next item…'; }, LOADING_DELAY);
+        scope.delay(() => { this.status.textContent = reverse ? 'Finding the previous item…' : 'Finding the next item…'; }, LOADING_DELAY);
         let cursor = null;
         let warning = false;
         try {
@@ -310,7 +315,7 @@ export class ImageViewer {
             } while (cursor !== null);
             if (!this.state.image) {
                 this.status.textContent = warning ? 'No accessible media found. Some folders could not be read.'
-                    : 'No images or videos in this collection. Close to return to the folder.';
+                    : 'No images or videos in this collection.';
             } else {
                 this.boundaryDirection = reverse;
                 this.status.textContent = (reverse ? 'Beginning' : 'End') + ' of collection.'
@@ -318,7 +323,8 @@ export class ImageViewer {
             }
         } catch (error) {
             if (error.name !== 'AbortError') {
-                this.status.textContent = error.message;
+                this.status.textContent = 'Unable to find the ' + (reverse ? 'previous' : 'next') + ' item.';
+                this.retryMove = () => { this.clearBoundary(); this.moveImage(reverse, wrap, entry); };
                 byId('viewer-retry').hidden = false;
             }
         } finally {
@@ -331,8 +337,8 @@ export class ImageViewer {
     }
 
     onKey(event) {
-        if (!this.state?.viewing || event.ctrlKey || event.metaKey || event.altKey) return;
-        if (document.fullscreenElement) return;
+        if (!this.state || this.state.mode === ScreenMode.BROWSE || event.ctrlKey || event.metaKey || event.altKey) return;
+        if (document.fullscreenElement || event.target instanceof Element && event.target.closest('#metadata-popover')) return;
         if (event.key === 'Escape') {
             event.preventDefault();
             if (!byId('size-menu').hidden) this.setSizeMenu(false);
@@ -340,20 +346,11 @@ export class ImageViewer {
             return;
         }
         if (event.composedPath().includes(this.video.element)) return;
-        if (event.key === 'Tab') {
-            const controls = [...this.container.querySelectorAll('a[href], button, select, [tabindex="0"]')]
-                .filter(node => node.getClientRects().length && !node.disabled);
-            const index = controls.indexOf(document.activeElement);
-            const next = (index + (event.shiftKey ? -1 : 1) + controls.length) % controls.length;
-            event.preventDefault();
-            controls[next]?.focus();
-            return;
-        }
-        if (this.state.overview) return;
+        if (this.state.mode === ScreenMode.OVERVIEW) return;
         if (event.target instanceof Element && event.target.matches('select, input, textarea')) return;
         if (!byId('size-menu').hidden) return;
         const vertical = ['ArrowUp', 'ArrowDown'].includes(event.key);
-        if (vertical && this.canvas.scrollHeight > this.canvas.clientHeight + 2) {
+        if (vertical && !this.filmstrip.container.contains(event.target) && this.canvas.scrollHeight > this.canvas.clientHeight + 2) {
             event.preventDefault();
             this.viewport.scroll(event.key === 'ArrowUp' ? -80 : 80);
         } else if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(event.key)) {
@@ -362,41 +359,23 @@ export class ImageViewer {
         } else if (['+', '=', '-'].includes(event.key)) {
             event.preventDefault();
             this.zoom(event.key === '-' ? -1 : 1);
-        } else if (event.key.toLowerCase() === 'f') this.changeSize('page');
-        else if (event.key.toLowerCase() === 'w') this.changeSize('width');
-        else if (event.key.toLowerCase() === 't') this.changeLayout(this.state.layout === 'strip' ? 'single' : 'strip');
+        } else if (event.key.toLowerCase() === 'f') this.changeSize(ImageSize.FIT_PAGE);
+        else if (event.key.toLowerCase() === 'w') this.changeSize(ImageSize.FIT_WIDTH);
+        else if (event.key.toLowerCase() === 't') this.changeLayout(this.state.layout === ReadingLayout.STRIP ? ReadingLayout.SINGLE : ReadingLayout.STRIP);
     }
 
     onWheel(event) {
-        if (this.state?.overview || isVideo(this.state?.image)) return;
-        if (!this.state?.viewing || event.ctrlKey || event.metaKey || event.altKey || event.shiftKey
+        if (this.state?.mode !== ScreenMode.VIEW || isVideo(this.state.image)
+            || event.ctrlKey || event.metaKey || event.altKey || event.shiftKey
             || !event.deltaY || Math.abs(event.deltaX) > Math.abs(event.deltaY)) return;
-        const now = performance.now();
-        const fresh = this.wheel.update(event.deltaY, now);
+        const delta = event.deltaY * (event.deltaMode === 1 ? 16
+            : event.deltaMode === 2 ? this.canvas.clientHeight : 1);
         const reverse = event.deltaY < 0;
-        const overflow = this.viewport.overflows();
-        if (this.loadingImage || this.moveScope) { event.preventDefault(); return; }
-        if (fresh) { this.scrollingGesture = false; this.edgeTurn = false; }
-        if (this.edgeTurn && !fresh) { event.preventDefault(); return; }
-        if (overflow) {
-            if (this.scrollingGesture) return;
-            if (this.wheel.consumed) { event.preventDefault(); return; }
-            if (this.viewport.canScroll(reverse)) {
-                // Native scrolling owns movement; reaching an edge consumes this gesture.
-                this.wheel.consume();
-                // Allow the rest of the gesture to scroll, but not to turn a page.
-                this.scrollingGesture = true;
-                return;
-            }
-            if (!fresh) { event.preventDefault(); return; }
-        } else if (!fresh && now - this.lastWheelTurn < 350) {
-            event.preventDefault(); return;
-        }
+        const overflow = this.state.size !== ImageSize.FIT_PAGE && this.viewport.overflows();
+        const mode = overflow ? (this.viewport.canScroll(reverse) ? WheelMode.NATIVE_SCROLL : WheelMode.EDGE_TURN) : WheelMode.PAGE_TURN;
+        const {native, turn, fresh} = this.wheel.update(delta, performance.now(), mode);
+        if (native) return;
         event.preventDefault();
-        if (this.boundaryDirection === reverse && !fresh) return;
-        this.wheel.consume();
-        this.lastWheelTurn = now;
-        this.edgeTurn = overflow;
-        this.requestMove(reverse, fresh, 'wheel');
+        if (turn) this.requestMove(reverse, fresh, reverse ? 'bottom' : 'top');
     }
 }

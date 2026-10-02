@@ -48,3 +48,14 @@ test('sequence carries the latest anchor through empty server continuation pages
     assert.deepEqual((await sequence.walk({root: '', anchor: 'a', limit: 16})).images, ['b']);
     assert.equal(calls.length, 2);
 });
+
+
+test('synchronous cache reads retain recently used values', async () => {
+    const cache = new ResourceCache(10, 2);
+    await cache.get('a', async () => 'a');
+    await cache.get('b', async () => 'b');
+    assert.equal(cache.getCached('a'), 'a');
+    await cache.get('c', async () => 'c');
+    assert.equal(cache.peek('a'), 'a');
+    assert.equal(cache.peek('b'), undefined);
+});
