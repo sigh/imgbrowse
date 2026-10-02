@@ -260,6 +260,9 @@ assert.equal(await evaluate('history.state.overviewPosition.path'), recursiveAnc
 await open(viewerUrl(first));
 await readyImage(first);
 const headerPositions = () => evaluate(`(() => ({
+    mode: document.getElementById('viewer-close').getBoundingClientRect().toJSON(),
+    copy: document.querySelector('#viewer-location .copy-path').getBoundingClientRect().toJSON(),
+    info: document.querySelector('#viewer-actions .item-info').getBoundingClientRect().toJSON(),
     layouts: document.querySelector('.viewer-layouts').getBoundingClientRect().x,
     size: document.querySelector('.size-control').getBoundingClientRect().x,
     width: document.querySelector('.size-control').getBoundingClientRect().width,
@@ -444,34 +447,86 @@ await key('Escape');
 await waitFor("document.getElementById('viewer').hidden");
 assert.ok(await evaluate("document.activeElement.getClientRects().length > 0"));
 
-// Delayed originals leave the old page stable; cancelled work cannot reopen a closed viewer.
+// Pending media has an empty, stable canvas; identity and actions refer to the requested file.
 await open(viewerUrl(first));
 await readyImage(first);
+await evaluate("document.querySelector('#viewer-actions .item-info').click()");
+await waitFor(`document.getElementById('metadata-details').textContent.includes(${JSON.stringify(first)})`);
 await call('Fetch.enable', {patterns:[{urlPattern:'*/image?*'},{urlPattern:'*/api/walk'}]});
 pauseImages = true;
 await evaluate("import('/static/media-cache.js').then(module => module.originals.clear())");
 const beforeLoading = await evaluate("document.getElementById('viewer-canvas').getBoundingClientRect().toJSON()");
 await click('viewer-next');
 await waitImage(second);
+assert.ok(await evaluate("document.getElementById('viewer-image').hidden && !document.getElementById('viewer-image').hasAttribute('src')"), 'The old image is removed as soon as the target changes');
+assert.equal(await evaluate("document.querySelector('#viewer-path .item-name').textContent"), 'page10.jpg');
+assert.equal(await evaluate("document.getElementById('viewer-zoom').disabled"), true);
+await waitFor(`document.getElementById('metadata-details').textContent.includes(${JSON.stringify(second)})`);
+await evaluate("window.copiedPath=null; Object.defineProperty(navigator, 'clipboard', {configurable:true, value:{writeText:async text => { window.copiedPath=text; }}}); document.querySelector('#viewer-location .copy-path').click()");
+await waitFor('window.copiedPath');
+assert.equal(await evaluate('window.copiedPath'), absoluteRoot + '/' + second);
 await waitFor("document.getElementById('viewer-status').textContent.includes('Loading')");
 assert.deepEqual(await evaluate("document.getElementById('viewer-canvas').getBoundingClientRect().toJSON()"), beforeLoading, 'Loading feedback does not resize the canvas');
 assert.equal(await evaluate("getComputedStyle(document.querySelector('.viewer-feedback')).display"), 'flex', 'Loading feedback is visible');
-assert.equal(await evaluate("document.getElementById('viewer-image').dataset.path"), first);
-assert.equal(await evaluate("document.getElementById('viewer-zoom').disabled"), false);
+pauseImages = false;
+for (const requestId of held.splice(0)) await call('Fetch.continueRequest',{requestId}).catch(()=>{});
+await readyImage(second);
+assert.equal(await evaluate("document.getElementById('viewer-status').textContent"), '');
+assert.deepEqual(await evaluate("document.getElementById('viewer-canvas').getBoundingClientRect().toJSON()"), beforeLoading, 'Completing the replacement preserves canvas geometry');
 await click('viewer-zoom');
 assert.equal(await evaluate("document.getElementById('size-menu').hidden"), false);
 assert.equal(await evaluate("getComputedStyle(document.getElementById('viewer-zoom')).backgroundColor"), actionColors.selected, 'An open size menu uses the shared expanded state');
 await evaluate("document.querySelector('[data-size=width]').click()");
 assert.equal(await evaluate("getComputedStyle(document.getElementById('viewer-zoom')).backgroundColor"), actionColors.action, 'Closing the menu restores neutral action styling');
 assert.equal(await evaluate("new URLSearchParams(location.search).get('size')"), 'width');
+assert.equal(await evaluate("document.getElementById('viewer-image').dataset.path"), second);
+
+// A failed replacement cannot reveal the previous image; Retry loads the same target.
+pauseImages = true;
+await evaluate("import('/static/media-cache.js').then(module => module.originals.clear())");
+await click('viewer-next');
+await waitImage(last);
+await waitFor(`document.getElementById('metadata-details').textContent.includes(${JSON.stringify(last)})`);
+for (let attempt = 0; !held.length && attempt < 160; attempt++) await pause(50);
+assert.ok(held.length > 0, 'The replacement request is held');
+for (const requestId of held.splice(0)) await call('Fetch.failRequest', {requestId, errorReason:'Failed'}).catch(()=>{});
+await waitFor("!document.getElementById('viewer-retry').hidden");
+assert.ok(await evaluate("document.getElementById('viewer-image').hidden && !document.getElementById('viewer-image').hasAttribute('src')"), 'Failure keeps the old image out of the canvas');
+assert.equal(await evaluate("document.querySelector('#viewer-path .item-name').textContent"), 'page1.jpg');
+await evaluate("window.copiedPath=null; document.querySelector('#viewer-location .copy-path').click()");
+await waitFor('window.copiedPath');
+assert.equal(await evaluate('window.copiedPath'), absoluteRoot + '/' + last);
+pauseImages = false;
+await click('viewer-retry');
+await readyImage(last);
+
+// Rapid navigation cancels a pending target; late work cannot display it instead.
+pauseImages = true;
+await evaluate("import('/static/media-cache.js').then(module => module.originals.clear())");
+await click('viewer-prev');
+await waitImage(second);
+await click('viewer-prev');
+await waitImage(first);
+assert.ok(await evaluate("document.getElementById('viewer-image').hidden"));
+pauseImages = false;
+for (const requestId of held.splice(0)) await call('Fetch.continueRequest',{requestId}).catch(()=>{});
+await readyImage(first);
+await pause(150);
 assert.equal(await evaluate("document.getElementById('viewer-image').dataset.path"), first);
 
-await key('Escape');
+// Cancelled work cannot reopen a closed viewer or reattach an old image.
+pauseImages = true;
+await evaluate("import('/static/media-cache.js').then(module => module.originals.clear())");
+await click('viewer-next');
+await waitImage(second);
+await waitFor("document.getElementById('viewer-status').textContent.includes('Loading')");
+await click('viewer-close');
 await waitFor("document.getElementById('viewer').hidden");
 pauseImages = false;
 for (const requestId of held.splice(0)) await call('Fetch.continueRequest',{requestId}).catch(()=>{});
 await pause(150);
 assert.ok(await evaluate("document.getElementById('viewer').hidden"));
+assert.ok(await evaluate("document.getElementById('viewer-image').hidden && !document.getElementById('viewer-image').hasAttribute('src')"));
 
 // A delayed walk isn't an end boundary. Empty and single-image collections have no dead controls.
 pauseWalk = true;
@@ -581,13 +636,42 @@ await evaluate("document.querySelector('#viewer-path a[aria-current]').click()")
 await waitFor("document.getElementById('viewer').hidden && new URLSearchParams(location.search).get('folder') === 'Packed.cbz/Chapter 3'");
 
 // Special filenames and narrow screens retain controls, full names, and a visible focus target.
+// Collection identity follows traversal, even when the URL's browsing folder differs.
+await open(stateUrl({...readState(''), viewing:true, folder:'Album', collection:'Album/Chapter 2', image:last}));
+await readyImage(last);
+assert.equal(await evaluate("document.querySelector('#viewer-path .selected-folder').textContent"), 'Chapter 2');
+assert.equal(await evaluate("document.getElementById('view-grid').title"), 'Collection overview');
+assert.equal(await evaluate("document.getElementById('view-grid').getAttribute('aria-label')"), 'Collection overview');
+await click('view-grid');
+await waitFor("!document.getElementById('overview').hidden");
+assert.equal(await evaluate("document.querySelector('#viewer-path .selected-folder').textContent"), 'Chapter 2');
+await click('view-single');
+await readyImage(last);
+assert.equal(await evaluate("new URLSearchParams(location.search).get('collection')"), 'Album/Chapter 2');
+
+// A scrolling path retains the collection and filename without moving header actions.
+await call('Emulation.setDeviceMetricsOverride', {width:320,height:844,deviceScaleFactor:1,mobile:true});
+await open(viewerUrl(last));
+await readyImage(last);
+const beforePathScroll = await headerPositions();
+await evaluate("document.getElementById('viewer-path').scrollLeft=0");
+assert.equal(await evaluate("document.getElementById('viewer-path').scrollLeft"), 0, 'Ancestors remain reachable');
+await evaluate("document.getElementById('viewer-path').scrollLeft=10000");
+assert.ok(await evaluate(`(() => {
+    const path=document.getElementById('viewer-path'), pin=path.querySelector('.collection-breadcrumb').getBoundingClientRect();
+    const bounds=path.getBoundingClientRect(), name=path.querySelector('.item-name').getBoundingClientRect();
+    return path.scrollLeft > 0 && pin.left >= bounds.left-.5 && pin.right <= name.left+.5 && name.right <= bounds.right+.5;
+})()`), 'The collection and filename remain visible at the end of an overflowing path');
+assert.deepEqual(await headerPositions(), beforePathScroll);
+await screenshot('pinned-collection-mobile');
+await call('Emulation.setDeviceMetricsOverride', {width:1440,height:900,deviceScaleFactor:1,mobile:false});
 await open(viewerUrl('Odd & #/a ?#%.jpg', 'page', 'Odd & #'));
 await readyImage('Odd & #/a ?#%.jpg');
 await call('Emulation.setDeviceMetricsOverride', {width:390,height:844,deviceScaleFactor:1,mobile:true});
 await open(viewerUrl(first,'width'));
 await readyImage(first);
 assert.ok(await evaluate('document.documentElement.scrollWidth <= innerWidth'));
-assert.equal(await evaluate("document.querySelector('#viewer-path .browsing-folder').textContent"), 'Album');
+assert.equal(await evaluate("document.querySelector('#viewer-path .selected-folder').textContent"), 'Album');
 assert.ok(await evaluate("getComputedStyle(document.querySelector('#viewer-path [aria-current]')).textDecorationLine.includes('underline')"));
 assert.ok(await evaluate("document.getElementById('viewer-close').getBoundingClientRect().right <= innerWidth"));
 assert.ok(await evaluate("document.querySelector('.viewer-header').getBoundingClientRect().height <= 85"));
@@ -618,7 +702,7 @@ await evaluate("document.querySelector('.list-name').click()");
 await waitFor("document.querySelector('#breadcrumbs [aria-current]').textContent.includes('Chapter 123')");
 await click('read-folder');
 await waitFor("document.querySelector('#viewer-path [aria-current]')?.textContent.includes('Chapter 123')");
-assert.ok(await evaluate("document.getElementById('viewer-path').scrollLeft > 0"));
+assert.ok(await evaluate("(() => {const link=document.querySelector('#viewer-path .collection-breadcrumb a'); return link.scrollWidth > link.clientWidth && link.title.includes('Chapter 123');})()"), 'Long collection names truncate within the path and retain their full tooltip');
 assert.ok(await evaluate("document.getElementById('viewer-close').getBoundingClientRect().right <= innerWidth"));
 assert.ok(await evaluate("document.querySelector('.viewer-header').getBoundingClientRect().height <= 85"));
 await screenshot('long-header');

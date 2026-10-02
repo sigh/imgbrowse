@@ -26,7 +26,7 @@ async function copyPath(target) {
 }
 
 /** Shared identity and actions for Browse, reading, and folder overview. */
-export function renderItemHeader(location, actions, {folder, image = null, rootName, folderLink, currentLink = false, browseFolder = folder}) {
+export function renderItemHeader(location, actions, {folder, image = null, rootName, folderLink, currentLink = false, collection = null}) {
     const name = location.querySelector('.item-name');
     name.hidden = !image;
     name.textContent = image ? filename(image) : '';
@@ -34,9 +34,9 @@ export function renderItemHeader(location, actions, {folder, image = null, rootN
     const breadcrumbs = location.querySelector('.breadcrumbs');
     const changed = breadcrumbs.dataset.folder !== folder || breadcrumbs.dataset.image !== (image || '');
     const scrollLeft = breadcrumbs.scrollLeft;
-    renderFolderPath(breadcrumbs, folder, rootName, folderLink, {currentLink, browseFolder});
+    renderFolderPath(breadcrumbs, folder, rootName, folderLink, {currentLink, collection, hasImage: Boolean(image)});
     breadcrumbs.dataset.image = image || '';
-    if (image) breadcrumbs.append(element('span', '', '/'));
+    if (image && folder !== collection) breadcrumbs.append(element('span', '', '/'));
     breadcrumbs.append(name);
     if (image) breadcrumbs.scrollLeft = changed ? breadcrumbs.scrollWidth : scrollLeft;
     const target = image || folder;
@@ -50,7 +50,7 @@ export function renderItemHeader(location, actions, {folder, image = null, rootN
 }
 
 /** Shared path presentation; the viewer keeps the current folder navigable. */
-function renderFolderPath(container, folder, rootName, folderLink, {currentLink = false, browseFolder = folder} = {}) {
+function renderFolderPath(container, folder, rootName, folderLink, {currentLink, collection, hasImage}) {
     const focused = container.contains(document.activeElement) ? document.activeElement.getAttribute('href') : null;
     const changed = container.dataset.folder !== folder;
     const scrollLeft = container.scrollLeft;
@@ -67,15 +67,20 @@ function renderFolderPath(container, folder, rootName, folderLink, {currentLink 
     }
     container.replaceChildren();
     parts.forEach((part, index) => {
-        if (index) container.append(element('span', '', '/'));
+        if (index && parts[index - 1].path !== collection) container.append(element('span', '', '/'));
         const current = index === parts.length - 1;
         const node = current && !currentLink ? element('span', '', part.name) : folderLink(part.path, part.name);
         if (current) node.setAttribute('aria-current', 'page');
-        if (part.path === browseFolder) {
-            node.classList.add('browsing-folder');
-            node.title = 'Browsing folder';
+        if (part.path === (collection ?? folder)) {
+            node.classList.add('selected-folder');
+            node.title = collection === null ? 'Browsing folder' : 'Viewing folder: ' + (part.path || rootName);
         }
-        container.append(node);
+        if (part.path === collection) {
+            const pinned = element('span', 'collection-breadcrumb');
+            pinned.append(node);
+            if (!current || hasImage) pinned.append(element('span', '', '/'));
+            container.append(pinned);
+        } else container.append(node);
         if (focused && node.getAttribute('href') === focused) node.focus({preventScroll: true});
     });
     container.scrollLeft = changed ? container.scrollWidth : scrollLeft;

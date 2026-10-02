@@ -382,7 +382,28 @@ input[type=search] {
 .app-header > .item-actions { grid-column: 3; }
 .viewer-tools { grid-column: 3; grid-row: 1; }
 .breadcrumbs a { text-underline-offset: 3px; }
-.breadcrumbs .browsing-folder { color: var(--color-text); font-weight: 600; }
+.breadcrumbs .selected-folder { color: var(--color-text); font-weight: 600; }
+.collection-breadcrumb {
+    position: sticky;
+    left: 0;
+    z-index: 1;
+    display: flex;
+    align-items: center;
+    gap: var(--space-md);
+    max-width: 40%;
+    background: var(--color-background);
+}
+.collection-breadcrumb::after {
+    content: '';
+    position: absolute;
+    inset-block: 0;
+    left: 100%;
+    width: var(--space-md);
+    background: linear-gradient(to right, var(--color-background), transparent);
+    pointer-events: none;
+}
+.collection-breadcrumb a { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.collection-breadcrumb > span { flex-shrink: 0; }
 .item-name { color: var(--color-text); }
 .viewer-tools, .zoom-controls {
     display: flex;

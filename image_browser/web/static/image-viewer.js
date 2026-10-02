@@ -84,7 +84,7 @@ export class ImageViewer {
         const folder = image ? parentPath(image) : this.state.collection;
         renderItemHeader(byId('viewer-location'), byId('viewer-actions'), {
             folder, image, rootName: this.rootName, folderLink: this.folderLink,
-            currentLink: true, browseFolder: this.state.folder,
+            currentLink: true, collection: this.state.collection,
         });
     }
 
@@ -97,7 +97,7 @@ export class ImageViewer {
         const hasImage = Boolean(this.state.image);
         this.previousButton.disabled = !hasImage || this.singleImage || Boolean(this.moveScope);
         this.nextButton.disabled = this.previousButton.disabled;
-        // The displayed image remains usable while its replacement loads.
+        // Sizing is available only once the requested image is displayed.
         const sizing = this.viewport.ready;
         byId('viewer-zoom').disabled = !sizing;
         const label = this.state.size === 'page' ? 'Fit' : this.state.size === 'width' ? 'Width' : Math.round(Number(this.state.size) * 100) + '%';
@@ -207,8 +207,9 @@ export class ImageViewer {
     }
 
     async loadImage(path, scope, entry) {
+        // The header and item actions already identify the requested file.
+        this.viewport.clear();
         if (isVideo(path)) {
-            this.viewport.clear();
             this.setSizeMenu(false, false);
             this.video.show(path, scope, () => {
                 this.status.textContent = 'Unable to play this video. Its format may not be supported by this browser.';
@@ -230,7 +231,6 @@ export class ImageViewer {
             if (this.boundaryDirection === null && !this.moveScope) this.status.textContent = '';
         } catch (error) {
             if (error.name !== 'AbortError' && !scope.signal.aborted) {
-                this.viewport.clear();
                 this.status.textContent = 'Unable to open ' + path + '. Retry or move to another image.';
                 byId('viewer-retry').hidden = false;
             }
