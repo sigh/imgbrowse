@@ -145,7 +145,15 @@ export class ImageViewer {
         const folderChanged = this.state?.folder !== state.folder;
         const layoutChanged = this.state?.layout !== state.layout;
         const anchor = layoutChanged && this.viewport.ready ? this.viewport.point() : null;
+        const sameImage = this.state?.collection === state.collection && this.state?.image === state.image;
+        if (!sameImage || state.mode === ScreenMode.BROWSE) this.overviewPoint = null;
+        else if (!wasOverview && state.mode === ScreenMode.OVERVIEW) this.overviewPoint = this.viewport.point();
+        const point = wasOverview && state.mode === ScreenMode.VIEW ? this.overviewPoint : null;
+        if (state.mode !== ScreenMode.OVERVIEW) this.overviewPoint = null;
         this.state = state;
+        // Capture the reading point before hiding the canvas, then size new media in the active screen.
+        byId('overview').hidden = state.mode !== ScreenMode.OVERVIEW;
+        byId('viewer-stage').hidden = state.mode === ScreenMode.OVERVIEW;
         if (this.viewport.size !== state.size) this.viewport.setSize(state.size);
         const key = JSON.stringify([state.mode, state.collection, state.image]);
         if (!force && key === this.key) {
@@ -187,9 +195,9 @@ export class ImageViewer {
         this.updateCollectionLabel();
         this.updateControls();
         if (state.image) {
-            this.loadImage(state.image, this.scope, entry);
-            this.loadNeighbors(state.image, state.collection, this.scope);
             this.renderStrip(force);
+            this.loadImage(state.image, this.scope, entry, point);
+            this.loadNeighbors(state.image, state.collection, this.scope);
         } else {
             this.viewport.clear();
             this.updateControls();
@@ -197,7 +205,7 @@ export class ImageViewer {
         }
     }
 
-    async loadImage(path, scope, entry) {
+    async loadImage(path, scope, entry, point = null) {
         if (isVideo(path)) {
             this.viewport.clear();
             this.setSizeMenu(false, false);
@@ -224,6 +232,7 @@ export class ImageViewer {
             const {image} = original instanceof Promise ? await original : original;
             scope.signal.throwIfAborted();
             this.viewport.show(image, this.state.size, entry);
+            if (point) this.viewport.resize(point);
             if (this.boundaryDirection === null && !this.moveScope) this.status.textContent = '';
         } catch (error) {
             if (error.name !== 'AbortError' && !scope.signal.aborted) {

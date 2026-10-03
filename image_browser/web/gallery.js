@@ -276,8 +276,6 @@ class GalleryApp {
         this.previews.setViewerOpen(this.state.mode !== ScreenMode.BROWSE);
         this.grid.viewport.hidden = this.state.mode === ScreenMode.VIEW;
         byId('summary').hidden = this.state.mode === ScreenMode.VIEW;
-        host.hidden = !overview;
-        byId('viewer-stage').hidden = overview;
         this.updateControls();
         let position = restore ? history.state?.position : null;
         if (overview) {

@@ -202,4 +202,70 @@ export async function run(browser, fixtures) {
     await waitFor("document.getElementById('viewer').hidden");
     assert.ok(await evaluate("document.activeElement.getClientRects().length > 0"));
 
+    // A temporary Overview visit retains only the current image's reading point.
+    await browser.start(viewerUrl(first, ImageSize.FIT_WIDTH));
+    await readyImage(first);
+    await key('w');
+    await waitFor("import('/gallery.js').then(({app}) => app.viewer.viewport.box.height === app.viewer.canvas.clientHeight && !app.viewer.filmstrip.container.hidden)");
+    await evaluate("document.getElementById('viewer-canvas').scrollTop = 700");
+    const readingPoint = await sourcePoint();
+    const readingUrl = await evaluate('location.href');
+    await click('overview-folder');
+    await waitFor("!document.getElementById('overview').hidden && document.querySelector('#overview .picture')");
+    await click('read-folder');
+    await readyImage(first);
+    await pause(100);
+    assert.ok(Math.abs(await sourcePoint() - readingPoint) < 3, 'View resumes the same passage after Overview');
+    assert.equal(await evaluate('location.href'), readingUrl, 'Restoring coordinates does not change the URL');
+
+    await click('overview-folder');
+    await waitFor("!document.getElementById('overview').hidden");
+    await evaluate('history.back()');
+    await readyImage(first);
+    await pause(100);
+    assert.ok(Math.abs(await sourcePoint() - readingPoint) < 3, 'Back from Overview also resumes the passage');
+
+    await click('overview-folder');
+    await waitFor("!document.getElementById('overview').hidden");
+    await call('Page.reload');
+    await waitFor("!document.getElementById('overview').hidden && document.querySelector('#overview .picture')");
+    await click('read-folder');
+    await readyImage(first);
+    await pause(100);
+    assert.ok((await position()).top < 100, 'Reload clears the temporary reading point');
+
+    await evaluate("document.getElementById('viewer-canvas').scrollTop = 700");
+    await click('overview-folder');
+    await waitFor(`document.querySelector('#overview [data-path="${second}"] .picture')`);
+    await evaluate(`document.querySelector('#overview [data-path="${second}"] .picture').click()`);
+    await readyImage(second);
+    await pause(100);
+    assert.ok((await position()).top < 100, 'Choosing another image starts at its normal entry point');
+
+    await evaluate("document.getElementById('viewer-canvas').scrollTop = 700");
+    await click('overview-folder');
+    await waitFor("!document.getElementById('overview').hidden");
+    await click('browse-folder');
+    await waitFor("document.getElementById('viewer').hidden");
+    await click('read-folder');
+    await readyImage(second);
+    await pause(100);
+    assert.ok((await position()).top < 100, 'Entering Browse discards the temporary reading point');
+    assert.ok((await position()).max > 1000, 'The reset is checked on an enlarged image');
+
+    await evaluate("document.getElementById('viewer-canvas').scrollTop = 700");
+    await click('overview-folder');
+    await waitFor("!document.getElementById('overview').hidden");
+    await click('folders-toggle');
+    await waitFor("document.querySelector('.tree-row[data-path=\"Album\"] a')");
+    await evaluate("document.querySelector('.tree-row[data-path=\"Album\"] a').click()");
+    await waitFor("document.querySelector('.tree-row[data-path=\"Album/Chapter 2\"] a')");
+    await evaluate("document.querySelector('.tree-row[data-path=\"Album/Chapter 2\"] a').click()");
+    await waitFor(`document.querySelector('#overview [data-path="${last}"] .picture')`);
+    assert.ok(await evaluate("!document.getElementById('overview').hidden"), 'Tree folder selection keeps Overview');
+    await click('read-folder');
+    await readyImage(last);
+    await pause(100);
+    assert.equal(await evaluate("new URLSearchParams(location.search).get('folder')"), 'Album/Chapter 2', 'View stays in the folder chosen through the tree');
+    assert.ok((await position()).top < 100, 'Changing folders does not restore the previous reading point');
 }
