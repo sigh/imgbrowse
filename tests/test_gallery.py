@@ -51,6 +51,22 @@ class GalleryTests(unittest.TestCase):
             result = self.gallery.walk(root='album', anchor=anchor, limit=1)
             self.assertEqual(result['images'], ['album/chapter99/c.jpg'])
             self.assertEqual([call.args[0] for call in listing.call_args_list], ['album/chapter99'])
+            self.assertNotIn('folders', result, 'Sharing tree metadata must not read the collection root')
+
+    def test_walk_shares_folder_names_only_when_already_read(self):
+        self.image('album/page.jpg')
+        self.image('album/chapter/page.jpg')
+        with patch.object(self.gallery, 'listing', wraps=self.gallery.listing) as listing:
+            result = self.gallery.walk(root='album', limit=1)
+            self.assertEqual(result['folders'], ['chapter'])
+            self.assertEqual([call.args[0] for call in listing.call_args_list], ['album'])
+        self.assertEqual(self.gallery.walk(root='album/chapter')['folders'], [])
+
+    def test_failed_walk_listing_does_not_report_a_leaf(self):
+        with patch.object(self.gallery, 'listing', side_effect=PermissionError('Unreadable')):
+            result = self.gallery.walk()
+        self.assertNotIn('folders', result)
+        self.assertEqual(result['warnings'], [{'path': '', 'message': 'Unreadable'}])
 
     def test_preview_never_backtracks_but_viewer_does(self):
         (self.root / 'series/first/leaf').mkdir(parents=True)

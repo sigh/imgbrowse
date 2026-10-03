@@ -8,14 +8,14 @@ export async function run(browser, {first, second, absoluteRoot}) {
     // Copy failures are visible beside their action without changing header geometry.
     for (const viewing of [false, true]) {
         if (viewing) { await open(viewerUrl(first)); await readyImage(first); }
-        const prefix = viewing ? '#viewer-location' : '#browse-location';
-        const geometry = await headerPositions(viewing);
+        const prefix = '#item-location';
+        const geometry = await headerPositions();
         await evaluate(`window.originalExecCommand=document.execCommand; document.execCommand=()=>false;
             Object.defineProperty(navigator,'clipboard',{configurable:true,value:{writeText:async()=>{throw new Error('denied');}}});
             document.querySelector('${prefix} .copy-path').click()`);
         await waitFor(`document.querySelector('${prefix} .copy-feedback').textContent === 'Copy failed. Try again.'`);
         assert.ok(await evaluate(`(() => { const feedback=document.querySelector('${prefix} .copy-feedback'), bounds=feedback.getBoundingClientRect(); return feedback.getAttribute('role')==='status' && bounds.height>0 && bounds.left>=0 && bounds.right<=innerWidth; })()`));
-        assert.deepEqual(await headerPositions(viewing), geometry);
+        assert.deepEqual(await headerPositions(), geometry);
         await screenshot(viewing ? 'image-copy-failure' : 'folder-copy-failure');
         await evaluate(`Object.defineProperty(navigator,'clipboard',{configurable:true,value:{writeText:async path=>{window.copiedPath=path;}}});
             document.execCommand=window.originalExecCommand; document.querySelector('${prefix} .copy-path').click()`);
@@ -26,7 +26,7 @@ export async function run(browser, {first, second, absoluteRoot}) {
     // A failed Info request retries in place and keeps keyboard focus in the panel.
     await call('Fetch.enable', {patterns:[{urlPattern:'*/api/metadata?*'}]});
     network.metadata = true;
-    await evaluate("document.querySelector('#viewer-actions .item-info').click()");
+    await evaluate("document.querySelector('#item-actions .item-info').click()");
     for (let attempt=0; !held.length && attempt<160; attempt++) await browser.pause(50);
     assert.ok(held.length);
     for (const requestId of held.splice(0)) await call('Fetch.fulfillRequest', {requestId,responseCode:503,
@@ -78,17 +78,17 @@ export async function run(browser, {first, second, absoluteRoot}) {
     // Archive information identifies logical member paths; copied paths stay complete.
     await open(viewerUrl('Packed.cbz/page2.jpg', undefined, 'Packed.cbz'));
     await readyImage('Packed.cbz/page2.jpg');
-    await evaluate("document.querySelector('#viewer-actions .item-info').click()");
+    await evaluate("document.querySelector('#item-actions .item-info').click()");
     await waitFor("document.querySelector('.metadata-path')");
     assert.equal(await evaluate("document.querySelector('.metadata-path').previousElementSibling.textContent"), 'Member path');
     assert.equal(await evaluate("document.querySelector('.metadata-path').textContent"), absoluteRoot + '/Packed.cbz/page2.jpg');
     await nativeKey('Escape', 27);
     await open('/?folder=Packed.cbz');
-    await evaluate("document.querySelector('#browse-actions .item-info').click()");
+    await evaluate("document.querySelector('#item-actions .item-info').click()");
     await waitFor("document.querySelector('.metadata-path')?.previousElementSibling.textContent === 'Archive'");
     await nativeKey('Escape', 27);
     await open('/?folder=Empty&viewer=1');
     await waitFor("document.getElementById('viewer-status').textContent === 'No images or videos in this collection.'");
-    await click('viewer-close');
+    await click('browse-folder');
     await waitFor("document.getElementById('viewer').hidden");
 }

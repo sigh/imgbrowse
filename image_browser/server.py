@@ -27,7 +27,7 @@ STATIC_FILES = {
     '/gallery.css': 'gallery.css',
     '/gallery.js': 'gallery.js',
     **{f'/static/{name}.js': f'static/{name}.js' for name in (
-        'api', 'dom', 'state', 'preview-loader', 'grid-layout', 'folder-grid', 'image-viewer',
+        'api', 'dom', 'state', 'preview-loader', 'grid-layout', 'folder-grid', 'folder-tree', 'image-viewer',
         'viewer-viewport', 'wheel-gesture', 'icons', 'thumbnail-strip',
         'resource-cache', 'sequence', 'media-cache', 'folder-path', 'video-player', 'media-kind', 'metadata',
     )},

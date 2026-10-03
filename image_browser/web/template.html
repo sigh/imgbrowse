@@ -9,68 +9,68 @@
 </head>
 <body>
     <header class="app-header">
-        <nav class="mode-navigation choice-group" aria-label="Screens"></nav>
-        <div id="browse-location" class="item-location">
-            <div class="path-copy"></div>
-            <nav id="breadcrumbs" class="breadcrumbs" aria-label="Folder path"></nav>
-            <span class="item-name" hidden></span>
-        </div>
-        <div id="browse-actions" class="item-actions"></div>
-    </header>
-    <div class="toolbar">
-        <div class="browse-controls choice-group" role="group" aria-label="Folder layout">
-            <button id="layout-previews" data-layout="previews" data-icon="previews" aria-pressed="true" aria-label="Previews" title="Previews"></button>
-            <button id="layout-list" data-layout="list" data-icon="list" aria-pressed="false" aria-label="List" title="List"></button>
-        </div>
-        <input id="filter" type="search" placeholder="Filter" aria-label="Filter this folder by name">
-    </div>
-    <main id="grid-viewport" tabindex="0" aria-label="Folder contents">
-        <div id="grid"></div>
-        <p id="grid-status" role="status"></p>
-        <button id="load-more" hidden>Retry</button>
-    </main>
-    <footer id="summary" aria-live="polite"></footer>
-
-    <section id="viewer" class="viewer" role="region" aria-label="Media viewer" hidden>
-        <header class="viewer-header">
+        <div class="header-start">
+            <button id="folders-toggle" data-icon="sidebar" aria-label="Folders" title="Folders" aria-controls="folder-tree" aria-expanded="false"></button>
             <nav class="mode-navigation choice-group" aria-label="Screens"></nav>
-            <div id="viewer-location" class="item-location">
-                <div class="path-copy"></div>
-                <nav id="viewer-path" class="breadcrumbs" aria-label="Image path"></nav>
-                <span id="viewer-name" class="item-name" hidden></span>
-            </div>
-            <div class="viewer-tools" aria-label="Reading controls">
-                <div class="size-control">
-                    <button id="viewer-zoom" aria-expanded="false" aria-controls="size-menu">Fit ▾</button>
-                    <div id="size-menu" role="group" aria-label="Image size" hidden>
-                        <button data-size="page" title="Fit page (F)">Fit page</button>
-                        <button data-size="width" title="Fit width (W)">Fit width</button>
-                        <button data-size="1">Actual size</button>
-                        <div class="zoom-controls">
-                            <button id="viewer-zoom-out" aria-label="Zoom out" title="Zoom out (−)">−</button>
-                            <span id="zoom-value"></span>
-                            <button id="viewer-zoom-in" aria-label="Zoom in" title="Zoom in (+)">+</button>
-                        </div>
+        </div>
+        <div id="item-location" class="item-location">
+            <div class="path-copy"></div>
+            <nav id="item-path" class="breadcrumbs" aria-label="Path"></nav>
+            <span id="item-name" class="item-name" hidden></span>
+        </div>
+        <div class="viewer-tools" aria-label="Reading controls" hidden>
+            <div class="size-control">
+                <button id="viewer-zoom" aria-expanded="false" aria-controls="size-menu">Fit ▾</button>
+                <div id="size-menu" role="group" aria-label="Image size" hidden>
+                    <button data-size="page" title="Fit page (F)">Fit page</button>
+                    <button data-size="width" title="Fit width (W)">Fit width</button>
+                    <button data-size="1">Actual size</button>
+                    <div class="zoom-controls">
+                        <button id="viewer-zoom-out" aria-label="Zoom out" title="Zoom out (−)">−</button>
+                        <span id="zoom-value"></span>
+                        <button id="viewer-zoom-in" aria-label="Zoom in" title="Zoom in (+)">+</button>
                     </div>
                 </div>
-                <button id="view-strip" data-icon="thumbnails" title="Thumbnails (T)" aria-label="Thumbnails" aria-pressed="true" aria-controls="viewer-strip"></button>
             </div>
-            <div id="viewer-actions" class="item-actions"></div>
-        </header>
-        <div id="overview" hidden></div>
-        <div id="viewer-stage" class="viewer-stage">
-            <button id="viewer-prev" class="viewer-nav" aria-label="Previous image" title="Previous image (←)"></button>
-            <div id="viewer-canvas" tabindex="-1" aria-label="Image; scroll when enlarged">
-                <div class="image-surface"><img id="viewer-image" alt="" hidden></div>
-            </div>
-            <button id="viewer-next" class="viewer-nav" aria-label="Next image" title="Next image (→)"></button>
-            <div class="viewer-feedback">
-                <span id="viewer-status" role="status"></span>
-                <button id="viewer-retry" hidden>Retry</button>
-            </div>
+            <button id="view-strip" data-icon="thumbnails" title="Thumbnails (T)" aria-label="Thumbnails" aria-pressed="true" aria-controls="viewer-strip"></button>
         </div>
-        <div id="viewer-strip" class="viewer-strip" role="group" aria-label="Collection thumbnails" hidden></div>
-    </section>
+        <div id="item-actions" class="item-actions"></div>
+    </header>
+    <div class="workspace">
+        <nav id="folder-tree" class="folder-tree" aria-label="Folders" hidden>
+            <ul role="tree" aria-label="Folder navigation"></ul>
+        </nav>
+        <div id="workspace-content">
+            <div class="toolbar">
+                <div class="browse-controls choice-group" role="group" aria-label="Folder layout">
+                    <button id="layout-previews" data-layout="previews" data-icon="previews" aria-pressed="true" aria-label="Previews" title="Previews"></button>
+                    <button id="layout-list" data-layout="list" data-icon="list" aria-pressed="false" aria-label="List" title="List"></button>
+                </div>
+                <input id="filter" type="search" placeholder="Filter" aria-label="Filter this folder by name">
+            </div>
+            <main id="grid-viewport" tabindex="0" aria-label="Folder contents">
+                <div id="grid"></div>
+                <p id="grid-status" role="status"></p>
+                <button id="load-more" hidden>Retry</button>
+            </main>
+            <footer id="summary" aria-live="polite"></footer>
+            <section id="viewer" class="viewer" role="region" aria-label="Media viewer" hidden>
+                <div id="overview" hidden></div>
+                <div id="viewer-stage" class="viewer-stage">
+                    <button id="viewer-prev" class="viewer-nav" aria-label="Previous image" title="Previous image (←)"></button>
+                    <div id="viewer-canvas" tabindex="-1" aria-label="Image; scroll when enlarged">
+                        <div class="image-surface"><img id="viewer-image" alt="" hidden></div>
+                    </div>
+                    <button id="viewer-next" class="viewer-nav" aria-label="Next image" title="Next image (→)"></button>
+                    <div class="viewer-feedback">
+                        <span id="viewer-status" role="status"></span>
+                        <button id="viewer-retry" hidden>Retry</button>
+                    </div>
+                </div>
+                <div id="viewer-strip" class="viewer-strip" role="group" aria-label="Collection thumbnails" hidden></div>
+            </section>
+        </div>
+    </div>
     <section id="metadata-popover" popover="manual" tabindex="0" role="region" aria-labelledby="metadata-title">
         <header class="metadata-header">
             <h2 id="metadata-title">Info</h2>

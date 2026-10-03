@@ -8,7 +8,7 @@ export async function run(browser, fixtures) {
     // Pending media has an empty, stable canvas; identity and actions refer to the requested file.
     await open(viewerUrl(first));
     await readyImage(first);
-    await evaluate("document.querySelector('#viewer-actions .item-info').click()");
+    await evaluate("document.querySelector('#item-actions .item-info').click()");
     await waitFor(`document.getElementById('metadata-details').textContent.includes(${JSON.stringify(first)})`);
     await call('Fetch.enable', {patterns:[{urlPattern:'*/image?*'},{urlPattern:'*/api/walk'}]});
     network.images = true;
@@ -17,10 +17,10 @@ export async function run(browser, fixtures) {
     await click('viewer-next');
     await waitImage(second);
     assert.ok(await evaluate("document.getElementById('viewer-image').hidden && !document.getElementById('viewer-image').hasAttribute('src')"), 'The old image is removed as soon as the target changes');
-    assert.equal(await evaluate("document.querySelector('#viewer-path .item-name').textContent"), 'page10.jpg');
+    assert.equal(await evaluate("document.querySelector('#item-path .item-name').textContent"), 'page10.jpg');
     assert.equal(await evaluate("document.getElementById('viewer-zoom').disabled"), true);
     await waitFor(`document.getElementById('metadata-details').textContent.includes(${JSON.stringify(second)})`);
-    await evaluate("window.copiedPath=null; Object.defineProperty(navigator, 'clipboard', {configurable:true, value:{writeText:async text => { window.copiedPath=text; }}}); document.querySelector('#viewer-location .copy-path').click()");
+    await evaluate("window.copiedPath=null; Object.defineProperty(navigator, 'clipboard', {configurable:true, value:{writeText:async text => { window.copiedPath=text; }}}); document.querySelector('#item-location .copy-path').click()");
     await waitFor('window.copiedPath');
     assert.equal(await evaluate('window.copiedPath'), absoluteRoot + '/' + second);
     await waitFor("document.getElementById('viewer-status').textContent.includes('Loading')");
@@ -50,8 +50,8 @@ export async function run(browser, fixtures) {
     for (const requestId of held.splice(0)) await call('Fetch.failRequest', {requestId, errorReason:'Failed'}).catch(()=>{});
     await waitFor("!document.getElementById('viewer-retry').hidden");
     assert.ok(await evaluate("document.getElementById('viewer-image').hidden && !document.getElementById('viewer-image').hasAttribute('src')"), 'Failure keeps the old image out of the canvas');
-    assert.equal(await evaluate("document.querySelector('#viewer-path .item-name').textContent"), 'page1.jpg');
-    await evaluate("window.copiedPath=null; document.querySelector('#viewer-location .copy-path').click()");
+    assert.equal(await evaluate("document.querySelector('#item-path .item-name').textContent"), 'page1.jpg');
+    await evaluate("window.copiedPath=null; document.querySelector('#item-location .copy-path').click()");
     await waitFor('window.copiedPath');
     assert.equal(await evaluate('window.copiedPath'), absoluteRoot + '/' + last);
     network.images = false;
@@ -66,7 +66,7 @@ export async function run(browser, fixtures) {
     await waitImage(second);
     await wheel(-100);
     await waitImage(first);
-    assert.equal(await evaluate("document.querySelector('#viewer-location .item-name').textContent"), 'page2.jpg');
+    assert.equal(await evaluate("document.querySelector('#item-location .item-name').textContent"), 'page2.jpg');
     assert.ok(await evaluate("document.getElementById('viewer-image').hidden"));
     network.images = false;
     for (const requestId of held.splice(0)) await call('Fetch.continueRequest',{requestId}).catch(()=>{});
@@ -80,7 +80,7 @@ export async function run(browser, fixtures) {
     await click('viewer-next');
     await waitImage(second);
     await waitFor("document.getElementById('viewer-status').textContent.includes('Loading')");
-    await click('viewer-close');
+    await click('browse-folder');
     await waitFor("document.getElementById('viewer').hidden");
     network.images = false;
     for (const requestId of held.splice(0)) await call('Fetch.continueRequest',{requestId}).catch(()=>{});
@@ -98,14 +98,14 @@ export async function run(browser, fixtures) {
     await waitFor("document.getElementById('viewer-status').textContent.includes('No images')");
     assert.ok(await evaluate("document.getElementById('viewer-zoom').disabled"));
     await call('Fetch.disable');
-    await click('viewer-close');
+    await click('browse-folder');
     await waitFor("document.getElementById('viewer').hidden && document.getElementById('grid-status').textContent.includes('no visible')");
     await click('overview-folder');
     await waitFor("!document.getElementById('overview').hidden && document.getElementById('grid-status').textContent.includes('No images')");
-    await click('viewer-read');
+    await click('read-folder');
     await waitFor("document.getElementById('overview').hidden && document.getElementById('viewer-status').textContent.includes('No images')");
-    assert.equal(await evaluate("document.getElementById('viewer-read').getAttribute('aria-current')"), 'page');
-    await click('viewer-close');
+    assert.equal(await evaluate("document.getElementById('read-folder').getAttribute('aria-current')"), 'page');
+    await click('browse-folder');
     await waitFor("document.getElementById('viewer').hidden && location.search === '?folder=Empty'");
     await open('/?folder=Single&viewer=1');
     await readyImage('Single/only.jpg');

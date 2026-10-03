@@ -72,6 +72,7 @@ export async function connectBrowser(port, base, screenshots = '') {
         assert.ok(opened, 'Native modified navigation opens another tab: ' + selector);
         assert.equal(await evaluate('location.href'), current, 'Modified navigation preserves the current tab');
         await call('Target.closeTarget', {targetId:opened.targetId});
+        await call('Page.bringToFront');
         return new URL(opened.url).searchParams;
     }
     const imageIs = path => `import('/static/state.js').then(({readState}) => readState().image === ${JSON.stringify(path)})`;
@@ -94,8 +95,8 @@ export async function connectBrowser(port, base, screenshots = '') {
     const position = () => evaluate("({top:document.getElementById('viewer-canvas').scrollTop,max:document.getElementById('viewer-canvas').scrollHeight-document.getElementById('viewer-canvas').clientHeight})");
     const viewerUrl = (image, size = ImageSize.FIT_PAGE, folder = 'Album') => stateUrl({...readState(''), folder, collection: folder, mode: ScreenMode.VIEW, image, size});
 
-    const headerPositions = (viewing = true) => evaluate(`(() => {
-        const header = document.querySelector(${JSON.stringify(viewing ? '.viewer-header' : '.app-header')});
+    const headerPositions = () => evaluate(`(() => {
+        const header = document.querySelector('.app-header');
         return {
             navigation: header.querySelector('.mode-navigation').getBoundingClientRect().toJSON(),
             modes: [...header.querySelectorAll('[data-mode]')].map(button => button.getBoundingClientRect().toJSON()),

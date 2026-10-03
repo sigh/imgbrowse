@@ -42,7 +42,6 @@ export async function run(browser, fixtures) {
     await evaluate(`window.pageTurnMutations=[];
         window.pageTurnObserver=new MutationObserver(records=>pageTurnMutations.push(...records));
         pageTurnObserver.observe(document.body,{childList:true});
-        pageTurnObserver.observe(document.getElementById('browse-location'),{childList:true,subtree:true});
         pageTurnObserver.observe(document.getElementById('viewer-strip'),{childList:true});`);
     assert.ok(await evaluate("(() => { document.getElementById('viewer-next').click(); const image=document.getElementById('viewer-image'); return image.dataset.path==='root3.jpg' && !image.hidden; })()"),
         'A decoded next image is displayed synchronously, without a blank loading frame');
@@ -50,8 +49,6 @@ export async function run(browser, fixtures) {
     assert.ok(await evaluate('window.retainedThumbnail.isConnected'));
     assert.ok(await evaluate("!pageTurnMutations.some(record=>[...record.removedNodes].some(node=>node.id==='grid-viewport' || node.id==='summary' || node.contains(retainedThumbnail)))"),
         'Page turns keep the grid and existing thumbnails attached');
-    assert.ok(await evaluate("!pageTurnMutations.some(record=>document.getElementById('browse-location').contains(record.target))"),
-        'Page turns leave the hidden Browse header alone');
     await evaluate('pageTurnObserver.disconnect()');
     assert.deepEqual((await evaluate("Array.from(document.querySelectorAll('#viewer-strip button'),button=>button.dataset.path)")).slice(0,stripPaths.length),stripPaths);
     // A middle image stays centered as adjacent batches arrive; real ends have no fade.
@@ -93,15 +90,15 @@ export async function run(browser, fixtures) {
     // Breadcrumbs leave the reader for the image's actual folder, preserving the grid layout.
     await open(viewerUrl(first));
     await readyImage(first);
-    await evaluate("document.querySelector('#viewer-path a[aria-current]').click()");
+    await evaluate("document.querySelector('#item-path a[aria-current]').click()");
     await waitFor("document.getElementById('viewer').hidden && document.querySelectorAll('.card').length === 2");
     assert.equal(await evaluate("new URLSearchParams(location.search).get('folder')"),'Album/Chapter 1');
-    assert.equal(await evaluate("document.querySelector('#breadcrumbs [aria-current]').tagName"),'SPAN');
+    assert.equal(await evaluate("document.querySelector('#item-path [aria-current]').tagName"),'SPAN');
 
     // ZIP/CBZ archives behave like folders, with direct links and natural page order.
     await open('/?folder=Packed.cbz');
     await waitFor("document.querySelectorAll('.card').length === 3");
-    assert.equal(await evaluate("document.querySelector('#breadcrumbs [aria-current]').textContent"),'Packed.cbz');
+    assert.equal(await evaluate("document.querySelector('#item-path [aria-current]').textContent"),'Packed.cbz');
     await click('read-folder');
     await readyImage('Packed.cbz/page2.jpg');
     await click('viewer-next');
@@ -110,15 +107,15 @@ export async function run(browser, fixtures) {
     await readyImage('Packed.cbz/Chapter 3/page1.jpg');
     await open(viewerUrl('Packed.cbz/Chapter 3/page1.jpg', ImageSize.FIT_PAGE, 'Packed.cbz'));
     await readyImage('Packed.cbz/Chapter 3/page1.jpg');
-    await evaluate("Object.defineProperty(navigator, 'clipboard', {configurable:true, value:{writeText:async text => { window.copiedPath=text; }}}); document.querySelector('#viewer-location .copy-path').click()");
+    await evaluate("Object.defineProperty(navigator, 'clipboard', {configurable:true, value:{writeText:async text => { window.copiedPath=text; }}}); document.querySelector('#item-location .copy-path').click()");
     await waitFor('window.copiedPath');
     assert.equal(await evaluate('window.copiedPath'), absoluteRoot + '/Packed.cbz/Chapter 3/page1.jpg');
-    await evaluate("document.querySelector('#viewer-actions .item-info').click()");
+    await evaluate("document.querySelector('#item-actions .item-info').click()");
     await waitFor("document.getElementById('metadata-details').textContent.includes('Packed.cbz/Chapter 3/page1.jpg')");
     await nativeKey('Escape', 27);
     await waitFor("!document.getElementById('metadata-popover').matches(':popover-open')");
 
-    await evaluate("document.querySelector('#viewer-path a[aria-current]').click()");
+    await evaluate("document.querySelector('#item-path a[aria-current]').click()");
     await waitFor("document.getElementById('viewer').hidden && new URLSearchParams(location.search).get('folder') === 'Packed.cbz/Chapter 3'");
 
 }

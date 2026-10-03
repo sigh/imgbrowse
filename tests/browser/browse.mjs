@@ -58,29 +58,29 @@ export async function run(browser, fixtures) {
     for (const request of requests.filter(url => new URL(url).pathname === '/thumbnail')) {
         assert.ok(visibleCards.includes(new URL(request).searchParams.get('path')), 'Only visible card paths may request thumbnails: ' + request);
     }
-    await evaluate("Object.defineProperty(navigator, 'clipboard', {configurable:true, value:{writeText:async text => { window.copiedPath=text; }}}); document.querySelector('#browse-location .copy-path').click()");
+    await evaluate("Object.defineProperty(navigator, 'clipboard', {configurable:true, value:{writeText:async text => { window.copiedPath=text; }}}); document.querySelector('#item-location .copy-path').click()");
     await waitFor("window.copiedPath");
     const absoluteRoot = await evaluate('window.copiedPath');
     assert.ok(absoluteRoot.startsWith('/'));
-    await evaluate("{ const info=document.querySelector('#browse-actions .item-info'); info.focus(); info.click(); }");
+    await evaluate("{ const info=document.querySelector('#item-actions .item-info'); info.focus(); info.click(); }");
     await waitFor("document.getElementById('metadata-details').textContent.includes('Media')");
-    assert.equal(await evaluate("getComputedStyle(document.querySelector('#browse-actions .item-info')).backgroundColor"), actionColors.selected, 'Expanded Info shares the selected-layout treatment');
+    assert.equal(await evaluate("getComputedStyle(document.querySelector('#item-actions .item-info')).backgroundColor"), actionColors.selected, 'Expanded Info shares the selected-layout treatment');
 
     assert.equal(await evaluate("document.getElementById('metadata-popover').matches(':popover-open')"), true);
     assert.equal(await evaluate("document.querySelector('#metadata-popover button') === null"), true, 'Info itself dismisses the popover');
     assert.equal(await evaluate("[...document.querySelectorAll('#metadata-details dt')].some(row => row.textContent === 'Type')"), false);
     assert.equal(await evaluate("import('/static/metadata.js').then(({formatMetadataDate}) => formatMetadataDate('2005-01-10T17:08:17'))"), '2005-01-10 17:08');
-    const folderActions = await evaluate("document.getElementById('browse-actions').getBoundingClientRect().toJSON()");
-    const folderCopy = await evaluate("document.querySelector('#browse-location .copy-path').getBoundingClientRect().toJSON()");
-    assert.ok(await evaluate("document.querySelector('#browse-location .copy-path').getBoundingClientRect().right < document.getElementById('breadcrumbs').getBoundingClientRect().left"));
+    const folderActions = await evaluate("document.getElementById('item-actions').getBoundingClientRect().toJSON()");
+    const folderCopy = await evaluate("document.querySelector('#item-location .copy-path').getBoundingClientRect().toJSON()");
+    assert.ok(await evaluate("document.querySelector('#item-location .copy-path').getBoundingClientRect().right < document.getElementById('item-path').getBoundingClientRect().left"));
     assert.equal(await evaluate("document.getElementById('metadata-details').textContent.includes('including archives') || document.getElementById('metadata-details').textContent.includes('Scope')"), false);
     assert.ok(folderActions.right <= await evaluate('innerWidth'));
     await screenshot('folder-info');
     assert.equal(await evaluate("document.getElementById('metadata-popover').getBoundingClientRect().top"), await evaluate("document.querySelector('.app-header').getBoundingClientRect().bottom + 8"));
     await nativeKey('Escape', 27);
     await waitFor("!document.getElementById('metadata-popover').matches(':popover-open')");
-    assert.equal(await evaluate("document.activeElement === document.querySelector('#browse-actions .item-info')"), true);
-    await evaluate("document.querySelector('#browse-actions .item-info').click()");
+    assert.equal(await evaluate("document.activeElement === document.querySelector('#item-actions .item-info')"), true);
+    await evaluate("document.querySelector('#item-actions .item-info').click()");
     await waitFor("document.getElementById('metadata-popover').matches(':popover-open')");
     await call('Input.dispatchMouseEvent', {type:'mousePressed', x:10, y:450, button:'left', clickCount:1});
     await call('Input.dispatchMouseEvent', {type:'mouseReleased', x:10, y:450, button:'left', clickCount:1});

@@ -79,7 +79,7 @@ export class ImageViewer {
     updateCollectionLabel() {
         const image = this.state.mode === ScreenMode.OVERVIEW ? null : this.state.image;
         const folder = image ? parentPath(image) : this.state.collection;
-        renderItemHeader(byId('viewer-location'), byId('viewer-actions'), {
+        renderItemHeader(byId('item-location'), byId('item-actions'), {
             folder, image, rootName: this.rootName, folderLink: this.folderLink,
             currentLink: true, collection: this.state.collection, compact: this.state.compact,
         });

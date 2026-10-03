@@ -1,5 +1,7 @@
 /** Small, consistent outline icons. Accessible names belong to their controls. */
 const paths = {
+    sidebar: '<rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18M5 8h2M5 12h2M5 16h2"/>',
+    down: '<path d="m5 9 7 7 7-7"/>',
     play: '<path d="m8 5 11 7-11 7Z" fill="currentColor" stroke="none"/>',
     back: '<path d="m10 5-7 7 7 7M3 12h18"/>',
     previews: '<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/><path d="m3 8 3-3 4 4m4-1 3-3 4 4M3 19l3-3 4 4m4-1 3-3 4 4"/>',

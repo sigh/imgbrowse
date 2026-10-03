@@ -41,7 +41,7 @@ export async function run(browser, fixtures) {
     await waitFor('testVideo.currentTime > 0');
     await evaluate('testVideo.pause(); testVideo.currentTime=1.5');
     await waitFor('!testVideo.seeking && testVideo.currentTime >= 1.4');
-    await click('view-grid');
+    await click('overview-folder');
     await waitFor("!document.getElementById('overview').hidden && document.querySelector('.selected-media')");
     assert.ok(await evaluate("testVideo.paused && !testVideo.hasAttribute('src')"));
     await evaluate(`document.querySelector('#overview [data-path="Mixed/2.webm"] .picture').click()`);
@@ -56,7 +56,7 @@ export async function run(browser, fixtures) {
     await click('viewer-prev');
     await waitFor("document.getElementById('viewer-video')?.readyState >= 2");
     await evaluate("window.testVideo=document.getElementById('viewer-video')");
-    await click('viewer-close');
+    await click('browse-folder');
     assert.ok(await evaluate("testVideo.paused && !testVideo.hasAttribute('src') && !testVideo.isConnected"));
     await open(viewerUrl('Mixed/4.mp4', ImageSize.FIT_PAGE, 'Mixed'));
     await waitFor("document.getElementById('viewer-status').textContent.includes('Unable to play')");

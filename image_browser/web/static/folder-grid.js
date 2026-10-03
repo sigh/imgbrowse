@@ -68,7 +68,7 @@ export class FolderGrid {
         if (force || previous?.folder !== state.folder || this.directory?.path !== state.folder) {
             this.loadFolder(force);
         } else if (this.directory && !this.loadingFolder
-            && ['recursive', 'compact', 'filter'].some(key => previous[key] !== state[key])) {
+            && (!previous.active || ['recursive', 'compact', 'filter'].some(key => previous[key] !== state[key]))) {
             this.displayFolder();
         } else this.scheduleRender();
     }

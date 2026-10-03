@@ -1,6 +1,7 @@
 /** Exercise real browser caches and bounded windows with the --performance fixture. */
 import assert from 'node:assert/strict';
 import {connectBrowser} from './browser-harness.mjs';
+import {ScreenMode} from '../image_browser/web/static/state.js';
 const [port, base] = process.argv.slice(2);
 const browser = await connectBrowser(port, base);
 const {call, evaluate, waitFor: wait} = browser;
@@ -63,7 +64,7 @@ assert.equal(await evaluate('testApp.state.image'), 'Large/page5.jpg');
 assert.ok(await evaluate('testApp.grid.directory.images.length <= 2000'));
 await evaluate("testApp.setMode('view')");
 await wait("document.getElementById('viewer-image').dataset.path === 'Large/page5.jpg' && !document.getElementById('viewer-image').hidden");
-await evaluate('testApp.closeViewer()');
+await evaluate(`testApp.setMode(${JSON.stringify(ScreenMode.BROWSE)})`);
 await wait("testApp.state.mode === 'browse'");
 console.log('Performance browser checks passed:' ,JSON.stringify({grid,strip,media}));
 browser.close();

@@ -289,7 +289,12 @@ class Gallery:
                 items.append(child)
             else:
                 stack.append({'path': child, 'phase': 0, 'after': None})
-        return {'images': items, 'cursor': stack or None, 'warnings': warnings}
+        result = {'images': items, 'cursor': stack or None, 'warnings': warnings}
+        # Share the selected collection's listing already read by traversal.
+        # Do not scan another directory just to supply tree metadata.
+        if root in listings and not any(warning['path'] == root for warning in warnings):
+            result['folders'] = listings[root]['folders']
+        return result
 
     def _walk_stack(self, root, anchor, cursor, phases):
         """Validate a continuation, or seed traversal directly at an image."""

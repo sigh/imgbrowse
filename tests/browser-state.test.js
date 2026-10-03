@@ -12,7 +12,7 @@ test('strip paths use the browsing folder, including an empty current-folder lab
     assert.equal(relativePath('Album', 'Album Extra'), '../Album Extra');
 });
 
-test('image URLs retain independent grid and viewer contexts', () => {
+test('legacy image URLs retain their collection override', () => {
     const state = {
         folder: 'Album & photos', layout: ReadingLayout.STRIP, compact: true, size: ImageSize.FIT_WIDTH, filter: 'chapter',
         mode: ScreenMode.VIEW, collection: 'Album & photos/Chapter 2',
@@ -26,7 +26,7 @@ test('literal percent filenames are preserved', () => {
     assert.equal(readState(current.toString()).image, 'Album/literal%20.jpg');
 });
 
-test('closing a viewer drops its collection override and preserves grid settings', () => {
+test('Browse URLs omit viewer state and retain their explicit folder settings', () => {
     const state = readState('folder=parent&recursive=1&filter=page&collection=child&image=../child/a.jpg');
     const restored = readState(new URL(stateUrl({...state, mode: ScreenMode.BROWSE}), 'http://localhost').search);
     assert.equal(restored.folder, 'parent');

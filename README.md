@@ -38,9 +38,20 @@ Browse shows immediate children as previews or a name list; its filter matches
 names. Overview includes descendant media; selecting an item opens View. View's
 thumbnail button shows or hides the tray. Sizing, thumbnail visibility, and
 thumbnail size are remembered for the tab session; viewer URLs restore their
-own presentation. Browse restores the opening folder, filter, layout, position,
-and focus. Breadcrumbs navigate to another folder. Back/Forward restores screen
-and grid position; Refresh picks up filesystem changes.
+own presentation. Browse, Overview, and View use the same current folder;
+switching screens keeps that location. Escape switches to Browse after closing
+any transient panel. Breadcrumbs navigate to another folder. Back/Forward visits
+the previous/next entry and restores its grid position and focus; Refresh picks
+up filesystem changes.
+
+The sidebar button beside Browse opens a folder tree, including archives, in
+every screen. Arrows expand branches; names change folders while keeping the
+current screen and reading settings. Clicking the selected folder toggles its branch;
+double-clicking another folder selects and expands it. The tree preserves its
+expansion and scroll when hidden. On narrow screens it overlays the content and
+closes after selecting another folder; toggling the current folder keeps it open.
+Use arrow keys to explore the tree and Enter to open a folder; modified clicks
+open folder links in another tab.
 
 Supports JPG, JPEG, PNG, GIF, WebP, and BMP, including images inside ZIP and CBZ
 archives. Loose MP4, M4V, WebM, OGV, and MOV videos use native browser playback
@@ -78,4 +89,4 @@ Browser journeys live in `tests/browser/` and share the Chrome helpers in
 `tests/browser-harness.mjs`. Each journey resets its preferences and viewport.
 Run one independently with `SMOKE_JOURNEY=reader python3 -B tests/browser_smoke.py`
 (also available: `browse`, `navigation-return`, `loading`, `strip-archives`,
-`responsive`, and `video`).
+`responsive`, `video`, and `tree`).

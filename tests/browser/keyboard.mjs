@@ -6,7 +6,7 @@ export async function run(browser, {first, second}) {
     await readyImage(first);
     await waitFor("document.querySelector('#viewer-strip button[data-path=\"Album/Chapter 1/page10.jpg\"]')");
     assert.ok(await evaluate("!document.getElementById('viewer').hasAttribute('aria-modal') && document.getElementById('viewer').getAttribute('role') === 'region'"));
-    assert.ok(await evaluate("document.querySelector('.app-header').inert && document.querySelector('.toolbar').inert && document.getElementById('grid-viewport').hidden && document.getElementById('summary').hidden"));
+    assert.ok(await evaluate("!document.querySelector('.app-header').inert && document.querySelector('.toolbar').inert && document.getElementById('grid-viewport').hidden && document.getElementById('summary').hidden"));
 
     await evaluate("document.querySelector('.strip-resizer').focus()");
     await nativeKey('Tab', 9);
@@ -26,18 +26,18 @@ export async function run(browser, {first, second}) {
     await readyImage(first);
     assert.equal(await evaluate('document.activeElement.id'), 'viewer-prev', 'Navigation outside the strip keeps its focus');
 
-    await evaluate("document.querySelector('#viewer-actions .item-info').click()");
+    await evaluate("document.querySelector('#item-actions .item-info').click()");
     await waitFor("document.getElementById('metadata-details').textContent.includes('1000 × 1800')");
     assert.equal(await evaluate('document.activeElement.id'), 'metadata-popover');
-    assert.ok(await evaluate("document.getElementById('viewer-actions').contains(document.getElementById('metadata-popover'))"));
+    assert.ok(await evaluate("document.getElementById('item-actions').contains(document.getElementById('metadata-popover'))"));
     await nativeKey('ArrowRight', 39);
     await readyImage(first);
     await nativeKey('Escape', 27);
-    assert.ok(await evaluate("document.activeElement.matches('#viewer-actions .item-info') && !document.getElementById('viewer').hidden"));
+    assert.ok(await evaluate("document.activeElement.matches('#item-actions .item-info') && !document.getElementById('viewer').hidden"));
     await nativeKey('Tab', 9);
     assert.equal(await evaluate('document.activeElement.id'), 'viewer-prev', 'Native Tab follows the header order');
 
-    await click('view-grid');
+    await click('overview-folder');
     await waitFor("!document.getElementById('overview').hidden && document.querySelector('#overview .picture')");
     await evaluate("document.getElementById('grid-viewport').focus()");
     await nativeKey('Tab', 9);

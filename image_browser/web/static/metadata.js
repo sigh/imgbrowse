@@ -37,7 +37,7 @@ function positionMetadata() {
     if (!metadataOpen() || !context?.button.isConnected) return;
     const panel = popover();
     const anchor = context.button.getBoundingClientRect();
-    const header = context.button.closest('.app-header, .viewer-header').getBoundingClientRect();
+    const header = context.button.closest('.app-header').getBoundingClientRect();
     const left = Math.max(12, Math.min(anchor.right - panel.offsetWidth, innerWidth - panel.offsetWidth - 12));
     const top = Math.min(Math.max(anchor.bottom, header.bottom) + 8, innerHeight - 60);
     panel.style.left = `${left}px`;

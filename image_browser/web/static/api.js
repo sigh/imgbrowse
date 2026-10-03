@@ -19,12 +19,25 @@ let mediaVersion = Date.now();
 const thumbnails = new ResourceCache(32 * 1024 * 1024, 512);
 const videoInfo = new ResourceCache(1024 * 1024, 4096);
 const walks = new ResourceCache(4 * 1024 * 1024, 256);
-export const sequence = new Sequence((options, signal) => walks.get(JSON.stringify(options),
-    shared => request('/api/walk', shared, options), signal, value => JSON.stringify(value).length * 2));
+const folders = new ResourceCache(4 * 1024 * 1024, 32);
+const folderListeners = new Set();
+export function onFolderListing(listener) {
+    folderListeners.add(listener);
+    return () => folderListeners.delete(listener);
+}
+function publishFolders(path, folders) {
+    for (const listener of folderListeners) listener(path, folders);
+}
+export const sequence = new Sequence(async (options, signal) => {
+    const result = await walks.get(JSON.stringify(options),
+        shared => request('/api/walk', shared, options), signal, value => JSON.stringify(value).length * 2);
+    if (result.folders) publishFolders(options.root || '', result.folders);
+    return result;
+});
 
 export async function refreshScope(path) {
     await request('/api/refresh', undefined, {path});
-    mediaVersion++; thumbnails.clear(); videoInfo.clear(); walks.clear(); sequence.clear();
+    mediaVersion++; thumbnails.clear(); videoInfo.clear(); walks.clear(); folders.clear(); sequence.clear();
 }
 
 export const imageUrl = (path, thumbnail = false) =>
@@ -35,8 +48,14 @@ export const getLocation = path => request('/api/location?' + new URLSearchParam
 export const fullPath = location => location.filesystem_path + (location.archive_member ? '/' + location.archive_member : '');
 export const getMetadata = (path, signal) => request('/api/metadata?' + new URLSearchParams({path}), signal);
 
-export const getFolder = (path, signal) =>
-    request('/api/folder?' + new URLSearchParams({path}), signal);
+export async function getFolder(path, signal) {
+    const listing = await folders.get(path,
+        shared => request('/api/folder?' + new URLSearchParams({path}), shared), signal,
+        value => JSON.stringify(value).length * 2);
+    signal?.throwIfAborted();
+    publishFolders(path, listing.folders);
+    return listing;
+}
 
 export const walkImages = (options, signal) => sequence.walk(options, signal);
 
