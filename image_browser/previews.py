@@ -28,7 +28,6 @@ class PreviewService:
             raise Invalidated('Refreshed during request')
 
     def prepare(self, path):
-        self.gallery.validate(path)
         generation = self.gallery.generation
         render_generation = self.thumbnails.generation
         source = self.gallery.thumbnail_source(path)

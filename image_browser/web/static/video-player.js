@@ -1,4 +1,5 @@
 import {imageUrl, cachedThumbnail} from './api.js';
+import {filename} from './state.js';
 
 /** A streaming video owns its element and releases it when the view changes. */
 export class VideoPlayer {
@@ -16,7 +17,7 @@ export class VideoPlayer {
         video.preload = 'metadata';
         video.tabIndex = 0;
         video.dataset.path = path;
-        video.setAttribute('aria-label', path.split('/').pop());
+        video.setAttribute('aria-label', filename(path));
         video.addEventListener('error', () => {
             if (!scope.signal.aborted) onError(video.error);
         });

@@ -67,3 +67,21 @@ class VideoTests(unittest.TestCase):
         self.assertEqual(self.request({'Range': 'bytes=0-9', 'If-Range': headers['ETag']})[0], 206)
         self.assertEqual(self.request({'Range': 'bytes=0-9', 'If-Range': '"old"'})[0], 200)
         self.assertEqual(self.request({'If-None-Match': headers['ETag']})[0], 304)
+
+    def test_media_conditional_responses_share_validators_and_headers(self):
+        for path in ('2.MP4', '1.jpg', 'book.cbz/page.jpg'):
+            url = '/image?path=' + path
+            _, original, _ = self.request(method='HEAD', path=url)
+            etag = original['ETag']
+            for validator in (etag, 'W/' + etag, '"old", W/' + etag, '*'):
+                for method in ('GET', 'HEAD'):
+                    with self.subTest(path=path, validator=validator, method=method):
+                        status, headers, body = self.request({'If-None-Match': validator}, method, url)
+                        self.assertEqual((status, body), (304, b''))
+                        self.assertEqual(headers['ETag'], etag)
+                        self.assertEqual(headers['Cache-Control'], original['Cache-Control'])
+                        self.assertNotIn('Content-Length', headers)
+                        if path == '2.MP4':
+                            self.assertEqual(headers['Accept-Ranges'], 'bytes')
+            self.assertEqual(self.request({'If-None-Match': '"old"'}, path=url)[0], 200)
+        self.assertEqual(self.request({'If-None-Match': '*'}, path='/image?path=missing.jpg')[0], 404)

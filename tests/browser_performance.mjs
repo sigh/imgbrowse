@@ -29,7 +29,7 @@ await evaluate(`(async()=>{
 await wait(`testApp.grid.directory.images[0].path !== ${JSON.stringify(grid.first)}`);
 assert.ok(await evaluate('testApp.grid.directory.images.length <= 2000'));
 
-await evaluate("testApp.openViewer('Large/page0.jpg','Large')");
+await evaluate("testApp.mediaLink('Large/page0.jpg', 'Large').click()");
 await wait("document.getElementById('viewer-image').dataset.path==='Large/page0.jpg'");
 await wait("testApp.viewer.prefetchPath==='Large/page1.jpg'");
 await wait("import('/static/media-cache.js').then(module=>module.originals.values.has('Large/page1.jpg'))");
@@ -56,13 +56,13 @@ assert.equal(await evaluate("document.querySelectorAll('#viewer-strip button[tab
 const media = await evaluate("import('/static/media-cache.js').then(module=>({bytes:module.originals.bytes,entries:module.originals.values.size}))");
 assert.ok(media.bytes <= 96*1024*1024 && media.entries <=4);
 // Return from an image outside the retained grid window without scanning from the start.
-await evaluate("testApp.openViewer('Large/page5.jpg', 'Large')");
+await evaluate("testApp.mediaLink('Large/page5.jpg', 'Large').click()");
 await wait("document.getElementById('viewer-image').dataset.path === 'Large/page5.jpg'");
-await evaluate("testApp.setMode('overview')");
+await evaluate(`testApp.setMode(${JSON.stringify(ScreenMode.OVERVIEW)})`);
 await wait("testApp.state.mode === 'overview' && document.querySelector('.card[data-path=\"Large/page5.jpg\"]')");
 assert.equal(await evaluate('testApp.state.image'), 'Large/page5.jpg');
 assert.ok(await evaluate('testApp.grid.directory.images.length <= 2000'));
-await evaluate("testApp.setMode('view')");
+await evaluate(`testApp.setMode(${JSON.stringify(ScreenMode.VIEW)})`);
 await wait("document.getElementById('viewer-image').dataset.path === 'Large/page5.jpg' && !document.getElementById('viewer-image').hidden");
 await evaluate(`testApp.setMode(${JSON.stringify(ScreenMode.BROWSE)})`);
 await wait("testApp.state.mode === 'browse'");

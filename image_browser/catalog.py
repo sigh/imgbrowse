@@ -177,16 +177,13 @@ class Gallery:
                     check_cancelled()
                 if entry.name.startswith('.') or entry.is_symlink():
                     continue
-                if entry.is_dir(follow_symlinks=False) or (
-                    Path(entry.name).suffix.lower() in ARCHIVE_EXTENSIONS
-                    and entry.is_file(follow_symlinks=False)
-                ):
+                if entry.is_dir(follow_symlinks=False):
                     folders.append(entry.name)
-                elif (
-                    Path(entry.name).suffix.lower() in MEDIA_EXTENSIONS
-                    and entry.is_file(follow_symlinks=False)
-                ):
-                    images.append(entry.name)
+                    continue
+                suffix = Path(entry.name).suffix.lower()
+                if suffix in ARCHIVE_EXTENSIONS or suffix in MEDIA_EXTENSIONS:
+                    if entry.is_file(follow_symlinks=False):
+                        (folders if suffix in ARCHIVE_EXTENSIONS else images).append(entry.name)
         return {
             'folders': sorted(folders, key=natural_key),
             'images': sorted(images, key=natural_key),

@@ -11,6 +11,7 @@ export async function run(browser, fixtures) {
     await open('/?folder=Album');
     await waitFor("document.querySelectorAll('.card').length === 2");
     const browseOverviewAction = await evaluate("document.getElementById('overview-folder').getBoundingClientRect().toJSON()");
+    assert.equal((await newTab('[data-path="Album/Chapter 1"] .picture')).get('folder'), 'Album/Chapter 1');
     assert.equal((await newTab('#read-folder')).get('viewer'), '1');
     assert.equal((await newTab('#overview-folder', 'left', 4)).get('view'), 'grid');
     const folderOverview = await newTab('[data-path="Album/Chapter 1"] .folder-overview');
@@ -88,6 +89,15 @@ export async function run(browser, fixtures) {
     await click('view-strip');
     await click('viewer-zoom');
     await evaluate("document.querySelector('[data-size=page]').click()");
+
+    // Media links retain input entered just before the filter debounce fires.
+    await open('/?folder=Single');
+    await waitFor("document.querySelector('[data-path=\"Single/only.jpg\"] .picture')");
+    await evaluate("{ const input=document.getElementById('filter'); input.value='only'; input.dispatchEvent(new Event('input')); document.querySelector('[data-path=\"Single/only.jpg\"] .picture').click(); }");
+    await readyImage('Single/only.jpg');
+    assert.equal(await evaluate("new URLSearchParams(location.search).get('filter')"), 'only');
+    await click('browse-folder');
+    await waitFor("document.getElementById('viewer').hidden && document.getElementById('filter').value === 'only'");
 
     // A mode switch retains the same folder's filter, scroll and focus after reload.
     // Back/Forward visits the adjacent screen entries without skipping history.

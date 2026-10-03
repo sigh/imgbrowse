@@ -1,5 +1,6 @@
 import {getMetadata, fullPath} from './api.js';
 import {byId, element} from './dom.js';
+import {filename} from './state.js';
 
 let request;
 
@@ -22,7 +23,7 @@ export function formatMetadataDate(value) {
 
 let context;
 const popover = () => byId('metadata-popover');
-export const metadataOpen = () => popover().matches(':popover-open');
+const metadataOpen = () => popover().matches(':popover-open');
 
 export function closeMetadata(restoreFocus = false) {
     if (!metadataOpen()) return;
@@ -46,26 +47,26 @@ function positionMetadata() {
 }
 
 // Keep an open panel in sync with the persistent header action.
-export function updateMetadataTarget(path, button, container) {
+export function updateMetadataTarget(path, button) {
     button.setAttribute('aria-expanded', 'false');
-    if (!metadataOpen() || context?.container !== container) return;
+    if (!metadataOpen() || context?.button !== button) return;
     const changed = context.path !== path;
-    context = {path, button, container};
+    context = {path, button};
     button.setAttribute('aria-expanded', 'true');
     positionMetadata();
     requestAnimationFrame(positionMetadata);
     if (changed) loadMetadata(path);
 }
 
-export function toggleMetadata(path, button, container) {
-    if (metadataOpen() && context?.container === container) {
+export function toggleMetadata(path, button) {
+    if (metadataOpen() && context?.button === button) {
         closeMetadata(true);
         return;
     }
     closeMetadata();
-    context = {path, button, container};
+    context = {path, button};
     button.setAttribute('aria-expanded', 'true');
-    container.append(popover());
+    button.parentElement.append(popover());
     popover().showPopover();
     popover().focus({preventScroll: true});
     positionMetadata();
@@ -94,7 +95,7 @@ async function loadMetadata(path) {
     const controller = request = new AbortController();
     if (status.contains(document.activeElement)) popover().focus({preventScroll: true});
     details.replaceChildren();
-    byId('metadata-title').textContent = path.split('/').pop() || 'Folder info';
+    byId('metadata-title').textContent = filename(path) || 'Folder info';
     status.textContent = 'Loading…';
     try {
         const data = await getMetadata(path, controller.signal);

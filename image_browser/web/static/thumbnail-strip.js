@@ -67,8 +67,6 @@ export class ThumbnailStrip {
 
     createResizer() {
         this.size = DEFAULT_SIZE;
-        this.width = this.size - GAP;
-        this.stride = this.size;
         const handle = element('div', 'strip-resizer');
         this.handle = handle;
         handle.tabIndex = 0;
@@ -120,8 +118,7 @@ export class ThumbnailStrip {
         const anchor = Math.max(0, oldOffsets.findIndex(offset => offset > left) - 1);
         const fraction = (left - oldOffsets[anchor]) / ((oldOffsets[anchor + 1] - oldOffsets[anchor]) || 1);
         this.size = Math.round(Math.max(48, Math.min(max, size)));
-        this.width = Math.round(this.size * 58 / 64);
-        this.stride = this.width + GAP;
+        this.width = Math.round(this.size * (DEFAULT_SIZE - GAP) / DEFAULT_SIZE);
         this.frame.style.setProperty('--thumbnail-height', this.size + 'px');
         this.frame.style.setProperty('--thumbnail-width', this.width + 'px');
         this.handle.setAttribute('aria-valuemin', '48');

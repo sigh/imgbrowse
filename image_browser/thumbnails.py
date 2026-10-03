@@ -36,7 +36,6 @@ class ThumbnailCache:
     """Share pending decodes and retain encoded bytes within a memory budget."""
 
     def __init__(self, max_bytes=DEFAULT_CACHE_BYTES, workers=4):
-        self.max_bytes = max_bytes
         self.cache = SharedCache(max_bytes)
         self.workers = WorkGate(workers, max(1, workers - 1))
         self.video_workers = WorkGate(1, 1)

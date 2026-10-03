@@ -34,6 +34,7 @@ export function renderItemHeader(location, actions, {folder, image = null, rootN
     const breadcrumbs = location.querySelector('.breadcrumbs');
     const changed = breadcrumbs.dataset.folder !== folder || breadcrumbs.dataset.image !== (image || '');
     const scrollLeft = breadcrumbs.scrollLeft;
+    // Layout belongs in link destinations even though it does not change the header's appearance.
     const context = JSON.stringify([folder, rootName, currentLink, collection, Boolean(image), compact]);
     if (breadcrumbs.dataset.context !== context) {
         renderFolderPath(breadcrumbs, folder, rootName, folderLink, {currentLink, collection, hasImage: Boolean(image)});
@@ -105,12 +106,12 @@ function renderItemActions(container, target, kind) {
         info.type = 'button';
         info.setAttribute('aria-controls', 'metadata-popover');
         info.append(icon('info'));
-        info.addEventListener('click', () => toggleMetadata(info.dataset.path, info, container));
+        info.addEventListener('click', () => toggleMetadata(info.dataset.path, info));
         container.append(info);
     }
     info.dataset.path = target;
     setButtonLabel(info, `${kind[0].toUpperCase() + kind.slice(1)} info`);
-    updateMetadataTarget(target, info, container);
+    updateMetadataTarget(target, info);
 }
 
 /** Copy stays in the fixed slot immediately left of the displayed path. */

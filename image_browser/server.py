@@ -70,6 +70,11 @@ class GalleryHandler(BaseHTTPRequestHandler):
     def send_json(self, value, status=200):
         self.send_content(json.dumps(value).encode(), 'application/json; charset=utf-8', status)
 
+    def matches_etag(self, etag):
+        candidates = [value.strip().removeprefix('W/') for value in
+                      self.headers.get('If-None-Match', '').split(',')]
+        return '*' in candidates or (etag is not None and etag.removeprefix('W/') in candidates)
+
     def do_HEAD(self):
         self.do_GET()
 
@@ -82,9 +87,9 @@ class GalleryHandler(BaseHTTPRequestHandler):
     def _dispatch(self, route):
         self.response_started = False
         try:
-            path = urlsplit(self.path).path
-            priority = 0 if path == '/image' else 2 if path in ('/thumbnail', '/api/video') else 1
-            if parse_qs(urlsplit(self.path).query).get('prefetch') == ['1']:
+            url = urlsplit(self.path)
+            priority = 0 if url.path == '/image' else 2 if url.path in ('/thumbnail', '/api/video') else 1
+            if parse_qs(url.query).get('prefetch') == ['1']:
                 priority = 3
             with request_work(priority, self.disconnected):
                 route()
@@ -165,10 +170,7 @@ class GalleryHandler(BaseHTTPRequestHandler):
             headers = {'X-Media-Kind': metadata['media_kind']}
             if metadata['duration'] is not None:
                 headers['X-Video-Duration'] = str(metadata['duration'])
-            candidates = [value.strip().removeprefix('W/') for value in
-                          self.headers.get('If-None-Match', '').split(',')]
-            if '*' in candidates or (preview.etag is not None and
-                                     preview.etag.removeprefix('W/') in candidates):
+            if self.matches_etag(preview.etag):
                 service.check(preview)
                 self.send_headers('image/jpeg', 0, 304, preview.etag, headers)
                 return
@@ -200,12 +202,10 @@ class GalleryHandler(BaseHTTPRequestHandler):
             return
         file, member, stat = source.file, source.member, source.stat
         etag = source.etag
-        if self.headers.get('If-None-Match') == etag:
-            self.send_response(304)
-            self.send_header('ETag', etag)
-            self.end_headers()
-            return
         content_type = mimetypes.guess_type(path)[0] or 'application/octet-stream'
+        if self.matches_etag(etag):
+            self.send_headers(content_type, 0, 304, etag)
+            return
         if member is not None:
             if self.command == 'HEAD':
                 self.send_headers(content_type, member.file_size, etag=etag)
@@ -224,10 +224,8 @@ class GalleryHandler(BaseHTTPRequestHandler):
     def _serve_video(self, path, source):
         content_type = VIDEO_TYPES[source.file.suffix.lower()]
         headers = {'Accept-Ranges': 'bytes'}
-        if self.headers.get('If-None-Match') == source.etag:
-            self.send_response(304)
-            self.send_header('ETag', source.etag)
-            self.end_headers()
+        if self.matches_etag(source.etag):
+            self.send_headers(content_type, 0, 304, source.etag, headers)
             return
         selected = None
         if self.command == 'GET' and self.headers.get('If-Range', source.etag) == source.etag:
@@ -268,13 +266,14 @@ class GalleryHandler(BaseHTTPRequestHandler):
         return request
 
     def _post(self):
-        if urlsplit(self.path).path == '/api/refresh':
+        path = urlsplit(self.path).path
+        if path == '/api/refresh':
             request = self._read_json()
             self.gallery.invalidate(request.get('path', ''))
             self.thumbnails.invalidate()
             self.send_json({'generation': self.gallery.generation})
             return
-        if urlsplit(self.path).path != '/api/walk':
+        if path != '/api/walk':
             self.send_json({'error': 'Not found'}, 404)
             return
         request = self._read_json()

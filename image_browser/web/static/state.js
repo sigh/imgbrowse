@@ -8,6 +8,7 @@ export const ItemType = Object.freeze({FOLDER: 'folder', MEDIA: 'image'});
 export const joinPath = (parent, name) => parent ? parent + '/' + name : name;
 export const parentPath = path => path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : '';
 export const filename = path => path.split('/').pop();
+export const currentFolder = state => state.mode === ScreenMode.BROWSE ? state.folder : state.collection;
 
 /** Display a path relative to its browsing folder; that folder itself is empty. */
 export function relativePath(base, path) {

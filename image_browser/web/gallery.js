@@ -8,7 +8,7 @@ import {FolderTree} from './static/folder-tree.js';
 import {ImageViewer} from './static/image-viewer.js';
 import {closeMetadata} from './static/metadata.js';
 import {PreviewLoader} from './static/preview-loader.js';
-import {filename, imageSize, readState, stateUrl, ScreenMode, ReadingLayout, FolderLayout} from './static/state.js';
+import {currentFolder, filename, imageSize, readState, stateUrl, ScreenMode, ReadingLayout, FolderLayout} from './static/state.js';
 
 const FILTER_DELAY = 150;
 const MODES = [
@@ -25,7 +25,7 @@ function focusTarget(node) {
     return {path: card.dataset.path, selector: selector ? '.' + selector : '.card-caption a'};
 }
 
-/** Coordinates browser history and independent folder/reader views. */
+/** Coordinates browser history and presentation of the current folder. */
 class GalleryApp {
     constructor() {
         this.rootName = 'Collection';
@@ -106,7 +106,7 @@ class GalleryApp {
         this.refreshing = true;
         this.savePosition();
         try {
-            await refreshScope(this.state.mode !== ScreenMode.BROWSE ? this.state.collection : this.state.folder);
+            await refreshScope(currentFolder(this.state));
             clearOriginals();
             this.grid.cache.clear();
             this.tree.refresh();
@@ -135,11 +135,6 @@ class GalleryApp {
         };
     }
 
-    openViewer(image, collection, opener) {
-        this.navigate(this.destination(ScreenMode.VIEW, image, collection),
-            false, 'top', opener);
-    }
-
     changeLayout(layout) {
         if (this.state.mode !== ScreenMode.VIEW) return;
         this.preferences.layout = layout;
@@ -161,8 +156,7 @@ class GalleryApp {
 
     modeDestination(mode) {
         const image = this.state.mode !== ScreenMode.BROWSE ? this.state.image : history.state?.selection || null;
-        const collection = this.state.mode !== ScreenMode.BROWSE ? this.state.collection : this.state.folder;
-        return this.destination(mode, image, collection);
+        return this.destination(mode, image, currentFolder(this.state));
     }
 
     destination(mode, image, collection) {
@@ -172,18 +166,23 @@ class GalleryApp {
             image: mode === ScreenMode.BROWSE ? null : image, collection};
     }
 
-    openOverview(collection, opener, image = null) {
-        this.navigate(this.destination(ScreenMode.OVERVIEW, image, collection), false, 'top', opener);
+    mediaLink(image, collection, label, mode = ScreenMode.VIEW) {
+        return this.navigationLink(() => this.destination(mode, image, collection), label, 'control-link');
     }
 
-    mediaLink(image, collection, label, mode = ScreenMode.VIEW) {
-        const link = element('a', 'control-link', label);
-        link.href = stateUrl(this.destination(mode, image, collection));
+    folderLink(path, label) {
+        return this.navigationLink(() => ({folder: path, collection: path,
+            mode: ScreenMode.BROWSE, image: null, filter: ''}), label);
+    }
+
+    /** Resolve again on activation so pending filter input and reading choices stay current. */
+    navigationLink(destination, label, className = '') {
+        const link = element('a', className, label);
+        link.href = stateUrl({...this.state, ...destination()});
         link.addEventListener('click', event => {
             if (!plainClick(event)) return;
             event.preventDefault();
-            if (mode === ScreenMode.OVERVIEW) this.openOverview(collection, link, image);
-            else this.openViewer(image, collection, link);
+            this.navigate(destination(), false, 'top', link);
         });
         return link;
     }
@@ -235,18 +234,6 @@ class GalleryApp {
             this.updateControls();
             this.viewer.show(next, false, entry);
         } else this.render(false, true, entry);
-    }
-
-    folderLink(path, label) {
-        const changes = {folder: path, collection: path, mode: ScreenMode.BROWSE, image: null, filter: ''};
-        const link = element('a', '', label);
-        link.href = stateUrl({...this.state, ...changes});
-        link.addEventListener('click', event => {
-            if (event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
-            event.preventDefault();
-            this.navigate(changes);
-        });
-        return link;
     }
 
     folderLoaded(name) {
@@ -318,7 +305,7 @@ class GalleryApp {
 let reloadError;
 if (performance.getEntriesByType('navigation')[0]?.type === 'reload') {
     const state = readState();
-    try { await refreshScope(state.mode !== ScreenMode.BROWSE ? state.collection : state.folder); }
+    try { await refreshScope(currentFolder(state)); }
     catch (error) { reloadError = error; }
 }
 export const app = new GalleryApp();

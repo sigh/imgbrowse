@@ -1,7 +1,7 @@
 import {getFolder, onFolderListing} from './api.js';
 import {byId, element, plainClick, setButtonLabel} from './dom.js';
 import {icon} from './icons.js';
-import {joinPath, parentPath, ScreenMode} from './state.js';
+import {currentFolder, joinPath, parentPath, ScreenMode} from './state.js';
 
 const OVERSCAN = 3;
 const TYPEAHEAD_INTERVAL = 700;
@@ -53,7 +53,7 @@ export class FolderTree {
         }, true);
     }
 
-    get current() { return this.state.mode === ScreenMode.BROWSE ? this.state.folder : this.state.collection; }
+    get current() { return currentFolder(this.state); }
     canExpand(path) { return !this.listings.has(path) || this.listings.get(path).length > 0; }
 
     update(state, rootName) {
@@ -142,7 +142,7 @@ export class FolderTree {
         this.rebuild();
     }
 
-    expand(path) {
+    toggleBranch(path) {
         this.focused = path;
         if (this.expanded.has(path)) {
             this.expanded.delete(path);
@@ -161,7 +161,7 @@ export class FolderTree {
         this.focused = row.dataset.path;
         if (event.target.closest('.tree-disclosure')) {
             event.preventDefault(); event.stopPropagation();
-            this.expand(row.dataset.path);
+            this.toggleBranch(row.dataset.path);
         } else if (event.target.closest('.tree-retry')) {
             event.preventDefault(); event.stopPropagation();
             this.load(row.dataset.path);
@@ -169,7 +169,7 @@ export class FolderTree {
             event.preventDefault(); event.stopPropagation();
             if (this.focused === this.current) {
                 // Single clicks toggle; the second click of a double-click expands.
-                if (event.detail < 2 || !this.expanded.has(this.focused)) this.expand(this.focused);
+                if (event.detail < 2 || !this.expanded.has(this.focused)) this.toggleBranch(this.focused);
                 else this.focusRow(this.focused);
                 return;
             }
@@ -300,12 +300,12 @@ export class FolderTree {
             case 'Home': target = rows[0]; break;
             case 'End': target = rows.at(-1); break;
             case 'ArrowRight':
-                if (!this.expanded.has(row.path)) this.expand(row.path);
+                if (!this.expanded.has(row.path)) this.toggleBranch(row.path);
                 else if (this.errors.has(row.path)) this.load(row.path);
                 else if (rows[index + 1]?.parent?.path === row.path) target = rows[index + 1];
                 break;
             case 'ArrowLeft':
-                if (this.expanded.has(row.path)) this.expand(row.path);
+                if (this.expanded.has(row.path)) this.toggleBranch(row.path);
                 else target = row.parent;
                 break;
             default:

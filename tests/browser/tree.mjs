@@ -55,13 +55,14 @@ export async function run(browser, {first, last, fixtureRoot}) {
     assert.equal(await evaluate('location.href'), selectedUrl, 'Collapsing the selected folder keeps the current location');
     await activate('Single');
     await waitFor("treeApp.state.folder === 'Single' && !treeApp.grid.loadingFolder");
-    const historyBeforeDoubleClick = await evaluate('history.length');
     await pointerClick('Album');
     assert.equal(await evaluate('treeApp.state.folder'), 'Album');
     assert.ok(!(await expanded()).includes('Album'), 'The first click selects without expanding');
+    const selectedHistory = await call('Page.getNavigationHistory');
     await pointerClick('Album', 2);
     await waitFor(`document.querySelector(${JSON.stringify(row('Album/Chapter 1') + ' a')})`);
-    assert.equal(await evaluate('history.length'), historyBeforeDoubleClick + 1, 'Double-click selects once and expands through the second click');
+    assert.deepEqual((await call('Page.getNavigationHistory')).entries.map(entry => entry.id),
+        selectedHistory.entries.map(entry => entry.id), 'The second click expands without another navigation entry');
     await activate('Single');
     await waitFor("treeApp.state.folder === 'Single' && !treeApp.grid.loadingFolder");
     await pointerClick('Album');
@@ -171,7 +172,7 @@ export async function run(browser, {first, last, fixtureRoot}) {
     await evaluate("document.querySelector('.tree-status[data-path=Names] .tree-retry').click()");
     await waitFor('treeApp.tree.listings.has("Names") && !treeApp.tree.pending.size');
     assert.equal(await evaluate('treeApp.state.folder'), '');
-    await evaluate("treeApp.tree.expand('Mixed'); treeApp.tree.setOpen(false)");
+    await evaluate("treeApp.tree.toggleBranch('Mixed'); treeApp.tree.setOpen(false)");
     assert.ok(await evaluate("treeApp.tree.expanded.has('Mixed') && !treeApp.tree.pending.size"), 'Hiding cancels tree requests while preserving expansion');
     await click('folders-toggle');
     await waitFor('treeApp.tree.listings.has("Mixed") && !treeApp.tree.pending.size');

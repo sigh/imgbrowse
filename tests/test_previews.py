@@ -88,9 +88,13 @@ class PreviewTests(unittest.TestCase):
         status, headers, body = self.request('book')
         self.assertEqual(status, 200)
         with patch.object(self.server.previews, 'render', side_effect=AssertionError('rendered')):
-            conditional = self.request('book', headers={'If-None-Match': headers['ETag']})
-            self.assertEqual((conditional[0], conditional[2]), (304, b''))
-            self.assertIn('Cache-Control', conditional[1])
+            etag = headers['ETag']
+            for validator in (etag, etag.removeprefix('W/'), '"old", ' + etag, '*'):
+                with self.subTest(validator=validator):
+                    conditional = self.request('book', headers={'If-None-Match': validator})
+                    self.assertEqual((conditional[0], conditional[2]), (304, b''))
+                    self.assertEqual(conditional[1]['Cache-Control'], headers['Cache-Control'])
+                    self.assertEqual(conditional[1]['X-Media-Kind'], 'image')
         head = self.request('book', method='HEAD')
         self.assertEqual((head[0], head[2], int(head[1]['Content-Length'])), (200, b'', len(body)))
 
