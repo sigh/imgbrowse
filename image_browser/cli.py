@@ -1,6 +1,7 @@
 """Browse local images and videos without building a collection-wide index."""
 
 import argparse
+import signal
 from pathlib import Path
 from stat import S_ISDIR
 
@@ -27,6 +28,8 @@ def main(argv=None):
         parser.error(f'unable to access directory {args.directory}: {error.strerror or error}')
     if not S_ISDIR(root_stat.st_mode):
         parser.error(f'not a directory: {args.directory}')
+    # Stop cleanly on SIGTERM (e.g. docker stop), as on Ctrl-C.
+    signal.signal(signal.SIGTERM, signal.default_int_handler)
     try:
         with GalleryServer((args.host, args.port), root, exclude=args.exclude) as server:
             local = '127.0.0.1' if args.host == '0.0.0.0' else args.host
