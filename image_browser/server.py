@@ -291,8 +291,8 @@ class GalleryServer(ThreadingHTTPServer):
     daemon_threads = True
     request_queue_size = 64
 
-    def __init__(self, address, root):
-        self.gallery = Gallery(root)
+    def __init__(self, address, root, exclude=()):
+        self.gallery = Gallery(root, exclude)
         self.thumbnails = ThumbnailCache()
         self.archive_work = WorkGate(2, 1)
         self.previews = PreviewService(self.gallery, self.thumbnails, self.archive_work)

@@ -20,7 +20,15 @@ class CliTests(unittest.TestCase):
                     running = server.return_value.__enter__.return_value
                     running.serve_forever.side_effect = KeyboardInterrupt
                     main([directory, *options])
-                    server.assert_called_once_with((host, port), Path(directory).resolve())
+                    server.assert_called_once_with((host, port), Path(directory).resolve(), exclude=[])
+
+    def test_repeatable_name_exclusions_are_passed_to_server(self):
+        with tempfile.TemporaryDirectory() as directory, patch('image_browser.cli.GalleryServer') as server, \
+                contextlib.redirect_stdout(io.StringIO()):
+            server.return_value.__enter__.return_value.serve_forever.side_effect = KeyboardInterrupt
+            main([directory, '--exclude', '@eaDir', '--exclude', '#recycle'])
+            server.assert_called_once_with(('127.0.0.1', 8080), Path(directory).resolve(),
+                                           exclude=['@eaDir', '#recycle'])
 
     def test_invalid_port_or_directory_does_not_start_server(self):
         with tempfile.TemporaryDirectory() as directory:

@@ -1,92 +1,66 @@
 # imgbrowse
 
-A local image browser for images in a folder tree. Targets macOS and Linux.
-Requires Python 3.9+ and Pillow.
+A read-only image and video browser for folder trees and ZIP/CBZ archives.
+Runs on macOS and Linux with Python 3.9+ and Pillow. FFmpeg/ffprobe enable
+video previews and duration labels.
 
 ## Install and run
 
-From a checkout, run `pipx install .`, or install a shared wheel:
+From a checkout:
 
 ```sh
-pipx install /path/to/imgbrowse-0.1.0-py3-none-any.whl
+pipx install .
 imgbrowse "/path/to/images"
-imgbrowse "/path/to/images" --host 0.0.0.0 --port 8080
 ```
 
-Open `http://127.0.0.1:8080/` locally. With `--host 0.0.0.0`, other devices can
-browse the selected folder at `http://<this-computer-IP>:8080/`. LAN access has no
-login. Each computer can run its own instance with any local or mounted directory.
-The default root is the current directory; stop with Ctrl+C.
-FFmpeg/ffprobe are optional for video previews and duration labels.
+Open `http://127.0.0.1:8080/`. Use `--host 0.0.0.0` to share on the LAN
+without a login, and `-p PORT` to change the port. See `imgbrowse --help`.
 
-To build a wheel to share (no publishing required):
+Repeat `--exclude NAME` to omit exact, case-sensitive file or folder names
+at any depth, including archive members. Hidden names and symlinks are omitted.
+
+## Browse and read
+
+- **Browse** shows immediate folder contents, with previews or a filtered list.
+- **Overview** shows media throughout the selected folder's descendants.
+- **View** opens media with sizing controls and an optional thumbnail tray.
+
+All screens keep the same current folder. The sidebar opens a folder tree;
+arrows expand branches, names navigate, and the selected name toggles its branch.
+Modified clicks open links in another tab.
+
+Use left/right arrows to turn pages and Escape to return to Browse.
+Back/Forward restores browsing context; Refresh picks up disk changes.
+Reading settings are remembered for the tab session.
+
+Supports JPG, JPEG, PNG, GIF, WebP and BMP, including images inside ZIP/CBZ files.
+Loose MP4, M4V, WebM, OGV and MOV videos use native browser playback, subject to
+codec support. Archives are read without extraction; no persistent cache is needed.
+
+## Container
 
 ```sh
-python3 -m pip wheel . --no-deps --wheel-dir dist
+docker build -t imgbrowse .
+docker run --rm --init --read-only \
+  --user "$(id -u):$(id -g)" --publish 8080:8080 \
+  --mount type=bind,src=/path/to/images,dst=/media,readonly \
+  imgbrowse
 ```
 
-Reinstall an updated wheel with `pipx install --force /path/to/new.whl`.
-
-## Browse
-
-Open folders or select an image to read. The viewer includes all descendants in
-natural filename order. Use left/right arrows to turn pages, Escape to return to Browse,
-and the size selector to fit or zoom. Scroll again at an image edge to turn pages.
-
-The fixed folder/grid/play group opens Browse, collection Overview, or View.
-Browse shows immediate children as previews or a name list; its filter matches
-names. Overview includes descendant media; selecting an item opens View. View's
-thumbnail button shows or hides the tray. Sizing, thumbnail visibility, and
-thumbnail size are remembered for the tab session; viewer URLs restore their
-own presentation. Browse, Overview, and View use the same current folder;
-switching screens keeps that location. Escape switches to Browse after closing
-any transient panel. Breadcrumbs navigate to another folder. Back/Forward visits
-the previous/next entry and restores its grid position and focus; Refresh picks
-up filesystem changes.
-
-The sidebar button beside Browse opens a folder tree, including archives, in
-every screen. Arrows expand branches; names change folders while keeping the
-current screen and reading settings. Clicking the selected folder toggles its branch;
-double-clicking another folder selects and expands it. The tree preserves its
-expansion and scroll when hidden. On narrow screens it overlays the content and
-closes after selecting another folder; toggling the current folder keeps it open.
-Use arrow keys to explore the tree and Enter to open a folder; modified clicks
-open folder links in another tab.
-
-Supports JPG, JPEG, PNG, GIF, WebP, and BMP, including images inside ZIP and CBZ
-archives. Loose MP4, M4V, WebM, OGV, and MOV videos use native browser playback
-(codec support depends on the browser), with on-demand thumbnails when optional `ffmpeg` is on PATH; otherwise a play icon. Archives appear as folders; their contents are read on demand without
-extraction. Hidden files and symlinks are ignored.
-The app is read-only, with no index or persistent cache. Folder discovery is
-incremental; bounded memory caches reuse listings, previews, and nearby images.
-Refresh reloads the current scope from disk.
+The image includes FFmpeg and serves `/media` on port 8080 as a non-root user.
+The selected user needs read access to the collection.
 
 ## Development
 
-Python HTTP, traversal, and thumbnail code lives in `image_browser/`. Browser
-assets are in `image_browser/web/`. No frontend build is needed.
-For source development, install with `python3 -m pip install -e .` in a virtual
-environment and run `python3 imgbrowse.py "/path/to/images"`.
-
-## Check
+Install with `python3 -m pip install -e .` in a virtual environment, then run
+`python3 imgbrowse.py "/path/to/images"`. Browser assets need no build.
 
 ```sh
-python3 -B -m unittest discover -s tests -v
+python3 -B -m unittest discover -s tests
 node --test tests/*.test.js
 ```
 
-Optional end-to-end checks require Chrome/Chromium and Node 22+:
-
-```sh
-python3 -B tests/browser_smoke.py --performance
-```
-
-Set `CHROME_BIN` if Chrome is not in a standard location. The smoke test starts a
-temporary server and browser profile with generated images, then removes them.
-Use `--screenshots /tmp/imgbrowse-check` to retain screenshots.
-
-Browser journeys live in `tests/browser/` and share the Chrome helpers in
-`tests/browser-harness.mjs`. Each journey resets its preferences and viewport.
-Run one independently with `SMOKE_JOURNEY=reader python3 -B tests/browser_smoke.py`
-(also available: `browse`, `navigation-return`, `loading`, `strip-archives`,
-`responsive`, `video`, and `tree`).
+Optional browser checks require Chrome/Chromium and Node 22+:
+`python3 -B tests/browser_smoke.py --performance`.
+Container checks require a running Docker engine:
+`docker build -t imgbrowse:test . && python3 -B tests/container_smoke.py`.

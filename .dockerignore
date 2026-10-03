@@ -1,0 +1,10 @@
+.git
+.venv
+.DS_Store
+**/__pycache__
+**/*.pyc
+_plans
+tests
+build
+dist
+*.egg-info

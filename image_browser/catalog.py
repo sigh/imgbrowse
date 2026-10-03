@@ -13,6 +13,7 @@ from time import monotonic
 from .archives import ARCHIVE_EXTENSIONS, ArchiveCache, ArchiveIndex
 from .cache import SharedCache
 from .sources import MEDIA_EXTENSIONS, MediaSource
+from .visibility import visible_name
 from .work import WorkGate, check_cancelled
 
 WALK_BUDGET = 24
@@ -50,14 +51,15 @@ def natural_key(name):
 
 
 class Gallery:
-    def __init__(self, root):
+    def __init__(self, root, exclude=()):
         self.root = Path(root).resolve()
+        self.excluded = frozenset(exclude)
         self.directory_work = WorkGate()
         self.listings = SharedCache(32 * 1024 * 1024)
         self.previews = SharedCache(4 * 1024 * 1024)
         self.sources = SharedCache(4 * 1024 * 1024, ttl=5)
         self.generation = 0
-        self.archives = ArchiveCache()
+        self.archives = ArchiveCache(self.excluded)
 
     def resolve(self, relative: str) -> Path:
         path = self.validate(relative)
@@ -104,12 +106,11 @@ class Gallery:
         self.previews.invalidate(related)
         self.archives.invalidate()
 
-    @staticmethod
-    def validate(relative):
+    def validate(self, relative):
         if not isinstance(relative, str) or '\x00' in relative:
             raise ValueError('Invalid path')
         path = PurePosixPath(relative)
-        if path.is_absolute() or any(part.startswith('.') for part in path.parts):
+        if path.is_absolute() or any(not visible_name(part, self.excluded) for part in path.parts):
             raise ValueError('Path is outside the visible collection')
         return path
 
@@ -168,14 +169,13 @@ class Gallery:
                 return entry.archive.listing(entry.inner, natural_key)
             return self._scan_directory(entry.file)
 
-    @staticmethod
-    def _scan_directory(directory):
+    def _scan_directory(self, directory):
         folders, images = [], []
         with os.scandir(directory) as entries:
             for index, entry in enumerate(entries):
                 if index % 128 == 0:
                     check_cancelled()
-                if entry.name.startswith('.') or entry.is_symlink():
+                if not visible_name(entry.name, self.excluded) or entry.is_symlink():
                     continue
                 if entry.is_dir(follow_symlinks=False):
                     folders.append(entry.name)

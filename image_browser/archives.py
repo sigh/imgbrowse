@@ -8,22 +8,23 @@ from pathlib import PurePosixPath
 
 from .cache import SharedCache
 from .sources import IMAGE_EXTENSIONS
+from .visibility import visible_name
 
 ARCHIVE_EXTENSIONS = {'.zip', '.cbz'}
 MAX_IMAGE_BYTES = 128 * 1024 * 1024
 MAX_ARCHIVE_ENTRIES = 200_000
 
 
-def visible_member(name):
+def visible_member(name, excluded=()):
     """Use only unambiguous, visible, relative member names."""
     if not name or name.startswith('/') or '\\' in name or '\x00' in name:
         return False
     parts = name.rstrip('/').split('/')
-    return all(part and not part.startswith('.') for part in parts)
+    return all(visible_name(part, excluded) for part in parts)
 
 
 class ArchiveIndex:
-    def __init__(self, file):
+    def __init__(self, file, exclude=()):
         self.folders = {'': set()}
         self.images = {}
         self.direct_images = {}
@@ -35,7 +36,7 @@ class ArchiveIndex:
             raise ValueError('Archive has too many entries')
         for info in archive.infolist():
             name = info.filename.rstrip('/')
-            if not visible_member(name):
+            if not visible_member(name, exclude):
                 continue
             if stat.S_ISLNK(info.external_attr >> 16):
                 continue
@@ -94,7 +95,8 @@ class ArchiveCache:
     reference is released. Shared loads prevent duplicate opens of one version.
     """
 
-    def __init__(self):
+    def __init__(self, exclude=()):
+        self.excluded = frozenset(exclude)
         self.cache = SharedCache(64 * 1024 * 1024, max_entries=16)
 
     def get(self, file, file_stat=None):
@@ -102,7 +104,7 @@ class ArchiveCache:
         key = (str(file), file_stat.st_mtime_ns, file_stat.st_size)
         def load():
             try:
-                return ArchiveIndex(file)
+                return ArchiveIndex(file, self.excluded)
             except zipfile.BadZipFile as error:
                 raise ValueError('Invalid ZIP archive') from error
         return self.cache.get(key, load,
