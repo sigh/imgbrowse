@@ -10,7 +10,7 @@ RUN apt-get update \
 WORKDIR /app
 COPY pyproject.toml README.md ./
 COPY image_browser ./image_browser
-RUN python -m pip install --no-cache-dir .
+RUN python -m pip install --no-cache-dir --root-user-action=ignore .
 
 # Override with --user or Compose's user setting.
 USER 65534:65534
