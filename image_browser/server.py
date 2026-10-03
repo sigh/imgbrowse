@@ -24,6 +24,7 @@ MAX_REQUEST_BYTES = 128 * 1024
 STATIC_FILES = {
     '/': 'template.html',
     '/index.html': 'template.html',
+    '/favicon.svg': 'favicon.svg',
     '/gallery.css': 'gallery.css',
     '/gallery.js': 'gallery.js',
     **{f'/static/{name}.js': f'static/{name}.js' for name in (
