@@ -18,4 +18,4 @@ packages = ["image_browser"]
 include-package-data = false
 
 [tool.setuptools.package-data]
-image_browser = ["web/*.html", "web/*.css", "web/*.js", "web/*.svg", "web/static/*.js"]
+image_browser = ["web/*.html", "web/*.css", "web/*.js", "web/*.svg", "web/static/*/*.js"]

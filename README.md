@@ -71,11 +71,24 @@ Install with `python3 -m pip install -e .` in a virtual environment, then run
 `python3 imgbrowse.py "/path/to/images"`. Browser assets need no build.
 
 ```sh
-python3 -B -m unittest discover -s tests
-node --test tests/*.test.js
+python3 -B -m unittest discover -s tests/backend
+npm test
 ```
 
 Optional browser checks require Chrome/Chromium and Node 22+:
-`python3 -B tests/browser_smoke.py --performance`.
+`python3 -B tests/browser/smoke.py --performance`.
 Container checks require a running Docker engine:
-`docker build -t imgbrowse:test . && python3 -B tests/container_smoke.py`.
+`docker build -t imgbrowse:test . && python3 -B tests/container/smoke.py`.
+
+The Python application lives in `image_browser/`. Its `web/` directory contains
+the HTML template, stylesheet, and JavaScript entry point. Frontend modules in
+`web/static/` are grouped by responsibility:
+
+- `shared/`: state, media types, DOM helpers, and icons.
+- `data/`: API access, caches, collection discovery, and data projection.
+- `browse/`: folder grid, layout, and tree.
+- `viewer/`: media presentation, reading layouts, thumbnails, and gestures.
+- `ui/`: reusable header, breadcrumbs, Info, sorting, and preview components.
+
+Tests are grouped into `tests/backend/`, `tests/unit/`, `tests/browser/`, and
+`tests/container/`, with common media fixtures in `tests/fixtures/`.

@@ -1,15 +1,15 @@
-import {ItemHeader} from './static/item-header.js';
-import {getInfo, refreshScope} from './static/api.js';
-import {icon} from './static/icons.js';
-import {clearOriginals} from './static/media-cache.js';
-import {byId, element, bindNavigation} from './static/dom.js';
-import {FolderGrid} from './static/folder-grid.js';
-import {FolderTree} from './static/folder-tree.js';
-import {ImageViewer} from './static/image-viewer.js';
-import {MetadataPanel} from './static/metadata.js';
-import {PreviewLoader} from './static/preview-loader.js';
-import {SortControls} from './static/sort-controls.js';
-import {currentFolder, filename, imageSize, readingLayout, readState, stateUrl, ScreenMode, ReadingLayout, FolderLayout, ViewerEntry, sortSettings, sortKey} from './static/state.js';
+import {ItemHeader} from './static/ui/item-header.js';
+import {getInfo, refreshScope} from './static/data/api.js';
+import {icon} from './static/shared/icons.js';
+import {clearOriginals} from './static/data/media-cache.js';
+import {byId, element, bindNavigation} from './static/shared/dom.js';
+import {FolderGrid} from './static/browse/folder-grid.js';
+import {FolderTree} from './static/browse/folder-tree.js';
+import {ImageViewer} from './static/viewer/image-viewer.js';
+import {MetadataPanel} from './static/ui/metadata.js';
+import {PreviewLoader} from './static/ui/preview-loader.js';
+import {SortControls} from './static/ui/sort-controls.js';
+import {currentFolder, filename, imageSize, readingLayout, readState, stateUrl, ScreenMode, ReadingLayout, FolderLayout, ViewerEntry, sortSettings, sortKey} from './static/shared/state.js';
 
 const FILTER_DELAY = 150;
 
