@@ -233,7 +233,7 @@ export async function run(browser, fixtures) {
         await evaluate("document.getElementById('grid-viewport').scrollTop = document.getElementById('grid-viewport').scrollHeight");
         await pause(100);
     }
-    await waitFor("document.getElementById('summary').textContent === '172 items'");
+    await waitFor("document.getElementById('summary').textContent === '173 items'");
     await evaluate("document.getElementById('grid-viewport').scrollTop = 1800");
     await pause(160);
     const recursiveAnchor = await evaluate('history.state.overviewPosition.path');

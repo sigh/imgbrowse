@@ -3,11 +3,31 @@ import {metadataInfo, MetadataKind} from './metadata-data.js';
 import {byId, element} from './dom.js';
 import {filename} from './state.js';
 import {setIconButton} from './icons.js';
+import {isVideo} from './media-kind.js';
 
 let request;
 let context;
 const popover = () => byId('metadata-popover');
 const metadataOpen = () => popover().matches(':popover-open');
+
+/** The persistent Info action owns its target and keeps an open panel in sync. */
+export class InfoButton {
+    constructor(container) {
+        this.button = element('button', 'item-info');
+        this.button.type = 'button';
+        this.button.setAttribute('aria-controls', 'metadata-popover');
+        this.button.addEventListener('click', () => toggleMetadata(this.button.dataset.path, this.button));
+        container.append(this.button);
+    }
+
+    update({folder, image = null}) {
+        const path = image || folder;
+        const kind = image ? (isVideo(image) ? 'Video' : 'Image') : 'Folder';
+        this.button.dataset.path = path;
+        setIconButton(this.button, 'info', `${kind} info`);
+        updateMetadataTarget(path, this.button);
+    }
+}
 
 export function closeMetadata(restoreFocus = false) {
     if (!metadataOpen()) return;
@@ -31,7 +51,7 @@ function positionMetadata() {
 }
 
 // Keep an open panel in sync with the persistent header action.
-export function updateMetadataTarget(path, button) {
+function updateMetadataTarget(path, button) {
     button.setAttribute('aria-expanded', 'false');
     if (!metadataOpen() || context?.button !== button) return;
     const changed = context.path !== path;
@@ -42,7 +62,7 @@ export function updateMetadataTarget(path, button) {
     if (changed) loadMetadata(path);
 }
 
-export function toggleMetadata(path, button) {
+function toggleMetadata(path, button) {
     if (metadataOpen() && context?.button === button) {
         closeMetadata(true);
         return;

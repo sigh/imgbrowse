@@ -1,4 +1,4 @@
-import {renderItemHeader} from './static/folder-path.js';
+import {ItemHeader} from './static/item-header.js';
 import {getInfo, refreshScope} from './static/api.js';
 import {icon} from './static/icons.js';
 import {clearOriginals} from './static/media-cache.js';
@@ -29,6 +29,7 @@ class GalleryApp {
             size: imageSize(sessionStorage.getItem('readingSize')),
         };
         this.previews = new PreviewLoader(byId('grid-viewport'), byId('viewer'));
+        this.header = new ItemHeader(byId('item-location'), byId('item-actions'), (path, label) => this.folderLink(path, label));
         this.grid = new FolderGrid(this.previews, {
             folderLink: (path, label) => this.folderLink(path, label),
             mediaLink: (image, collection, label, mode) => this.mediaLink(image, collection, label, mode),
@@ -41,7 +42,7 @@ class GalleryApp {
             changeLayout: layout => this.changeLayout(layout),
             close: () => this.setMode(ScreenMode.BROWSE),
             refresh: () => this.refresh(),
-            folderLink: (path, label) => this.folderLink(path, label),
+            renderHeader: options => this.header.update(options),
         });
         this.tree = new FolderTree({
             destination: path => stateUrl(this.treeDestination(path)),
@@ -222,9 +223,8 @@ class GalleryApp {
 
     renderBreadcrumbs() {
         if (this.state.mode !== ScreenMode.BROWSE) return;
-        renderItemHeader(byId('item-location'), byId('item-actions'), {
+        this.header.update({
             folder: this.state.folder, rootName: this.rootName, compact: this.state.compact,
-            folderLink: (path, name) => this.folderLink(path, name),
         });
     }
 

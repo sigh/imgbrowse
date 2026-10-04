@@ -1,81 +1,45 @@
 import {joinPath, filename} from './state.js';
-import {isVideo} from './media-kind.js';
-import {setIconButton} from './icons.js';
-import {element} from './dom.js';
-import {toggleMetadata, updateMetadataTarget} from './metadata.js';
 
-/** Shared identity and actions for Browse, reading, and folder overview. */
-export function renderItemHeader(location, actions, {folder, image = null, rootName, folderLink, currentLink = false, collection = null, compact = false}) {
-    const name = location.querySelector('.item-name');
-    name.hidden = !image;
-    name.textContent = image ? filename(image) : '';
-    name.title = image || '';
-    const breadcrumbs = location.querySelector('.breadcrumbs');
-    const changed = breadcrumbs.dataset.folder !== folder || breadcrumbs.dataset.image !== (image || '');
-    const scrollLeft = breadcrumbs.scrollLeft;
-    // Layout belongs in link destinations even though it does not change the header's appearance.
-    const context = JSON.stringify([folder, rootName, currentLink, collection, Boolean(image), compact]);
-    if (breadcrumbs.dataset.context !== context) {
-        renderFolderPath(breadcrumbs, folder, rootName, folderLink, {currentLink, collection, hasImage: Boolean(image)});
-        if (image && folder !== collection) breadcrumbs.append(element('span', '', '/'));
-        breadcrumbs.append(name);
-        breadcrumbs.dataset.context = context;
-    }
-    breadcrumbs.dataset.image = image || '';
-    if (image) breadcrumbs.scrollLeft = changed ? breadcrumbs.scrollWidth : scrollLeft;
-    const target = image || folder;
-    const kind = image ? (isVideo(image) ? 'video' : 'image') : 'folder';
-    renderItemActions(actions, target, kind);
-}
+export const PathKind = Object.freeze({FOLDER:'folder', FILE:'file', GAP:'gap'});
 
-/** Shared path presentation; the viewer keeps the current folder navigable. */
-function renderFolderPath(container, folder, rootName, folderLink, {currentLink, collection, hasImage}) {
-    const focused = container.contains(document.activeElement) ? document.activeElement.getAttribute('href') : null;
-    const changed = container.dataset.folder !== folder;
-    const scrollLeft = container.scrollLeft;
-    container.dataset.folder = folder;
-    container.tabIndex = 0;
-    container.onkeydown = event => {
-        if (['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) event.stopPropagation();
-    };
-    const parts = [{path: '', name: rootName}];
+/** Describe identity and navigation semantics without DOM nodes or measurements. */
+export function folderPath({folder, image = null, rootName, currentLink = false, collection = null}) {
+    const folders = [{path:'', label:rootName}];
     let path = '';
-    for (const name of folder.split('/').filter(Boolean)) {
-        path = joinPath(path, name);
-        parts.push({path, name});
+    for (const label of folder.split('/').filter(Boolean)) {
+        path = joinPath(path, label);
+        folders.push({path, label});
     }
-    container.replaceChildren();
-    parts.forEach((part, index) => {
-        if (index && parts[index - 1].path !== collection) container.append(element('span', '', '/'));
-        const current = index === parts.length - 1;
-        const node = current && !currentLink ? element('span', '', part.name) : folderLink(part.path, part.name);
-        if (current) node.setAttribute('aria-current', 'page');
-        if (part.path === (collection ?? folder)) {
-            node.classList.add('selected-folder');
-            node.title = collection === null ? 'Browsing folder' : 'Viewing folder: ' + (part.path || rootName);
-        }
-        if (part.path === collection) {
-            const pinned = element('span', 'collection-breadcrumb');
-            pinned.append(node);
-            if (!current || hasImage) pinned.append(element('span', '', '/'));
-            container.append(pinned);
-        } else container.append(node);
-        if (focused && node.getAttribute('href') === focused) node.focus({preventScroll: true});
+    const items = folders.map((item, index) => {
+        const current = index === folders.length - 1;
+        return {...item, kind:PathKind.FOLDER, browsing:item.path === (collection ?? folder),
+            link:!current || currentLink, current:current ? (image ? 'location' : 'page') : null};
     });
-    container.scrollLeft = changed ? container.scrollWidth : scrollLeft;
+    if (image) items.push({kind:PathKind.FILE, path:image, label:filename(image), browsing:false, link:false, current:'page'});
+    return items;
 }
 
-/** Actions belong next to the item they describe. */
-function renderItemActions(container, target, kind) {
-    let info = container.querySelector('.item-info');
-    if (!info) {
-        info = element('button', 'item-info');
-        info.type = 'button';
-        info.setAttribute('aria-controls', 'metadata-popover');
-        info.addEventListener('click', () => toggleMetadata(info.dataset.path, info));
-        container.append(info);
+/** Collapse ancestors, then intermediate descendants; retain browsing and file identity. */
+export function fitFolderPath(items, widths, {available, spacing, separator, gap}) {
+    const shown = new Set(items);
+    const measured = new Map(items.map((item, index) => [item, widths[index]]));
+    const segments = () => {
+        const result = [];
+        let hidden = [];
+        for (const item of items) {
+            if (!shown.has(item)) { hidden.push(item); continue; }
+            if (hidden.length) { result.push({kind:PathKind.GAP, items:hidden}); hidden = []; }
+            result.push(item);
+        }
+        return result;
+    };
+    const width = parts => parts.reduce((total, item) => total + (item.kind === PathKind.GAP ? gap : measured.get(item)), 0)
+        + Math.max(0, parts.length - 1) * (separator + 2 * spacing);
+    let parts = segments();
+    for (const item of items.filter(item => !item.browsing && item.kind !== PathKind.FILE)) {
+        if (width(parts) <= available + 1) break;
+        shown.delete(item);
+        parts = segments();
     }
-    info.dataset.path = target;
-    setIconButton(info, 'info', `${kind[0].toUpperCase() + kind.slice(1)} info`);
-    updateMetadataTarget(target, info);
+    return {parts, truncated:width(parts) > available + 1};
 }

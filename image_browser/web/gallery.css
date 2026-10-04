@@ -199,18 +199,33 @@ a {
     display: flex;
     flex-wrap: nowrap;
     align-items: center;
-    gap: var(--space-md);
+    gap: var(--space-sm);
     flex: 1;
     min-width: 0;
-    overflow-x: auto;
-    scrollbar-width: none;
+    overflow: hidden;
     white-space: nowrap;
     font-size: .9rem;
     line-height: 1.6;
     min-height: var(--control-height);
 }
 .breadcrumbs > * { flex-shrink: 0; }
-.breadcrumbs::-webkit-scrollbar { display: none; }
+.breadcrumb-item { display: flex; align-items: center; height: var(--control-height); min-width: 0; padding-inline: 2px; }
+.breadcrumb-label { overflow: hidden; text-overflow: ellipsis; line-height: 1.6; }
+a.breadcrumb-item { text-decoration: none; text-underline-offset: 3px; }
+a.breadcrumb-item > .breadcrumb-label { text-decoration: underline; }
+.breadcrumbs .selected-folder { color: var(--color-text); font-weight: 600; }
+.breadcrumbs.truncated > .breadcrumb-item { flex: 1 1 auto; min-width: 24px; }
+.breadcrumbs.truncated > .item-name { flex: 2 1 auto; }
+.breadcrumb-separator { color: var(--color-muted); }
+.breadcrumb-gap { width: 28px; height: var(--control-height); padding: 0; font-size: 18px; text-decoration: underline; text-underline-offset: 3px; }
+.breadcrumb-gap[aria-expanded] { --button-background: transparent; --button-border: transparent; --button-color: var(--color-accent); }
+.breadcrumb-gap:hover { background: transparent; color: var(--color-text); }
+.breadcrumb-menu { position: fixed; inset: auto; margin: 0; width: min(320px, calc(100vw - 24px)); padding: var(--space-sm); overflow: auto; border: 1px solid var(--color-border); border-radius: var(--radius); background: var(--color-surface); color: var(--color-text); font-size: .9rem; box-shadow: 0 8px 24px #0008; }
+.breadcrumb-menu ul { margin: 0; padding: 0; list-style: none; }
+.breadcrumb-menu li { padding-inline-start: calc(var(--depth) * var(--space-lg)); }
+.breadcrumb-menu a { height: auto; min-height: var(--control-height); padding: 4px var(--space-sm); border-radius: 4px; }
+.breadcrumb-menu .breadcrumb-label { white-space: normal; overflow: visible; overflow-wrap: anywhere; }
+.breadcrumb-menu a:hover { background: var(--color-button-hover); }
 .copy-path, .item-info, .metadata-close {
     padding: var(--space-sm);
     width: var(--control-height);
@@ -437,29 +452,6 @@ input[type=search] {
     display: flex;
     flex-direction: column;
 }
-.breadcrumbs a { text-underline-offset: 3px; }
-.breadcrumbs .selected-folder { color: var(--color-text); font-weight: 600; }
-.collection-breadcrumb {
-    position: sticky;
-    left: 0;
-    z-index: 1;
-    display: flex;
-    align-items: center;
-    gap: var(--space-md);
-    max-width: 40%;
-    background: var(--color-background);
-}
-.collection-breadcrumb::after {
-    content: '';
-    position: absolute;
-    inset-block: 0;
-    left: 100%;
-    width: var(--space-md);
-    background: linear-gradient(to right, var(--color-background), transparent);
-    pointer-events: none;
-}
-.collection-breadcrumb a { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-.collection-breadcrumb > span { flex-shrink: 0; }
 .item-name { color: var(--color-text); }
 .viewer-stage {
     position: relative;

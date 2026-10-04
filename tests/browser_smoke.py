@@ -70,7 +70,9 @@ def make_collection(root):
     (mixed / '4.mp4').write_bytes(b'unsupported video')
     (root / 'Empty').mkdir()
     long_name = 'A very long collection title with many descriptive words and publisher details ' * 2
-    (root / 'Names' / (long_name + '- Chapter 123')).mkdir(parents=True)
+    long_folder = root / 'Names' / (long_name + '- Chapter 123')
+    long_folder.mkdir(parents=True)
+    shutil.copyfile(root / 'root2.jpg', long_folder / 'Harbour at sunrise — edited photograph from the autumn coastal collection.jpg')
 
 
 def check_http(base):

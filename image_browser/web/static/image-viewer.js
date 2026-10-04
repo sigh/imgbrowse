@@ -1,5 +1,4 @@
 import {setIconButton} from './icons.js';
-import {renderItemHeader} from './folder-path.js';
 import {closeMetadata} from './metadata.js';
 import {loadOriginal} from './media-cache.js';
 import {walkImages} from './api.js';
@@ -24,8 +23,8 @@ const ARROW_DIRECTIONS = Object.freeze({
 
 /** Owns image loading and collection navigation; geometry and gestures are separate. */
 export class ImageViewer {
-    constructor(previews, {selectImage, changeSize, changeLayout, close, folderLink, refresh}) {
-        Object.assign(this, {selectImage, changeSize, changeLayout, close, folderLink, refresh});
+    constructor(previews, {selectImage, changeSize, changeLayout, close, renderHeader, refresh}) {
+        Object.assign(this, {selectImage, changeSize, changeLayout, close, renderHeader, refresh});
         this.container = byId('viewer');
         this.canvas = byId('viewer-canvas');
         this.singleViewport = new ViewerViewport(this.canvas, () => { if (this.state) this.updateControls(); });
@@ -96,8 +95,8 @@ export class ImageViewer {
     updateCollectionLabel() {
         const image = this.state.mode === ScreenMode.OVERVIEW ? null : this.state.image;
         const folder = image ? parentPath(image) : this.state.collection;
-        renderItemHeader(byId('item-location'), byId('item-actions'), {
-            folder, image, rootName: this.rootName, folderLink: this.folderLink,
+        this.renderHeader({
+            folder, image, rootName: this.rootName,
             currentLink: true, collection: this.state.collection, compact: this.state.compact,
         });
     }
