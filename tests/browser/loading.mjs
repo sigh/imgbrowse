@@ -4,7 +4,6 @@ export async function run(browser, fixtures) {
     const {call, evaluate, waitFor, open, click, waitImage, key, wheel, readyImage, pause, viewerUrl, network, held} = browser;
     const {absoluteRoot, first, second, last} = fixtures;
     await browser.start();
-    const actionColors = await evaluate("({selected:getComputedStyle(document.getElementById('layout-previews')).backgroundColor, action:getComputedStyle(document.getElementById('read-folder')).backgroundColor})");
     // Pending media has an empty, stable canvas; identity and actions refer to the requested file.
     await open(viewerUrl(first));
     await readyImage(first);
@@ -18,9 +17,9 @@ export async function run(browser, fixtures) {
     await waitImage(second);
     assert.ok(await evaluate("document.getElementById('viewer-image').hidden && !document.getElementById('viewer-image').hasAttribute('src')"), 'The old image is removed as soon as the target changes');
     assert.equal(await evaluate("document.querySelector('#item-path .item-name').textContent"), 'page10.jpg');
-    assert.equal(await evaluate("document.getElementById('viewer-zoom').disabled"), true);
+    assert.equal(await evaluate("document.getElementById('viewer-zoom-in').disabled"), true);
     await waitFor(`document.getElementById('metadata-details').textContent.includes(${JSON.stringify(second)})`);
-    await evaluate("window.copiedPath=null; Object.defineProperty(navigator, 'clipboard', {configurable:true, value:{writeText:async text => { window.copiedPath=text; }}}); document.querySelector('#item-location .copy-path').click()");
+    await evaluate("window.copiedPath=null; Object.defineProperty(navigator, 'clipboard', {configurable:true, value:{writeText:async text => { window.copiedPath=text; }}}); document.querySelector('#metadata-details .copy-path').click()");
     await waitFor('window.copiedPath');
     assert.equal(await evaluate('window.copiedPath'), absoluteRoot + '/' + second);
     await waitFor("document.getElementById('viewer-status').textContent.includes('Loading')");
@@ -31,13 +30,13 @@ export async function run(browser, fixtures) {
     await readyImage(second);
     assert.equal(await evaluate("document.getElementById('viewer-status').textContent"), '');
     assert.deepEqual(await evaluate("document.getElementById('viewer-canvas').getBoundingClientRect().toJSON()"), beforeLoading, 'Completing the replacement preserves canvas geometry');
-    await click('viewer-zoom');
-    assert.equal(await evaluate("document.getElementById('size-menu').hidden"), false);
-    assert.equal(await evaluate("getComputedStyle(document.getElementById('viewer-zoom')).backgroundColor"), actionColors.selected, 'An open size menu uses the shared expanded state');
-    await evaluate("document.querySelector('[data-size=width]').click()");
-    assert.equal(await evaluate("getComputedStyle(document.getElementById('viewer-zoom')).backgroundColor"), actionColors.action, 'Closing the menu restores neutral action styling');
-    assert.equal(await evaluate("new URLSearchParams(location.search).get('size')"), 'width');
+    await key('f');
+    const fittedWidth = await evaluate("document.getElementById('viewer-image').width");
+    await click('viewer-zoom-in');
+    assert.ok(Math.abs(await evaluate("document.getElementById('viewer-image').width") - fittedWidth * 1.25) < 2);
     assert.equal(await evaluate("document.getElementById('viewer-image').dataset.path"), second);
+    await click('viewer-zoom-out');
+    assert.ok(Math.abs(await evaluate("document.getElementById('viewer-image').width") - fittedWidth) < 2);
 
     // A failed replacement cannot reveal the previous image; Retry loads the same target.
     network.images = true;
@@ -51,7 +50,7 @@ export async function run(browser, fixtures) {
     await waitFor("!document.getElementById('viewer-retry').hidden");
     assert.ok(await evaluate("document.getElementById('viewer-image').hidden && !document.getElementById('viewer-image').hasAttribute('src')"), 'Failure keeps the old image out of the canvas');
     assert.equal(await evaluate("document.querySelector('#item-path .item-name').textContent"), 'page1.jpg');
-    await evaluate("window.copiedPath=null; document.querySelector('#item-location .copy-path').click()");
+    await evaluate("window.copiedPath=null; document.querySelector('#metadata-details .copy-path').click()");
     await waitFor('window.copiedPath');
     assert.equal(await evaluate('window.copiedPath'), absoluteRoot + '/' + last);
     network.images = false;
@@ -96,15 +95,15 @@ export async function run(browser, fixtures) {
     network.walk = false;
     for (const requestId of held.splice(0)) await call('Fetch.continueRequest',{requestId}).catch(()=>{});
     await waitFor("document.getElementById('viewer-status').textContent.includes('No images')");
-    assert.ok(await evaluate("document.getElementById('viewer-zoom').disabled"));
+    assert.ok(await evaluate("document.getElementById('viewer-zoom-in').disabled"));
     await call('Fetch.disable');
     await click('browse-folder');
     await waitFor("document.getElementById('viewer').hidden && document.getElementById('grid-status').textContent.includes('no visible')");
     await click('overview-folder');
     await waitFor("!document.getElementById('overview').hidden && document.getElementById('grid-status').textContent.includes('No images')");
-    await click('read-folder');
+    await click('read-strip');
     await waitFor("document.getElementById('overview').hidden && document.getElementById('viewer-status').textContent.includes('No images')");
-    assert.equal(await evaluate("document.getElementById('read-folder').getAttribute('aria-current')"), 'page');
+    assert.equal(await evaluate("document.getElementById('read-strip').getAttribute('aria-current')"), 'page');
     await click('browse-folder');
     await waitFor("document.getElementById('viewer').hidden && location.search === '?folder=Empty'");
     await open('/?folder=Single&viewer=1');

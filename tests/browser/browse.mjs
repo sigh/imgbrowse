@@ -30,21 +30,21 @@ export async function run(browser, fixtures) {
     assert.ok(await evaluate("(() => {const image=document.querySelector('.picture img').getBoundingClientRect(), frame=document.querySelector('.picture img').parentElement.getBoundingClientRect(); return image.left>=frame.left-.5 && image.right<=frame.right+.5 && image.top>=frame.top-.5 && image.bottom<=frame.bottom+.5;})()"), 'Preview images stay within their card area');
     assert.equal(await evaluate("document.getElementById('layout-previews').getBoundingClientRect().right"), await evaluate("document.getElementById('layout-list').getBoundingClientRect().left"), 'Layout choices remain a contiguous button group');
     await screenshot('grid');
-    const folderModeAction = await evaluate("document.getElementById('read-folder').getBoundingClientRect().toJSON()");
-    const actionColors = await evaluate("(() => {const style=id=>getComputedStyle(document.getElementById(id)); return {action:style('read-folder').backgroundColor, neutral:style('layout-list').backgroundColor, selected:style('layout-previews').backgroundColor};})()");
+    const folderModeAction = await evaluate("document.getElementById('read-strip').getBoundingClientRect().toJSON()");
+    const actionColors = await evaluate("(() => {const style=id=>getComputedStyle(document.getElementById(id)); return {action:style('read-strip').backgroundColor, neutral:style('layout-list').backgroundColor, selected:style('layout-previews').backgroundColor};})()");
     assert.equal(actionColors.action, actionColors.neutral, 'View uses neutral action styling');
     assert.notEqual(actionColors.action, actionColors.selected, 'View does not appear permanently selected');
     await call('Input.dispatchMouseEvent', {type:'mouseMoved', x:folderModeAction.x+folderModeAction.width/2, y:folderModeAction.y+folderModeAction.height/2});
-    assert.notEqual(await evaluate("getComputedStyle(document.getElementById('read-folder')).backgroundColor"), actionColors.action, 'Hover feedback is visible');
-    assert.deepEqual(await evaluate("document.getElementById('read-folder').getBoundingClientRect().toJSON()"), folderModeAction, 'Hover preserves button geometry');
+    assert.notEqual(await evaluate("getComputedStyle(document.getElementById('read-strip')).backgroundColor"), actionColors.action, 'Hover feedback is visible');
+    assert.deepEqual(await evaluate("document.getElementById('read-strip').getBoundingClientRect().toJSON()"), folderModeAction, 'Hover preserves button geometry');
     await call('Input.dispatchMouseEvent', {type:'mouseMoved', x:700, y:450});
     const imageNameBounds = await evaluate("document.querySelector('.card-caption .image-name').getBoundingClientRect().toJSON()");
     await call('Input.dispatchMouseEvent', {type:'mouseMoved', x:imageNameBounds.x+imageNameBounds.width/2, y:imageNameBounds.y+imageNameBounds.height/2});
     assert.equal(await evaluate("getComputedStyle(document.querySelector('.card-caption .image-name')).backgroundColor"), 'rgba(0, 0, 0, 0)', 'Content links stay unfilled under the shared hover rules');
     await call('Input.dispatchMouseEvent', {type:'mouseMoved', x:700, y:450});
 
-    assert.equal(await evaluate("document.getElementById('read-folder').textContent.trim()"), '', 'Opening the viewer uses one icon action');
-    assert.ok(await evaluate("[...document.querySelectorAll('.mode-navigation')].every(group => [...group.querySelectorAll('a')].map(button => button.dataset.mode).join(',') === 'browse,overview,view' && group.querySelectorAll('[aria-current=page]').length === 1 && !group.querySelector('button:disabled'))"), 'Every screen uses the same fixed navigation group with one selected destination');
+    assert.equal(await evaluate("document.getElementById('read-strip').textContent.trim()"), '', 'Opening the viewer uses one icon action');
+    assert.ok(await evaluate("[...document.querySelectorAll('.mode-navigation')].every(group => [...group.querySelectorAll('a')].map(button => button.dataset.mode).join(',') === 'browse,overview' && group.querySelectorAll('[aria-current=page]').length === 1 && !group.querySelector('button:disabled'))"), 'Every screen uses the same fixed navigation group with one selected destination');
     assert.ok(await evaluate("[...document.querySelectorAll('[data-layout]')].every(button => button.textContent.trim()==='' && button.querySelector('svg') && button.getAttribute('aria-label') && button.title)"), 'Layout choices use named icons');
     await pause(150);
     const visibleCards = await evaluate(`(() => {
@@ -58,21 +58,21 @@ export async function run(browser, fixtures) {
     for (const request of requests.filter(url => new URL(url).pathname === '/thumbnail')) {
         assert.ok(visibleCards.includes(new URL(request).searchParams.get('path')), 'Only visible card paths may request thumbnails: ' + request);
     }
-    await evaluate("Object.defineProperty(navigator, 'clipboard', {configurable:true, value:{writeText:async text => { window.copiedPath=text; }}}); document.querySelector('#item-location .copy-path').click()");
+    await browser.openInfo();
+    await evaluate("Object.defineProperty(navigator, 'clipboard', {configurable:true, value:{writeText:async text => { window.copiedPath=text; }}}); document.querySelector('#metadata-details .copy-path').click()");
     await waitFor("window.copiedPath");
     const absoluteRoot = await evaluate('window.copiedPath');
     assert.ok(absoluteRoot.startsWith('/'));
-    await evaluate("{ const info=document.querySelector('#item-actions .item-info'); info.focus(); info.click(); }");
+    await evaluate("{ const info=document.querySelector('#item-actions .item-info'); info.focus(); }");
     await waitFor("document.getElementById('metadata-details').textContent.includes('Media')");
     assert.equal(await evaluate("getComputedStyle(document.querySelector('#item-actions .item-info')).backgroundColor"), actionColors.selected, 'Expanded Info shares the selected-layout treatment');
 
     assert.equal(await evaluate("document.getElementById('metadata-popover').matches(':popover-open')"), true);
-    assert.equal(await evaluate("document.querySelector('#metadata-popover button') === null"), true, 'Info itself dismisses the popover');
+    assert.ok(await evaluate("document.querySelector('#metadata-popover #metadata-close') && document.querySelector('#metadata-details .copy-path') && !document.querySelector('.app-header > .item-location .copy-path')"), 'Copy belongs in Info alongside the full path');
     assert.equal(await evaluate("[...document.querySelectorAll('#metadata-details dt')].some(row => row.textContent === 'Type')"), false);
     assert.equal(await evaluate("import('/static/metadata.js').then(({formatMetadataDate}) => formatMetadataDate('2005-01-10T17:08:17'))"), '2005-01-10 17:08');
     const folderActions = await evaluate("document.getElementById('item-actions').getBoundingClientRect().toJSON()");
-    const folderCopy = await evaluate("document.querySelector('#item-location .copy-path').getBoundingClientRect().toJSON()");
-    assert.ok(await evaluate("document.querySelector('#item-location .copy-path').getBoundingClientRect().right < document.getElementById('item-path').getBoundingClientRect().left"));
+
     assert.equal(await evaluate("document.getElementById('metadata-details').textContent.includes('including archives') || document.getElementById('metadata-details').textContent.includes('Scope')"), false);
     assert.ok(folderActions.right <= await evaluate('innerWidth'));
     await screenshot('folder-info');

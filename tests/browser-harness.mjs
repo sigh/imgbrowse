@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import {writeFileSync} from 'node:fs';
 import {join} from 'node:path';
-import {readState, stateUrl, ScreenMode, ImageSize} from '../image_browser/web/static/state.js';
+import {readState, stateUrl, ScreenMode, ImageSize, ReadingLayout} from '../image_browser/web/static/state.js';
 
 export async function connectBrowser(port, base, screenshots = '') {
     const targets = await (await fetch(`http://127.0.0.1:${port}/json/list`)).json();
@@ -90,18 +90,31 @@ export async function connectBrowser(port, base, screenshots = '') {
     }
 
 
-    const readyImage = path => waitFor(`(() => { const image = document.getElementById('viewer-image'); return image?.dataset.path === ${JSON.stringify(path)} && !image.hidden && image.naturalWidth > 0 && image.getBoundingClientRect().width > 0 && !document.getElementById('viewer-zoom').disabled; })()`);
+    const readyImage = path => waitFor(`(() => { const image = document.getElementById('viewer-image'); return image?.dataset.path === ${JSON.stringify(path)} && !image.hidden && image.naturalWidth > 0 && image.getBoundingClientRect().width > 0 && !document.getElementById('viewer-zoom-in').disabled; })()`);
     const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
     const position = () => evaluate("({top:document.getElementById('viewer-canvas').scrollTop,max:document.getElementById('viewer-canvas').scrollHeight-document.getElementById('viewer-canvas').clientHeight})");
-    const viewerUrl = (image, size = ImageSize.FIT_PAGE, folder = 'Album') => stateUrl({...readState(''), folder, collection: folder, mode: ScreenMode.VIEW, image, size});
+    const viewerUrl = (image, size = ImageSize.DEFAULT, folder = 'Album', layout = ReadingLayout.STRIP) => stateUrl({...readState(''), folder, collection: folder, mode: ScreenMode.VIEW, image, size, layout});
+    async function presentation(layout) {
+        await evaluate(`document.querySelector('[data-reading-layout="${layout}"]').click()`);
+    }
+    // Seed an exact numeric size for geometry/legacy-link scenarios; reader tests exercise −/+.
+    async function setZoom(percent) {
+        await evaluate(`import('/gallery.js').then(({app}) => app.changeSize(String(${percent}/100)))`);
+    }
+    async function openInfo() {
+        if (!await evaluate("document.getElementById('metadata-popover').matches(':popover-open')")) {
+            await evaluate("document.querySelector('.item-info').click()");
+        }
+        await waitFor("document.querySelector('#metadata-details .copy-path')");
+    }
 
     const headerPositions = () => evaluate(`(() => {
         const header = document.querySelector('.app-header');
         return {
             navigation: header.querySelector('.mode-navigation').getBoundingClientRect().toJSON(),
-            modes: [...header.querySelectorAll('[data-mode]')].map(button => button.getBoundingClientRect().toJSON()),
+            modes: [...header.querySelectorAll('[data-mode], [data-reading-layout]')].map(button => button.getBoundingClientRect().toJSON()),
             height: header.offsetHeight,
-            copy: header.querySelector('.copy-path').getBoundingClientRect().toJSON(),
+            location: header.querySelector('.item-location').getBoundingClientRect().toJSON(),
             info: header.querySelector('.item-info').getBoundingClientRect().toJSON(),
         };
     })()`);
@@ -119,6 +132,6 @@ export async function connectBrowser(port, base, screenshots = '') {
     await call('Network.enable');
     await call('Page.enable');
     return {call, evaluate, waitFor, open, start, click, newTab, imageIs, waitImage, key,
-        nativeKey, wheel, screenshot, readyImage, pause, position, viewerUrl, headerPositions,
+        nativeKey, wheel, screenshot, readyImage, pause, position, viewerUrl, presentation, setZoom, openInfo, headerPositions,
         requests, exceptions, network, held, close: () => socket.close()};
 }

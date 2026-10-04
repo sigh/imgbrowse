@@ -2,20 +2,19 @@ import assert from 'node:assert/strict';
 import {ImageSize} from '../../image_browser/web/static/state.js';
 
 export async function run(browser, fixtures) {
-    const {call, evaluate, waitFor, open, click, imageIs, key, nativeKey, wheel, screenshot, readyImage, pause, position, viewerUrl, headerPositions, requests} = browser;
+    const {call, evaluate, waitFor, open, click, imageIs, key, nativeKey, wheel, screenshot, readyImage, pause, position, viewerUrl, presentation, setZoom, headerPositions, requests} = browser;
     const {absoluteRoot, first, second, last} = fixtures;
     await browser.start();
     await waitFor("document.querySelectorAll('.card').length > 5");
-    const folderModeAction = await evaluate("document.getElementById('read-folder').getBoundingClientRect().toJSON()");
+    const folderModeAction = await evaluate("document.getElementById('read-strip').getBoundingClientRect().toJSON()");
     const folderActions = await evaluate("document.getElementById('item-actions').getBoundingClientRect().toJSON()");
-    const folderCopy = await evaluate("document.querySelector('#item-location .copy-path').getBoundingClientRect().toJSON()");
     const folderHeaderHeight = await evaluate("document.querySelector('.app-header').offsetHeight");
     assert.ok(await evaluate("(() => {const buttons=document.querySelector('.browse-controls').getBoundingClientRect(), filter=document.getElementById('filter').getBoundingClientRect(); return buttons.left===16 && buttons.right < filter.left && buttons.top===filter.top && buttons.height===32 && filter.height===32;})()"), 'Layout controls sit left of the filter in one compact row');
     // The layout choice keeps the header geometry fixed and survives history and reload.
     await open(viewerUrl(first));
     await readyImage(first);
     const initialPositions = await headerPositions();
-    await click('view-strip');
+    await presentation('single');
     assert.equal(await evaluate("new URLSearchParams(location.search).get('view')"), 'single');
     assert.ok(await evaluate("document.getElementById('viewer-strip').hidden && document.getElementById('viewer-image').dataset.path === 'Album/Chapter 1/page2.jpg'"));
     assert.deepEqual(await headerPositions(), initialPositions);
@@ -23,36 +22,37 @@ export async function run(browser, fixtures) {
     assert.equal(await evaluate("getComputedStyle(document.querySelector('.viewer-feedback')).display"), 'none', 'Empty feedback takes no space');
     await call('Page.reload');
     await readyImage(first);
-    assert.equal(await evaluate("document.getElementById('view-strip').getAttribute('aria-pressed')"), 'false');
+    assert.equal(await evaluate("document.querySelector('[data-reading-layout=strip]').getAttribute('aria-current')"), 'false');
     await key('t');
     await waitFor("!new URLSearchParams(location.search).has('view') && !document.getElementById('viewer-strip').hidden");
     assert.deepEqual(await headerPositions(), initialPositions);
     await click('overview-folder');
     await waitFor("!document.getElementById('overview').hidden");
     assert.equal(await evaluate("new URLSearchParams(location.search).get('view')"), 'grid');
-    assert.ok(await evaluate("document.querySelector('.viewer-tools').hidden"));
+    assert.ok(await evaluate("document.querySelector('.viewer-tools').classList.contains('unavailable')"));
     assert.deepEqual(await headerPositions(), initialPositions);
     await evaluate('history.back()');
-    await waitFor("document.getElementById('view-strip').getAttribute('aria-pressed') === 'true' && !document.getElementById('viewer-strip').hidden");
+    await waitFor("document.querySelector('[data-reading-layout=strip]').getAttribute('aria-current') === 'page' && !document.getElementById('viewer-strip').hidden");
     await readyImage(first);
 
     // Fit page never upscales a small photo. Native wheel events turn fitted pages.
-    await open(viewerUrl('root2.jpg', ImageSize.FIT_PAGE, ''));
+    await open(viewerUrl('root2.jpg', ImageSize.DEFAULT, ''));
     await readyImage('root2.jpg');
     assert.ok(await evaluate("document.getElementById('viewer-image').width <= 320"));
     await call('Input.dispatchMouseEvent', {type:'mouseWheel', x:700,y:350,deltaX:0,deltaY:120});
     await readyImage('root3.jpg');
     await open(viewerUrl(first));
     await readyImage(first);
-    await evaluate("Object.defineProperty(navigator, 'clipboard', {configurable:true, value:undefined}); window.originalExecCommand=document.execCommand; document.execCommand=command => { if(command==='copy') { window.copiedPath=document.querySelector('.clipboard-input').value; return true; } return false; }; document.querySelector('#item-location .copy-path').click()");
+    await browser.openInfo();
+    await evaluate("Object.defineProperty(navigator, 'clipboard', {configurable:true, value:undefined}); window.originalExecCommand=document.execCommand; document.execCommand=command => { if(command==='copy') { window.copiedPath=document.querySelector('.clipboard-input').value; return true; } return false; }; document.querySelector('#metadata-details .copy-path').click()");
     await waitFor("window.copiedPath");
     assert.equal(await evaluate('window.copiedPath'), absoluteRoot + '/' + first);
     await evaluate('document.execCommand=window.originalExecCommand');
     assert.equal(await evaluate("getComputedStyle(document.querySelector('#viewer-strip button.selected')).borderColor"), await evaluate("getComputedStyle(document.getElementById('layout-previews')).borderColor"), 'Current thumbnails and layout choices share the selection accent');
-    const viewAction = await evaluate("document.getElementById('read-folder').getBoundingClientRect().toJSON()");
+    const viewAction = await evaluate("document.getElementById('read-strip').getBoundingClientRect().toJSON()");
     assert.deepEqual(viewAction, folderModeAction, 'View has identical geometry on every screen');
     assert.equal(await evaluate("document.getElementById('browse-folder').getBoundingClientRect().width"), 32);
-    assert.equal(folderModeAction.width, 64, 'The primary View action has a wider target');
+    assert.equal(folderModeAction.width, 40, 'The primary View action has a wider target');
     assert.ok(await evaluate("[...document.querySelectorAll('.viewer-nav')].every(button => button.textContent.trim()==='' && button.querySelector('svg') && button.getAttribute('aria-label') && button.title && button.getBoundingClientRect().height >= 60)"), 'Navigation has no visible labels and keeps generous click targets');
     const viewerFrame = await evaluate("({header:document.querySelector('.app-header').offsetHeight, canvas:document.getElementById('viewer-canvas').getBoundingClientRect().toJSON()})");
     assert.equal(viewerFrame.header, folderHeaderHeight, 'Image and folder headers have the same height');
@@ -60,30 +60,44 @@ export async function run(browser, fixtures) {
     assert.equal(viewerFrame.canvas.y, viewerFrame.header, 'Canvas starts immediately below the header');
     assert.equal(await evaluate("document.getElementById('viewer-stage').getBoundingClientRect().bottom"), await evaluate("document.querySelector('.strip-frame').getBoundingClientRect().top"), 'No footer reserves image space');
     assert.ok(await evaluate("document.querySelector('.toolbar').hidden"), 'The shared workspace gives all remaining space to the image');
-    assert.deepEqual(await evaluate("document.getElementById('item-actions').getBoundingClientRect().toJSON()"), folderActions, 'Copy and Info keep the same position and size across modes');
-    assert.deepEqual(await evaluate("document.querySelector('#item-location .copy-path').getBoundingClientRect().toJSON()"), folderCopy, 'Copy stays immediately left of the path in both modes');
-    assert.equal(await evaluate("document.getElementById('item-actions').textContent.trim()"), '', 'Header actions use icons with accessible names');
-    await evaluate("document.querySelector('#item-actions .item-info').click()");
+    // Clicking a detail uses the same numeric zoom and preserves the clicked source point.
+    const fitted = await evaluate("document.getElementById('viewer-image').getBoundingClientRect().toJSON()");
+    for (const type of ['mousePressed', 'mouseReleased']) await call('Input.dispatchMouseEvent', {type,
+        x:fitted.x+fitted.width/2, y:fitted.y+fitted.height*2/3, button:'left', clickCount:1});
+    assert.equal(await evaluate("(new URLSearchParams(location.search).get('size') || 'auto')"), '1');
+    assert.ok(await evaluate("(() => { const c=document.getElementById('viewer-canvas'), i=document.getElementById('viewer-image'), r=i.getBoundingClientRect(); return Math.abs((c.getBoundingClientRect().top+c.clientHeight/2-r.top)/(r.height/i.naturalHeight)-1200)<3; })()"));
+    const canvasBounds = await evaluate("document.getElementById('viewer-canvas').getBoundingClientRect().toJSON()");
+    for (const type of ['mousePressed', 'mouseReleased']) await call('Input.dispatchMouseEvent', {type,
+        x:canvasBounds.x+canvasBounds.width/2, y:canvasBounds.y+canvasBounds.height/2, button:'left', clickCount:1});
+    assert.equal(await evaluate("(new URLSearchParams(location.search).get('size') || 'auto')"), 'auto');
+    await click('viewer-zoom-in');
+    for (const type of ['mousePressed', 'mouseReleased']) await call('Input.dispatchMouseEvent', {type,
+        x:canvasBounds.x+canvasBounds.width/2, y:canvasBounds.y+canvasBounds.height/2, button:'left', clickCount:1});
+    assert.equal(await evaluate("(new URLSearchParams(location.search).get('size') || 'auto')"), 'auto', 'Image click returns adjusted zoom to the presentation default');
+    assert.deepEqual(await headerPositions(), initialPositions, 'Click zoom does not move header controls');
+    assert.deepEqual(await evaluate("document.getElementById('item-actions').getBoundingClientRect().toJSON()"), folderActions, 'Info keeps the same position and size across modes');
+    assert.equal(await evaluate("document.querySelector('#item-actions > .item-info').textContent.trim()"), '', 'Header actions use icons with accessible names');
+    await browser.openInfo();
     await waitFor("document.getElementById('metadata-details').textContent.includes('1000 × 1800')");
     assert.equal(await evaluate("(() => { const path=document.querySelector('.metadata-path'); const size=[...document.querySelectorAll('#metadata-details dt')].find(row => row.textContent==='Size').nextElementSibling; return path.getBoundingClientRect().left===size.getBoundingClientRect().left && getComputedStyle(path).fontSize===getComputedStyle(size).fontSize; })()"), true, 'Paths use the same value column and type size as other details');
     assert.deepEqual(await evaluate("({header:document.querySelector('.app-header').offsetHeight, canvas:document.getElementById('viewer-canvas').getBoundingClientRect().toJSON()})"), viewerFrame, 'Opening Info must not resize or move the viewer');
     assert.equal(await evaluate("document.querySelector('#item-path .item-info') === null"), true);
-    assert.match(await evaluate("document.querySelector('#item-location .copy-path').getAttribute('aria-label')"), /^(Copy image path|Copied)$/);
+    assert.match(await evaluate("document.querySelector('#metadata-details .copy-path').getAttribute('aria-label')"), /^(Copy full path|Copied)$/);
     await screenshot('image-metadata');
-    await evaluate("window.headerCopy=document.querySelector('#item-location .copy-path'); window.headerInfo=document.querySelector('#item-actions .item-info'); window.headerFolder=document.querySelector('#item-path a')");
+    await evaluate("window.headerInfo=document.querySelector('#item-actions .item-info'); window.headerFolder=document.querySelector('#item-path a')");
     assert.equal(await evaluate("document.activeElement.id"), 'metadata-popover');
     await nativeKey('ArrowRight', 39);
     await readyImage(first);
     await evaluate("document.getElementById('viewer-canvas').focus()");
     await nativeKey('ArrowRight', 39);
     await readyImage(second);
-    assert.ok(await evaluate("headerCopy===document.querySelector('#item-location .copy-path') && headerInfo===document.querySelector('#item-actions .item-info') && headerFolder===document.querySelector('#item-path a')"),
+    assert.ok(await evaluate("headerInfo===document.querySelector('#item-actions .item-info') && headerFolder===document.querySelector('#item-path a')"),
         'Changing an image keeps header controls and folder breadcrumbs in place');
-    await waitFor("document.getElementById('metadata-title').textContent === 'page10.jpg'");
+    await waitFor("document.getElementById('metadata-title').textContent === 'page10.jpg' && document.querySelector('#metadata-details .copy-path')");
     assert.deepEqual(await evaluate("document.getElementById('item-actions').getBoundingClientRect().toJSON()"), folderActions, 'Changing the current item must not move its controls');
     assert.equal(await evaluate("document.getElementById('metadata-popover').matches(':popover-open')"), true);
     await evaluate("window.copiedPath=null; Object.defineProperty(navigator, 'clipboard', {configurable:true, value:{writeText:async text => { window.copiedPath=text; }}})");
-    const copyBounds = await evaluate("document.querySelector('#item-location .copy-path').getBoundingClientRect().toJSON()");
+    const copyBounds = await evaluate("document.querySelector('#metadata-details .copy-path').getBoundingClientRect().toJSON()");
     for (const type of ['mousePressed', 'mouseReleased']) await call('Input.dispatchMouseEvent', {type, x:copyBounds.x+copyBounds.width/2, y:copyBounds.y+copyBounds.height/2, button:'left', clickCount:1});
     await waitFor('window.copiedPath');
     assert.equal(await evaluate('window.copiedPath'), absoluteRoot + '/' + second);
@@ -118,8 +132,8 @@ export async function run(browser, fixtures) {
     assert.equal(await evaluate("document.getElementById('viewer-next').dataset.icon"), 'next', 'Normal navigation icon returns after wrapping');
 
     // Edge gestures consume momentum; reverse wheel entry is at the previous image's bottom.
-    await key('w');
-    await waitFor("new URLSearchParams(location.search).get('size') === 'width'");
+    await setZoom(150);
+    await waitFor("new URLSearchParams(location.search).get('size') === '1.5'");
     assert.ok((await position()).max > 1000);
     await evaluate("document.getElementById('viewer-canvas').scrollTop = 400");
     await wheel(120);
@@ -150,23 +164,21 @@ export async function run(browser, fixtures) {
     await evaluate("document.getElementById('viewer-canvas').scrollTop = 450");
     const sourcePoint = () => evaluate("(()=>{const c=document.getElementById('viewer-canvas'),i=document.getElementById('viewer-image'),b=c.getBoundingClientRect(),r=i.getBoundingClientRect();return (b.top+c.clientHeight/2-r.top)/(r.width/i.naturalWidth);})()");
     const beforeZoom = await sourcePoint();
-    await click('viewer-zoom');
     await click('viewer-zoom-in');
-    await click('viewer-zoom');
     assert.ok(Math.abs(await sourcePoint() - beforeZoom) < 3);
     await evaluate("document.getElementById('viewer-canvas').scrollLeft = 0");
     await call('Input.dispatchMouseEvent',{type:'mouseWheel',x:700,y:350,deltaX:120,deltaY:0});
     await pause(150);
     assert.ok(await evaluate("document.getElementById('viewer-canvas').scrollLeft > 0"));
-    const size = await evaluate("document.getElementById('viewer-zoom').dataset.size");
+    const size = await evaluate("(new URLSearchParams(location.search).get('size') || 'auto')");
     assert.equal(await evaluate("new URLSearchParams(location.search).get('size')"), size);
     await click('viewer-next');
     await readyImage(second);
-    assert.equal(await evaluate("document.getElementById('viewer-zoom').dataset.size"), size);
+    assert.equal(await evaluate("(new URLSearchParams(location.search).get('size') || 'auto')"), size);
     await evaluate("document.getElementById('viewer-stage').dispatchEvent(new WheelEvent('wheel',{deltaY:100,ctrlKey:true,cancelable:true}))");
     assert.ok(await evaluate(imageIs(second)));
 
-    assert.equal(await evaluate("document.getElementById('view-strip').getAttribute('aria-pressed')"), 'true');
+    assert.equal(await evaluate("document.querySelector('[data-reading-layout=strip]').getAttribute('aria-current')"), 'page');
     await waitFor("document.querySelectorAll('#viewer-strip button').length === 3");
     assert.deepEqual(await evaluate("Array.from(document.querySelectorAll('#viewer-strip .folder-start .strip-folder'), node=>node.textContent)"), ['Chapter 1', 'Chapter 2/deep']);
     // Resize through the actual pointer handle, then the keyboard, without changing image.
@@ -189,7 +201,7 @@ export async function run(browser, fixtures) {
     // Hidden filmstrip cancels preview work and does not request thumbnails on later pages.
     await evaluate("document.getElementById('viewer-canvas').scrollTop = 450");
     const beforeStrip = await sourcePoint();
-    await click('view-strip');
+    await presentation('single');
     assert.equal(await evaluate("new URLSearchParams(location.search).get('view')"), 'single');
     await pause(150);
     assert.ok(Math.abs(await sourcePoint() - beforeStrip) < 3);
@@ -203,16 +215,16 @@ export async function run(browser, fixtures) {
     assert.ok(await evaluate("document.activeElement.getClientRects().length > 0"));
 
     // A temporary Overview visit retains only the current image's reading point.
-    await browser.start(viewerUrl(first, ImageSize.FIT_WIDTH));
+    await browser.start(viewerUrl(first, '1.5'));
     await readyImage(first);
-    await key('w');
+    await setZoom(150);
     await waitFor("import('/gallery.js').then(({app}) => app.viewer.viewport.box.height === app.viewer.canvas.clientHeight && !app.viewer.filmstrip.container.hidden)");
     await evaluate("document.getElementById('viewer-canvas').scrollTop = 700");
     const readingPoint = await sourcePoint();
     const readingUrl = await evaluate('location.href');
     await click('overview-folder');
     await waitFor("!document.getElementById('overview').hidden && document.querySelector('#overview .picture')");
-    await click('read-folder');
+    await click('read-strip');
     await readyImage(first);
     await pause(100);
     assert.ok(Math.abs(await sourcePoint() - readingPoint) < 3, 'View resumes the same passage after Overview');
@@ -229,7 +241,7 @@ export async function run(browser, fixtures) {
     await waitFor("!document.getElementById('overview').hidden");
     await call('Page.reload');
     await waitFor("!document.getElementById('overview').hidden && document.querySelector('#overview .picture')");
-    await click('read-folder');
+    await click('read-strip');
     await readyImage(first);
     await pause(100);
     assert.ok((await position()).top < 100, 'Reload clears the temporary reading point');
@@ -247,7 +259,7 @@ export async function run(browser, fixtures) {
     await waitFor("!document.getElementById('overview').hidden");
     await click('browse-folder');
     await waitFor("document.getElementById('viewer').hidden");
-    await click('read-folder');
+    await click('read-strip');
     await readyImage(second);
     await pause(100);
     assert.ok((await position()).top < 100, 'Entering Browse discards the temporary reading point');
@@ -263,7 +275,7 @@ export async function run(browser, fixtures) {
     await evaluate("document.querySelector('.tree-row[data-path=\"Album/Chapter 2\"] a').click()");
     await waitFor(`document.querySelector('#overview [data-path="${last}"] .picture')`);
     assert.ok(await evaluate("!document.getElementById('overview').hidden"), 'Tree folder selection keeps Overview');
-    await click('read-folder');
+    await click('read-strip');
     await readyImage(last);
     await pause(100);
     assert.equal(await evaluate("new URLSearchParams(location.search).get('folder')"), 'Album/Chapter 2', 'View stays in the folder chosen through the tree');

@@ -1,6 +1,6 @@
 import {getFolder, onFolderListing} from './api.js';
-import {byId, element, plainClick, setButtonLabel} from './dom.js';
-import {icon} from './icons.js';
+import {byId, element, plainClick} from './dom.js';
+import {setIconButton} from './icons.js';
 import {currentFolder, joinPath, parentPath, ScreenMode} from './state.js';
 
 const OVERSCAN = 3;
@@ -47,8 +47,7 @@ export class FolderTree {
             if (event.key === 'Escape' && !document.fullscreenElement && !this.pane.hidden
                 && (this.narrow.matches || this.pane.contains(event.target))) {
                 event.preventDefault(); event.stopImmediatePropagation();
-                if (!byId('size-menu').hidden) this.closeTransient();
-                else this.setOpen(false);
+                this.setOpen(false);
             }
         }, true);
     }
@@ -249,8 +248,8 @@ export class FolderTree {
         const disclosure = element(expandable ? 'button' : 'span', 'tree-disclosure');
         if (expandable) {
             disclosure.tabIndex = -1;
-            setButtonLabel(disclosure, (this.expanded.has(row.path) ? 'Collapse ' : 'Expand ') + row.name);
-            disclosure.append(icon(this.expanded.has(row.path) ? 'down' : 'next'));
+            const expanded = this.expanded.has(row.path);
+            setIconButton(disclosure, expanded ? 'down' : 'next', (expanded ? 'Collapse ' : 'Expand ') + row.name);
         } else disclosure.setAttribute('aria-hidden', 'true');
         const link = element('a');
         link.href = this.destination(row.path);

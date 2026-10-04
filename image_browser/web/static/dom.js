@@ -3,6 +3,15 @@ export const byId = id => document.getElementById(id);
 export const plainClick = event => event.button === 0 && !event.ctrlKey && !event.metaKey
     && !event.shiftKey && !event.altKey && !event.defaultPrevented;
 
+/** Handle in-app link activation while leaving modified clicks to the browser. */
+export function bindNavigation(link, activate) {
+    link.addEventListener('click', event => {
+        if (!plainClick(event)) return;
+        event.preventDefault();
+        activate();
+    });
+}
+
 export function element(tag, className = '', text) {
     const node = document.createElement(tag);
     if (className) node.className = className;

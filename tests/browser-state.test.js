@@ -14,7 +14,7 @@ test('strip paths use the browsing folder, including an empty current-folder lab
 
 test('legacy image URLs retain their collection override', () => {
     const state = {
-        folder: 'Album & photos', layout: ReadingLayout.STRIP, compact: true, size: ImageSize.FIT_WIDTH, filter: 'chapter',
+        folder: 'Album & photos', layout: ReadingLayout.SCROLL, compact: true, size: ImageSize.DEFAULT, filter: 'chapter',
         mode: ScreenMode.VIEW, collection: 'Album & photos/Chapter 2',
         image: 'Album & photos/Chapter 2/page #1%.jpg',
     };
@@ -36,11 +36,11 @@ test('Browse URLs omit viewer state and retain their explicit folder settings', 
     assert.equal(restored.collection, 'parent');
 });
 
-test('invalid image sizes fall back to Fit page and valid sizes survive URLs', () => {
-    for (const size of ['0', '-1', 'NaN', 'Infinity', '10', '<script>']) {
-        assert.equal(readState(new URLSearchParams({size})).size, ImageSize.FIT_PAGE);
+test('invalid zoom falls back to the presentation default and numeric zoom survives URLs', () => {
+    for (const size of ['0', '-1', 'NaN', 'Infinity', '10', '<script>', '.001']) {
+        assert.equal(readState(new URLSearchParams({size})).size, ImageSize.DEFAULT);
     }
-    for (const size of [ImageSize.FIT_PAGE, ImageSize.FIT_WIDTH, '0.5', '1.25', '8']) {
+    for (const size of [ImageSize.DEFAULT, '0.01', '0.5', '1.25', '1.37', '8']) {
         const state = {...readState(''), mode: ScreenMode.VIEW, size};
         assert.equal(readState(new URL(stateUrl(state), 'http://localhost').search).size, size);
     }
@@ -72,11 +72,20 @@ test('view grid has a compact URL and browse never recurses', () => {
 });
 
 test('viewer layouts have stable, reloadable URLs', () => {
-    for (const layout of ['grid', ReadingLayout.STRIP, ReadingLayout.SINGLE]) {
+    for (const layout of ['grid', ...Object.values(ReadingLayout)]) {
         const state = {...readState('folder=Album&image=page.jpg'), layout: layout === 'grid' ? ReadingLayout.STRIP : layout, mode: layout === 'grid' ? ScreenMode.OVERVIEW : ScreenMode.VIEW};
         const url = stateUrl(state);
         assert.equal(readState(new URL(url, 'http://localhost').search).layout, state.layout);
         assert.equal(new URL(url, 'http://localhost').searchParams.get('view'), layout === ReadingLayout.STRIP ? null : layout);
     }
     assert.equal(stateUrl(readState('folder=Album&view=single')), '/?folder=Album&view=single');
+    assert.equal(stateUrl(readState('folder=Album&view=scroll')), '/?folder=Album&view=scroll');
+});
+
+test('old Width links select continuous reading; Page links select default zoom', () => {
+    const state = readState('folder=Album&image=page.jpg&size=width');
+    assert.equal(state.layout, ReadingLayout.SCROLL);
+    assert.equal(state.size, ImageSize.DEFAULT);
+    assert.equal(stateUrl(state), '/?folder=Album&view=scroll&image=page.jpg');
+    assert.equal(readState('folder=Album&image=page.jpg&size=page').size, ImageSize.DEFAULT);
 });

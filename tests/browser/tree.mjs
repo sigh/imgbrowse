@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict';
 import {mkdirSync} from 'node:fs';
 import {join} from 'node:path';
-import {ScreenMode, ImageSize} from '../../image_browser/web/static/state.js';
+import {ScreenMode} from '../../image_browser/web/static/state.js';
 
 export async function run(browser, {first, last, fixtureRoot}) {
-    const {evaluate, waitFor, click, nativeKey, readyImage, requests, open, call, newTab, screenshot} = browser;
+    const {evaluate, waitFor, click, nativeKey, readyImage, requests, open, call, newTab, screenshot, setZoom} = browser;
     const row = path => '.tree-row[data-path=' + JSON.stringify(path) + ']';
     const activate = (path, selector = 'a') => evaluate(`document.querySelector(${JSON.stringify(row(path) + ' ' + selector)}).click()`);
     const pointerClick = async (path, clickCount = 1) => {
@@ -22,13 +22,13 @@ export async function run(browser, {first, last, fixtureRoot}) {
     await waitFor("document.querySelector('#grid .card') && document.getElementById('grid-viewport').getAttribute('aria-busy') === 'false'");
     await attach();
     assert.ok(await evaluate("document.getElementById('folder-tree').hidden"));
-    await evaluate("window.sharedHeader=document.querySelector('.app-header'); window.sharedPane=document.getElementById('folder-tree'); window.sharedCopy=document.querySelector('.copy-path'); window.sharedInfo=document.querySelector('.item-info'); window.sharedModes=[...document.querySelectorAll('[data-mode]')]");
+    await evaluate("window.sharedHeader=document.querySelector('.app-header'); window.sharedPane=document.getElementById('folder-tree'); window.sharedInfo=document.querySelector('.item-info'); window.sharedModes=[...document.querySelectorAll('[data-mode]')]");
     const header = await browser.headerPositions();
     const beforeOpen = folderRequests().length;
     await click('folders-toggle');
     await waitFor("document.querySelectorAll('.tree-row').length > 5 && document.activeElement.getAttribute('role') === 'treeitem'");
     assert.equal(folderRequests().length, beforeOpen, 'Opening reuses the listing already loaded by Browse');
-    assert.ok(await evaluate("document.querySelectorAll('.mode-navigation').length === 1 && document.querySelectorAll('.copy-path').length === 1 && document.querySelectorAll('#folder-tree').length === 1"));
+    assert.ok(await evaluate("document.querySelectorAll('.mode-navigation').length === 1 && document.querySelectorAll('.app-header > .item-location .copy-path').length === 0 && document.querySelectorAll('#folder-tree').length === 1"));
     assert.ok(await evaluate("document.querySelectorAll('.tree-row > .icon').length === 0 && document.querySelectorAll('.tree-guide').length > 0"));
     assert.equal(await evaluate("getComputedStyle(document.getElementById('folders-toggle')).borderColor"), await evaluate("getComputedStyle(document.getElementById('layout-previews')).borderColor"), 'The open toggle uses the shared selection style');
     assert.ok(await evaluate(`Boolean(document.querySelector(${JSON.stringify(row('Empty') + ' button')}))`), 'Unknown folders start with arrows');
@@ -82,24 +82,20 @@ export async function run(browser, {first, last, fixtureRoot}) {
     await waitFor("treeApp.state.folder === 'Album/Chapter 1' && !treeApp.grid.loadingFolder");
     await screenshot('tree-browse');
 
-    await click('read-folder');
+    await click('read-strip');
     await readyImage(first);
     assert.equal(await evaluate('treeApp.state.mode'), ScreenMode.VIEW);
-    assert.ok(await evaluate("!sharedPane.hidden && sharedPane === document.getElementById('folder-tree') && sharedHeader === document.querySelector('.app-header') && sharedCopy === document.querySelector('.copy-path') && sharedInfo === document.querySelector('.item-info') && sharedModes.every(node=>node.isConnected)"));
+    assert.ok(await evaluate("!sharedPane.hidden && sharedPane === document.getElementById('folder-tree') && sharedHeader === document.querySelector('.app-header') && sharedInfo === document.querySelector('.item-info') && sharedModes.every(node=>node.isConnected)"));
     assert.deepEqual(await browser.headerPositions(), header, 'The shared header keeps its geometry in View');
-    await click('viewer-zoom');
-    await evaluate("treeApp.tree.focusRow('Album/Chapter 1')");
-    await nativeKey('Escape', 27);
-    assert.ok(await evaluate("document.getElementById('size-menu').hidden && !treeApp.tree.pane.hidden && treeApp.state.mode === 'view'"), 'Escape dismisses sizing before the docked tree');
     const modified = await newTab(row('Album/Chapter 2') + ' a');
     assert.equal(modified.get('folder'), 'Album/Chapter 2');
     assert.equal(modified.get('viewer'), '1');
     assert.equal((await newTab(row('Album/Chapter 2') + ' a', 'left', 4)).get('folder'), 'Album/Chapter 2');
     await evaluate("document.getElementById('viewer-canvas').focus()");
-    await nativeKey('w', 87);
+    await setZoom(150);
     await activate('Album/Chapter 2');
     await readyImage(last);
-    assert.equal(await evaluate('treeApp.state.size'), ImageSize.FIT_WIDTH);
+    assert.equal(await evaluate('treeApp.state.size'), '1.5');
     assert.equal(await evaluate("document.querySelector('#folder-tree [aria-current=page]').closest('.tree-row').dataset.path"), 'Album/Chapter 2', 'The tree marks the collection, not the image-containing folder');
     assert.deepEqual(await expanded(), branches);
     await screenshot('tree-view');
@@ -119,7 +115,7 @@ export async function run(browser, {first, last, fixtureRoot}) {
     await waitFor("treeApp.state.mode === 'browse' && !treeApp.grid.loadingFolder");
     assert.equal(await evaluate('treeApp.state.folder'), 'Album/Chapter 2', 'Forward restores the corresponding location and mode');
     assert.deepEqual(await expanded(), branches, 'History navigation preserves deliberate tree expansion');
-    await click('read-folder');
+    await click('read-strip');
     await readyImage(last);
     assert.equal(await evaluate('treeApp.state.collection'), 'Album/Chapter 2', 'View stays in the same folder');
     await click('overview-folder');
@@ -127,7 +123,7 @@ export async function run(browser, {first, last, fixtureRoot}) {
     await activate('Album/Chapter 1');
     await waitFor("treeApp.state.collection === 'Album/Chapter 1' && !treeApp.grid.loadingFolder");
     assert.equal(await evaluate('treeApp.state.mode'), ScreenMode.OVERVIEW);
-    await click('read-folder');
+    await click('read-strip');
     await readyImage(first);
     await evaluate("document.getElementById('viewer-canvas').scrollTop=(document.getElementById('viewer-canvas').scrollHeight-document.getElementById('viewer-canvas').clientHeight)/2; window.inspectedPoint=treeApp.viewer.viewport.point(); treeApp.tree.focusRow('Album/Chapter 1')");
     await nativeKey('Escape', 27);
@@ -244,11 +240,6 @@ export async function run(browser, {first, last, fixtureRoot}) {
     assert.ok(await evaluate("!treeApp.tree.pane.hidden && !document.getElementById('metadata-popover').matches(':popover-open')"));
     await evaluate("document.querySelector('.item-info').click()");
     assert.ok(await evaluate("treeApp.tree.pane.hidden && document.getElementById('metadata-popover').matches(':popover-open')"), 'Transient panels replace each other in either direction');
-    await nativeKey('Escape', 27);
-    await click('viewer-zoom'); await click('folders-toggle');
-    assert.ok(await evaluate("document.getElementById('size-menu').hidden && !treeApp.tree.pane.hidden"));
-    await click('viewer-zoom');
-    assert.ok(await evaluate("!document.getElementById('size-menu').hidden && treeApp.tree.pane.hidden"));
     await nativeKey('Escape', 27);
     await click('folders-toggle');
     await activate('Album');

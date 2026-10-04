@@ -2,20 +2,15 @@ import {renderItemHeader} from './static/folder-path.js';
 import {getInfo, refreshScope} from './static/api.js';
 import {icon} from './static/icons.js';
 import {clearOriginals} from './static/media-cache.js';
-import {byId, element, plainClick, setButtonLabel} from './static/dom.js';
+import {byId, element, bindNavigation} from './static/dom.js';
 import {FolderGrid} from './static/folder-grid.js';
 import {FolderTree} from './static/folder-tree.js';
 import {ImageViewer} from './static/image-viewer.js';
 import {closeMetadata} from './static/metadata.js';
 import {PreviewLoader} from './static/preview-loader.js';
-import {currentFolder, filename, imageSize, readState, stateUrl, ScreenMode, ReadingLayout, FolderLayout} from './static/state.js';
+import {currentFolder, filename, imageSize, readingLayout, readState, stateUrl, ScreenMode, ReadingLayout, FolderLayout} from './static/state.js';
 
 const FILTER_DELAY = 150;
-const MODES = [
-    {mode: ScreenMode.BROWSE, icon: 'folder', label: 'Browse', id: 'browse-folder'},
-    {mode: ScreenMode.OVERVIEW, icon: 'grid', label: 'Collection overview', id: 'overview-folder'},
-    {mode: ScreenMode.VIEW, icon: 'play', label: 'View', id: 'read-folder'},
-];
 
 function focusTarget(node) {
     if (node?.id) return {id: node.id};
@@ -30,10 +25,9 @@ class GalleryApp {
     constructor() {
         this.rootName = 'Collection';
         this.preferences = {
-            layout: sessionStorage.getItem('readingLayout') === ReadingLayout.SINGLE ? ReadingLayout.SINGLE : ReadingLayout.STRIP,
+            layout: readingLayout(sessionStorage.getItem('readingLayout')),
             size: imageSize(sessionStorage.getItem('readingSize')),
         };
-        this.buildNavigation();
         this.previews = new PreviewLoader(byId('grid-viewport'), byId('viewer'));
         this.grid = new FolderGrid(this.previews, {
             folderLink: (path, label) => this.folderLink(path, label),
@@ -52,26 +46,13 @@ class GalleryApp {
         this.tree = new FolderTree({
             destination: path => stateUrl(this.treeDestination(path)),
             select: (path, opener) => this.navigate(this.treeDestination(path), false, 'top', opener),
-            closeTransient: () => { closeMetadata(); this.viewer.setSizeMenu(false, false); },
+            closeTransient: closeMetadata,
         });
         history.scrollRestoration = 'manual';
         this.bindControls();
         this.render(false, true);
         this.tree.setOpen(!this.tree.narrow.matches && sessionStorage.getItem('foldersOpen') === '1', false);
         getInfo().then(info => this.folderLoaded(info.root_name)).catch(() => {});
-    }
-
-    buildNavigation() {
-        const group = document.querySelector('.mode-navigation');
-        for (const {mode, icon: name, label, id} of MODES) {
-            const button = element('a', 'control-link');
-            button.id = id;
-            button.dataset.mode = mode;
-            button.dataset.icon = name;
-            setButtonLabel(button, label);
-            if (mode === ScreenMode.BROWSE) button.title = 'Browse (Escape)';
-            group.append(button);
-        }
     }
 
     bindControls() {
@@ -82,13 +63,11 @@ class GalleryApp {
             button.addEventListener('click', () => this.navigate({compact: button.dataset.layout === FolderLayout.LIST}, true));
         }
         for (const button of document.querySelectorAll('[data-mode]')) {
-            button.addEventListener('click', event => {
-                if (!plainClick(event)) return;
-                event.preventDefault();
-                this.setMode(button.dataset.mode, button);
-            });
+            bindNavigation(button, () => this.setMode(button.dataset.mode, button));
         }
-        byId('view-strip').addEventListener('click', () => this.changeLayout(this.state.layout === ReadingLayout.STRIP ? ReadingLayout.SINGLE : ReadingLayout.STRIP));
+        for (const link of document.querySelectorAll('[data-reading-layout]')) {
+            bindNavigation(link, () => this.changeLayout(link.dataset.readingLayout, link));
+        }
         this.grid.viewport.addEventListener('scroll', () => {
             clearTimeout(this.positionTimer);
             this.positionTimer = setTimeout(() => this.savePosition(), 120);
@@ -135,11 +114,10 @@ class GalleryApp {
         };
     }
 
-    changeLayout(layout) {
-        if (this.state.mode !== ScreenMode.VIEW) return;
+    changeLayout(layout, opener = document.activeElement) {
         this.preferences.layout = layout;
         sessionStorage.setItem('readingLayout', layout);
-        this.navigate({layout}, true);
+        this.navigate({...this.modeDestination(ScreenMode.VIEW), layout}, this.state.mode === ScreenMode.VIEW, 'top', opener);
     }
 
     changeSize(size) {
@@ -179,11 +157,7 @@ class GalleryApp {
     navigationLink(destination, label, className = '') {
         const link = element('a', className, label);
         link.href = stateUrl({...this.state, ...destination()});
-        link.addEventListener('click', event => {
-            if (!plainClick(event)) return;
-            event.preventDefault();
-            this.navigate(destination(), false, 'top', link);
-        });
+        bindNavigation(link, () => this.navigate(destination(), false, 'top', link));
         return link;
     }
 
@@ -192,8 +166,10 @@ class GalleryApp {
             button.setAttribute('aria-current', button.dataset.mode === this.state.mode ? 'page' : 'false');
             button.href = stateUrl(this.modeDestination(button.dataset.mode));
         }
-        document.querySelector('.viewer-tools').hidden = this.state.mode !== ScreenMode.VIEW;
-        byId('view-strip').setAttribute('aria-pressed', String(this.state.layout === ReadingLayout.STRIP));
+        for (const link of document.querySelectorAll('[data-reading-layout]')) {
+            link.setAttribute('aria-current', this.state.mode === ScreenMode.VIEW && link.dataset.readingLayout === this.state.layout ? 'page' : 'false');
+            link.href = stateUrl({...this.modeDestination(ScreenMode.VIEW), layout: link.dataset.readingLayout});
+        }
         this.tree.update(this.state, this.rootName);
     }
 

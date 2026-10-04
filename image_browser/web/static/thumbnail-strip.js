@@ -1,5 +1,6 @@
 import {isVideo} from './media-kind.js';
 import {walkImages} from './api.js';
+import {CollectionWindow} from './collection-window.js';
 import {element, TaskScope} from './dom.js';
 import {icon} from './icons.js';
 import {filename, parentPath, relativePath} from './state.js';
@@ -13,6 +14,7 @@ const DEFAULT_SIZE = 64;
 export class ThumbnailStrip {
     constructor(container, previews, selectImage) {
         Object.assign(this, {container, previews, selectImage});
+        this.window = new CollectionWindow(walkImages, {pageSize:PAGE_SIZE, maxPaths:MAX_PATHS});
         this.frame = element('div', 'strip-frame');
         container.before(this.frame); this.frame.append(container);
         this.createResizer();
@@ -45,7 +47,6 @@ export class ThumbnailStrip {
                 if (bounds.left < viewport.left || bounds.right > viewport.right) this.centerImage();
             }
         });
-        this.paths = [];
         this.nodes = new Map();
         container.addEventListener('scroll', () => {
             if (Math.abs(container.scrollLeft - (this.followScroll || 0)) > 1) this.followImage = false;
@@ -64,6 +65,9 @@ export class ThumbnailStrip {
         });
         this.resizeObserver.observe(container);
     }
+
+    get paths() { return this.window.paths; }
+    get edges() { return this.window.edges; }
 
     createResizer() {
         this.size = DEFAULT_SIZE;
@@ -144,8 +148,7 @@ export class ThumbnailStrip {
 
     reset(collection, image) {
         this.stop(); this.collection = collection;
-        this.paths = image ? [image] : [];
-        this.edges = [true, false].map(reverse => ({reverse, cursor: null, done: false, loading: false}));
+        this.window = new CollectionWindow(walkImages, {root:collection, image, pageSize:PAGE_SIZE, maxPaths:MAX_PATHS});
         this.scrollTo(0);
     }
 
@@ -286,39 +289,21 @@ export class ThumbnailStrip {
     }
 
     async discover(edge) {
-        if (edge.done || edge.loading || edge.failed) return;
-        edge.loading = true;
+        if (!this.window.canLoad(edge)) return;
         const scope = this.scope;
         this.container.setAttribute('aria-busy', 'true');
         try {
-            const result = await walkImages({root: this.collection,
-                anchor: edge.reverse ? this.paths[0] : this.paths.at(-1),
-                reverse: edge.reverse, cursor: edge.cursor, limit: PAGE_SIZE}, scope.signal);
-            scope.signal.throwIfAborted();
-            const known = new Set(this.paths);
-            const added = result.images.filter(path => !known.has(path));
+            const change = await this.window.load(edge, scope.signal);
+            if (!change) return;
             const left = this.container.scrollLeft;
-            const oldFirst = this.paths[0];
-            let removedWidth = 0;
-            if (edge.reverse) this.paths.unshift(...added.reverse());
-            else this.paths.push(...added);
-            const excess = Math.max(0, this.paths.length - MAX_PATHS);
-            if (excess) {
-                if (edge.reverse) this.paths.splice(MAX_PATHS);
-                else { removedWidth = this.offsets()[excess]; this.paths.splice(0, excess); }
-                const other = this.edges[edge.reverse ? 1 : 0];
-                other.done = false; other.cursor = null;
-            }
-            edge.cursor = result.cursor; edge.done = result.cursor === null;
+            const shifted = edge.reverse ? change.added : change.removed;
+            const width = shifted.reduce((sum, path) => sum + this.tileWidth(path) + GAP, 0);
             this.render();
-            this.scrollTo(Math.max(0, left + (edge.reverse ? this.offsets()[Math.max(0, this.paths.indexOf(oldFirst))] : -removedWidth)));
+            this.scrollTo(Math.max(0, left + (edge.reverse ? width : -width)));
             if (this.followImage) this.centerImage();
             else this.render();
-        } catch (error) {
-            if (error.name !== 'AbortError' && scope === this.scope) edge.failed = true;
         } finally {
             if (scope === this.scope) {
-                edge.loading = false;
                 this.container.setAttribute('aria-busy', String(this.edges.some(item => item.loading)));
                 this.updateEdges();
                 if (!edge.done && !edge.failed) requestAnimationFrame(() => this.discoverEdges());

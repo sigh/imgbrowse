@@ -2,9 +2,9 @@ import assert from 'node:assert/strict';
 import {ImageSize} from '../../image_browser/web/static/state.js';
 
 export async function run(browser, fixtures) {
-    const {call, evaluate, waitFor, open, click, waitImage, key, wheel, screenshot, readyImage, pause, viewerUrl, headerPositions} = browser;
+    const {call, evaluate, waitFor, open, click, waitImage, key, wheel, screenshot, readyImage, pause, viewerUrl, presentation, headerPositions} = browser;
     await browser.start();
-    await open(viewerUrl('Mixed/1.jpg', ImageSize.FIT_PAGE, 'Mixed'));
+    await open(viewerUrl('Mixed/1.jpg', ImageSize.DEFAULT, 'Mixed'));
     await readyImage('Mixed/1.jpg');
     const initialPositions = await headerPositions();
     // Mixed media: placeholder previews, streaming, native controls, seeking, and cleanup.
@@ -21,7 +21,7 @@ export async function run(browser, fixtures) {
     await waitFor("document.getElementById('viewer-video')?.readyState >= 2");
     assert.ok(await evaluate("document.activeElement === document.getElementById('viewer-video')"));
     if (videoPreviewAvailable) assert.ok(await evaluate("document.getElementById('viewer-video').poster.startsWith('blob:')"));
-    if (await evaluate("document.getElementById('view-strip').getAttribute('aria-pressed') === 'false'")) await click('view-strip');
+    if (await evaluate("document.querySelector('[data-reading-layout=strip]').getAttribute('aria-current') !== 'page'")) await presentation('strip');
     await waitFor(`document.querySelector('#viewer-strip button[data-path="Mixed/1.jpg"]')`);
     assert.ok(await evaluate(`document.querySelector('#viewer-strip button[data-path="Mixed/2.webm"]').offsetWidth > document.querySelector('#viewer-strip button[data-path="Mixed/1.jpg"]').offsetWidth`));
     await call('Emulation.setDeviceMetricsOverride', {width:390,height:844,deviceScaleFactor:1,mobile:true});
@@ -29,11 +29,11 @@ export async function run(browser, fixtures) {
     assert.ok(await evaluate("(()=>{const v=document.getElementById('viewer-video'), r=v.getBoundingClientRect(); return Math.abs(r.width/r.height-v.videoWidth/v.videoHeight)<.02 && r.right<=innerWidth})()"));
     await screenshot('video-mobile');
     await call('Emulation.setDeviceMetricsOverride', {width:1440,height:900,deviceScaleFactor:1,mobile:false});
-    await open(viewerUrl('Mixed/1.jpg', ImageSize.FIT_PAGE, 'Mixed'));
+    await open(viewerUrl('Mixed/1.jpg', ImageSize.DEFAULT, 'Mixed'));
     await readyImage('Mixed/1.jpg');
     await click('viewer-next');
     await waitFor("document.getElementById('viewer-video')?.readyState >= 2");
-    assert.ok(await evaluate("document.getElementById('viewer-video').paused && document.querySelector('.size-control').classList.contains('unavailable')"));
+    assert.ok(await evaluate("document.getElementById('viewer-video').paused && document.querySelector('.viewer-tools').classList.contains('unavailable')"));
     assert.deepEqual(await headerPositions(), initialPositions);
     await evaluate("window.testVideo=document.getElementById('viewer-video'); testVideo.focus(); testVideo.dispatchEvent(new KeyboardEvent('keydown', {key:'ArrowRight',bubbles:true})); testVideo.dispatchEvent(new WheelEvent('wheel', {deltaY:100,bubbles:true}));");
     await waitImage('Mixed/2.webm');
@@ -52,13 +52,13 @@ export async function run(browser, fixtures) {
     await screenshot('video');
     await click('viewer-next');
     await readyImage('Mixed/3.jpg');
-    assert.ok(await evaluate("testVideo.paused && !testVideo.hasAttribute('src') && !testVideo.isConnected && !document.querySelector('.size-control').classList.contains('unavailable')"));
+    assert.ok(await evaluate("testVideo.paused && !testVideo.hasAttribute('src') && !testVideo.isConnected && !document.querySelector('.viewer-tools').classList.contains('unavailable')"));
     await click('viewer-prev');
     await waitFor("document.getElementById('viewer-video')?.readyState >= 2");
     await evaluate("window.testVideo=document.getElementById('viewer-video')");
     await click('browse-folder');
     assert.ok(await evaluate("testVideo.paused && !testVideo.hasAttribute('src') && !testVideo.isConnected"));
-    await open(viewerUrl('Mixed/4.mp4', ImageSize.FIT_PAGE, 'Mixed'));
+    await open(viewerUrl('Mixed/4.mp4', ImageSize.DEFAULT, 'Mixed'));
     await waitFor("document.getElementById('viewer-status').textContent.includes('Unable to play')");
     await click('viewer-prev');
     await readyImage('Mixed/3.jpg');

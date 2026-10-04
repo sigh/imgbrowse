@@ -2,20 +2,20 @@ import assert from 'node:assert/strict';
 import {ImageSize} from '../../image_browser/web/static/state.js';
 
 export async function run(browser, fixtures) {
-    const {call, evaluate, waitFor, open, click, key, nativeKey, wheel, screenshot, readyImage, pause, viewerUrl} = browser;
+    const {call, evaluate, waitFor, open, click, key, nativeKey, wheel, screenshot, readyImage, pause, viewerUrl, presentation} = browser;
     const {absoluteRoot, first} = fixtures;
     await browser.start();
     // Continued wheel input advances fitted pages without requiring a pause after every image.
-    await open(viewerUrl('root2.jpg', ImageSize.FIT_PAGE, '') + '&view=single');
+    await open(viewerUrl('root2.jpg', ImageSize.DEFAULT, '') + '&view=single');
     await readyImage('root2.jpg');
     // Touchpads emit small, frequent deltas; movement, rather than a cooldown, drives turns.
     await wheel(1, 10);
     await readyImage('root3.jpg');
-    await open(viewerUrl('root2.jpg', ImageSize.FIT_PAGE, '') + '&view=single');
+    await open(viewerUrl('root2.jpg', ImageSize.DEFAULT, '') + '&view=single');
     await readyImage('root2.jpg');
     for (let i=0; i<20; i++) await wheel(20, 10);
     await waitFor("parseInt(new URLSearchParams(location.search).get('image').slice(4)) >= 4");
-    await open(viewerUrl('root2.jpg', ImageSize.FIT_PAGE, '') + '&view=single');
+    await open(viewerUrl('root2.jpg', ImageSize.DEFAULT, '') + '&view=single');
     await readyImage('root2.jpg');
     for (let i=0; i<24; i++) await wheel(60);
     await pause(100);
@@ -32,9 +32,9 @@ export async function run(browser, fixtures) {
     await evaluate("document.querySelector('.image-surface').style.minWidth=''");
 
     // A visible strip retains buttons and their order as pages turn; discovery is demand driven.
-    await open(viewerUrl('root2.jpg', ImageSize.FIT_PAGE, '') + '&view=single');
+    await open(viewerUrl('root2.jpg', ImageSize.DEFAULT, '') + '&view=single');
     await readyImage('root2.jpg');
-    if (await evaluate("document.getElementById('view-strip').getAttribute('aria-pressed') === 'false'")) await click('view-strip');
+    await presentation('strip');
     await waitFor("document.querySelectorAll('#viewer-strip button').length >= 16");
     await evaluate("window.retainedThumbnail=document.querySelector('#viewer-strip button')");
     const stripPaths = await evaluate("Array.from(document.querySelectorAll('#viewer-strip button'),button=>button.dataset.path)");
@@ -52,7 +52,7 @@ export async function run(browser, fixtures) {
     await evaluate('pageTurnObserver.disconnect()');
     assert.deepEqual((await evaluate("Array.from(document.querySelectorAll('#viewer-strip button'),button=>button.dataset.path)")).slice(0,stripPaths.length),stripPaths);
     // A middle image stays centered as adjacent batches arrive; real ends have no fade.
-    await open(viewerUrl('root40.jpg', ImageSize.FIT_PAGE, ''));
+    await open(viewerUrl('root40.jpg', ImageSize.DEFAULT, ''));
     await readyImage('root40.jpg');
     await waitFor(`(() => {
         const strip = document.getElementById('viewer-strip');
@@ -80,12 +80,9 @@ export async function run(browser, fixtures) {
     await waitFor("document.querySelector('#viewer-strip button').dataset.path !== window.retainedThumbnail.dataset.path");
     assert.ok(await evaluate("document.querySelectorAll('#viewer-strip button').length < 40"));
     await screenshot('thumbnails');
-    await click('viewer-zoom');
-    assert.equal(await evaluate("document.querySelectorAll('#size-menu > button').length"),3);
-    await screenshot('sizing');
-    await key('Escape');
-    assert.ok(await evaluate("document.getElementById('size-menu').hidden && !document.getElementById('viewer').hidden"));
-    await click('view-strip');
+    assert.ok(await evaluate("document.querySelectorAll('.viewer-tools button').length === 2 && !document.querySelector('#size-menu, #layout-menu')"));
+    await screenshot('reading-controls');
+    await presentation('single');
 
     // Breadcrumbs leave the reader for the image's actual folder, preserving the grid layout.
     await open(viewerUrl(first));
@@ -99,18 +96,19 @@ export async function run(browser, fixtures) {
     await open('/?folder=Packed.cbz');
     await waitFor("document.querySelectorAll('.card').length === 3");
     assert.equal(await evaluate("document.querySelector('#item-path [aria-current]').textContent"),'Packed.cbz');
-    await click('read-folder');
+    await click('read-strip');
     await readyImage('Packed.cbz/page2.jpg');
     await click('viewer-next');
     await readyImage('Packed.cbz/page10.jpg');
     await click('viewer-next');
     await readyImage('Packed.cbz/Chapter 3/page1.jpg');
-    await open(viewerUrl('Packed.cbz/Chapter 3/page1.jpg', ImageSize.FIT_PAGE, 'Packed.cbz'));
+    await open(viewerUrl('Packed.cbz/Chapter 3/page1.jpg', ImageSize.DEFAULT, 'Packed.cbz'));
     await readyImage('Packed.cbz/Chapter 3/page1.jpg');
-    await evaluate("Object.defineProperty(navigator, 'clipboard', {configurable:true, value:{writeText:async text => { window.copiedPath=text; }}}); document.querySelector('#item-location .copy-path').click()");
+    await browser.openInfo();
+    await evaluate("Object.defineProperty(navigator, 'clipboard', {configurable:true, value:{writeText:async text => { window.copiedPath=text; }}}); document.querySelector('#metadata-details .copy-path').click()");
     await waitFor('window.copiedPath');
     assert.equal(await evaluate('window.copiedPath'), absoluteRoot + '/Packed.cbz/Chapter 3/page1.jpg');
-    await evaluate("document.querySelector('#item-actions .item-info').click()");
+    await browser.openInfo();
     await waitFor("document.getElementById('metadata-details').textContent.includes('Packed.cbz/Chapter 3/page1.jpg')");
     await nativeKey('Escape', 27);
     await waitFor("!document.getElementById('metadata-popover').matches(':popover-open')");

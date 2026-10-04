@@ -1,8 +1,9 @@
 /** URL state is the source of truth for folder and viewer navigation. */
 export const ScreenMode = Object.freeze({BROWSE: 'browse', OVERVIEW: 'overview', VIEW: 'view'});
-export const ReadingLayout = Object.freeze({STRIP: 'strip', SINGLE: 'single'});
+export const ReadingLayout = Object.freeze({STRIP: 'strip', SINGLE: 'single', SCROLL: 'scroll'});
 export const FolderLayout = Object.freeze({PREVIEWS: 'previews', LIST: 'list'});
-export const ImageSize = Object.freeze({FIT_PAGE: 'page', FIT_WIDTH: 'width'});
+export const ImageSize = Object.freeze({DEFAULT: 'auto', ORIGINAL: '1'});
+export const ViewerEntry = Object.freeze({TOP: 'top', BOTTOM: 'bottom', KEEP: 'keep'});
 export const ItemType = Object.freeze({FOLDER: 'folder', MEDIA: 'image'});
 
 export const joinPath = (parent, name) => parent ? parent + '/' + name : name;
@@ -19,8 +20,10 @@ export function relativePath(base, path) {
     return [...from.slice(shared).map(() => '..'), ...to.slice(shared)].join('/');
 }
 
-export const IMAGE_SIZES = [ImageSize.FIT_PAGE, ImageSize.FIT_WIDTH, '0.1', '0.25', '0.5', '0.75', '1', '1.25', '1.5', '2', '3', '4', '6', '8'];
-export const imageSize = value => IMAGE_SIZES.includes(String(value)) ? String(value) : ImageSize.FIT_PAGE;
+export const ZOOM = Object.freeze({MIN: .01, MAX: 8, STEP: 1.25});
+export const imageSize = value => Number.isFinite(Number(value)) && Number(value) >= ZOOM.MIN && Number(value) <= ZOOM.MAX
+    ? String(Number(value)) : ImageSize.DEFAULT;
+export const readingLayout = value => Object.values(ReadingLayout).includes(value) ? value : ReadingLayout.STRIP;
 
 const OVERVIEW_QUERY_VALUE = 'grid';
 
@@ -42,8 +45,8 @@ export function readState(search = location.search) {
         folder,
         size: imageSize(query.get('size')),
         mode: view === OVERVIEW_QUERY_VALUE ? ScreenMode.OVERVIEW
-            : image !== null || query.get('viewer') === '1' || view === ReadingLayout.SINGLE ? ScreenMode.VIEW : ScreenMode.BROWSE,
-        layout: view === ReadingLayout.SINGLE ? ReadingLayout.SINGLE : ReadingLayout.STRIP,
+            : image !== null || query.get('viewer') === '1' || [ReadingLayout.SINGLE, ReadingLayout.SCROLL].includes(view) ? ScreenMode.VIEW : ScreenMode.BROWSE,
+        layout: view === ReadingLayout.SCROLL || query.get('size') === 'width' ? ReadingLayout.SCROLL : readingLayout(view),
         compact: query.get('compact') === '1',
         filter: query.get('filter') || '',
         image: image === null ? null : resolveImage(folder, image),
@@ -58,8 +61,8 @@ export function stateUrl(next) {
     if (next.filter) query.set('filter', next.filter);
     if (next.mode !== ScreenMode.BROWSE) {
         if (next.mode === ScreenMode.OVERVIEW) query.set('view', OVERVIEW_QUERY_VALUE);
-        else if (next.layout === ReadingLayout.SINGLE) query.set('view', ReadingLayout.SINGLE);
-        if (imageSize(next.size) !== ImageSize.FIT_PAGE) query.set('size', imageSize(next.size));
+        else if (next.layout !== ReadingLayout.STRIP) query.set('view', next.layout);
+        if (imageSize(next.size) !== ImageSize.DEFAULT) query.set('size', imageSize(next.size));
         if (next.collection !== next.folder) query.set('collection', next.collection);
         if (next.image != null) query.set('image', relativePath(next.folder, next.image));
         else if (next.mode === ScreenMode.VIEW && next.layout === ReadingLayout.STRIP) query.set('viewer', '1');

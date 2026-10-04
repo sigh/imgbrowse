@@ -4,15 +4,17 @@ import {mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync} from 'no
 import {join} from 'node:path';
 
 export async function run(browser, fixtures) {
-    const {call, evaluate, waitFor, open, click, newTab, key, nativeKey, screenshot, readyImage, pause, position, viewerUrl, requests, network, held} = browser;
+    const {call, evaluate, waitFor, open, click, newTab, key, nativeKey, screenshot, readyImage, pause, position, viewerUrl, presentation, setZoom, requests, network, held} = browser;
     const {fixtureRoot, first, second, last} = fixtures;
     await browser.start();
-    // Each navigation control has a fixed destination; presentation never navigates.
+    // Reading links enter their presentation in the current folder.
     await open('/?folder=Album');
     await waitFor("document.querySelectorAll('.card').length === 2");
     const browseOverviewAction = await evaluate("document.getElementById('overview-folder').getBoundingClientRect().toJSON()");
     assert.equal((await newTab('[data-path="Album/Chapter 1"] .picture')).get('folder'), 'Album/Chapter 1');
-    assert.equal((await newTab('#read-folder')).get('viewer'), '1');
+    assert.equal((await newTab('#read-strip')).get('viewer'), '1');
+    assert.equal((await newTab('#read-single')).get('view'), 'single');
+    assert.equal((await newTab('#read-scroll')).get('view'), 'scroll');
     assert.equal((await newTab('#overview-folder', 'left', 4)).get('view'), 'grid');
     const folderOverview = await newTab('[data-path="Album/Chapter 1"] .folder-overview');
     assert.equal(folderOverview.get('folder'), 'Album/Chapter 1');
@@ -33,7 +35,7 @@ export async function run(browser, fixtures) {
     assert.ok(await evaluate("document.getElementById('viewer-image').hidden && document.activeElement === document.getElementById('grid-viewport')"));
     assert.equal(requests.filter(url => new URL(url).pathname === '/image').length, originalsBeforeOverview, 'Direct overview entry loads previews without loading an original');
     assert.deepEqual(await evaluate("document.getElementById('overview-folder').getBoundingClientRect().toJSON()"), browseOverviewAction, 'Overview has the same position in Browse and the viewer');
-    assert.ok(await evaluate("document.getElementById('overview-folder').getAttribute('aria-current') === 'page' && document.querySelector('.viewer-tools').hidden"));
+    assert.ok(await evaluate("document.getElementById('overview-folder').getAttribute('aria-current') === 'page' && document.querySelector('.viewer-tools').classList.contains('unavailable')"));
     const overviewEntry = await evaluate('({url:location.href,length:history.length})');
     await click('overview-folder');
     await key('t');
@@ -46,49 +48,47 @@ export async function run(browser, fixtures) {
     assert.equal(await evaluate("document.getElementById('overview-folder').getAttribute('aria-current')"), 'false');
     assert.ok(await evaluate("document.activeElement === document.getElementById('viewer-canvas')"));
     const viewEntry = await evaluate('({url:location.href,length:history.length})');
-    await click('read-folder');
+    await click('read-strip');
     assert.deepEqual(await evaluate('({url:location.href,length:history.length})'), viewEntry, 'The selected View button does nothing');
-    await click('view-strip');
+    await presentation('single');
     assert.equal(await evaluate('history.length'), viewEntry.length, 'The thumbnail toggle changes presentation without a navigation entry');
-    assert.ok(await evaluate("document.getElementById('read-folder').getAttribute('aria-current') === 'page' && document.getElementById('overview').hidden"));
-    await click('viewer-zoom');
-    await evaluate("document.querySelector('[data-size=width]').click()");
+    assert.ok(await evaluate("document.getElementById('read-single').getAttribute('aria-current') === 'page' && document.getElementById('overview').hidden"));
+    await setZoom(150);
     assert.equal(await evaluate("sessionStorage.getItem('readingLayout')"), 'single');
-    assert.equal(await evaluate("sessionStorage.getItem('readingSize')"), 'width');
+    assert.equal(await evaluate("sessionStorage.getItem('readingSize')"), '1.5');
     await click('overview-folder');
     await waitFor("!document.getElementById('overview').hidden");
     await call('Page.reload');
     await waitFor("!document.getElementById('overview')?.hidden && document.querySelectorAll('#overview .card').length === 3");
-    await click('read-folder');
+    await click('read-single');
     await readyImage(first);
     assert.equal(await evaluate("new URLSearchParams(location.search).get('view')"), 'single', 'Reloading overview retains its underlying reading layout');
-    assert.equal(await evaluate("document.getElementById('viewer-zoom').dataset.size"), 'width');
+    assert.equal(await evaluate("(new URLSearchParams(location.search).get('size') || 'auto')"), '1.5');
     await click('browse-folder');
     await waitFor("document.getElementById('viewer').hidden");
     await call('Page.reload');
     await waitFor("document.querySelectorAll('.card').length === 2 && document.getElementById('viewer').hidden");
-    await click('read-folder');
+    await click('read-single');
     await readyImage(first);
     assert.equal(await evaluate("new URLSearchParams(location.search).get('view')"), 'single', 'Entering from Browse reuses the session reading layout');
-    assert.equal(await evaluate("document.getElementById('viewer-zoom').dataset.size"), 'width');
+    assert.equal(await evaluate("(new URLSearchParams(location.search).get('size') || 'auto')"), '1.5');
     await open(viewerUrl(second));
     await readyImage(second);
-    assert.ok(await evaluate("!document.getElementById('viewer-strip').hidden && document.getElementById('viewer-zoom').dataset.size === 'page'"), 'Viewer URLs override session defaults');
+    assert.ok(await evaluate("!document.getElementById('viewer-strip').hidden && (new URLSearchParams(location.search).get('size') || 'auto') === 'auto'"), 'Viewer URLs override session defaults');
     assert.equal(await evaluate("sessionStorage.getItem('readingLayout')"), 'single', 'Opening a viewer URL does not rewrite preferences');
     await click('overview-folder');
     await waitFor("!document.getElementById('overview').hidden");
-    await click('read-folder');
+    await click('read-strip');
     await readyImage(second);
     assert.ok(await evaluate("!document.getElementById('viewer-strip').hidden"), 'Overview returns to the actual bookmarked reading layout');
     await open('/?folder=Single');
     await waitFor("document.querySelector('[data-path=\"Single/only.jpg\"]')");
     await evaluate("document.querySelector('[data-path=\"Single/only.jpg\"] .picture').click()");
     await readyImage('Single/only.jpg');
-    assert.ok(await evaluate("document.getElementById('viewer-strip').hidden && document.getElementById('viewer-zoom').dataset.size === 'width'"), 'Opening another folder uses the remembered presentation');
+    assert.ok(await evaluate("!document.getElementById('viewer-strip').hidden && (new URLSearchParams(location.search).get('size') || 'auto') === '1.5'"), 'Opening another folder uses the latest chosen presentation');
     // Restore defaults through the real controls for the rest of the smoke scenarios.
-    await click('view-strip');
-    await click('viewer-zoom');
-    await evaluate("document.querySelector('[data-size=page]').click()");
+    await presentation('strip');
+    await key('f');
 
     // Media links retain input entered just before the filter debounce fires.
     await open('/?folder=Single');
@@ -120,7 +120,7 @@ export async function run(browser, fixtures) {
     await readyImage(browseContext.path);
     await click('overview-folder');
     await waitFor("!document.getElementById('overview').hidden");
-    await click('read-folder');
+    await click('read-strip');
     await readyImage(browseContext.path);
     await call('Page.reload');
     await readyImage(browseContext.path);
@@ -151,14 +151,14 @@ export async function run(browser, fixtures) {
     // Traversing beyond the opening filter must not widen Browse on return.
     await open('/?folder=Album&compact=1');
     await waitFor("document.querySelectorAll('.list-item').length === 2");
-    await evaluate("{const input=document.getElementById('filter'); input.value='Chapter 1'; input.dispatchEvent(new Event('input')); document.getElementById('read-folder').focus(); document.getElementById('read-folder').click();}");
+    await evaluate("{const input=document.getElementById('filter'); input.value='Chapter 1'; input.dispatchEvent(new Event('input')); document.getElementById('read-strip').focus(); document.getElementById('read-strip').click();}");
     await readyImage(first);
     await click('viewer-next');
     await readyImage(second);
     await click('viewer-next');
     await readyImage(last);
     await key('Escape');
-    await waitFor("document.getElementById('viewer').hidden && document.activeElement.id === 'read-folder'");
+    await waitFor("document.getElementById('viewer').hidden && document.activeElement.id === 'read-strip'");
     assert.equal(await evaluate('location.search'), '?folder=Album&compact=1&filter=Chapter+1', 'Opening before filter debounce retains the entered text');
     assert.equal(await evaluate("document.getElementById('filter').value"), 'Chapter 1');
     assert.equal(await evaluate("document.querySelectorAll('.list-item').length"), 1);
@@ -177,7 +177,7 @@ export async function run(browser, fixtures) {
     await open('/?folder=Album');
     await waitFor("document.querySelectorAll('.card').length === 2");
     const pathStyle = await evaluate("(() => {const style=getComputedStyle(document.getElementById('item-path')); return [style.fontSize, style.lineHeight, style.gap, style.color];})()");
-    await click('read-folder');
+    await click('read-strip');
     await readyImage(first);
     assert.deepEqual(await evaluate("(() => {const style=getComputedStyle(document.getElementById('item-path')); return [style.fontSize, style.lineHeight, style.gap, style.color];})()"), pathStyle, 'Path typography stays consistent between Browse and View');
     assert.ok(await evaluate("!document.getElementById('refresh') && !document.getElementById('viewer-refresh')"));
@@ -185,8 +185,8 @@ export async function run(browser, fixtures) {
     await readyImage(second);
     await click('browse-folder');
     await waitFor("document.getElementById('viewer').hidden");
-    await waitFor("document.activeElement.id === 'read-folder'");
-    await click('read-folder');
+    await waitFor("document.activeElement.id === 'read-strip'");
+    await click('read-strip');
     await readyImage(second);
     assert.ok(await evaluate("(() => { const image = document.getElementById('viewer-image'); return !image.hidden && image.naturalWidth > 0 && image.getBoundingClientRect().width > 0; })()"), 'Reopening a cached image must display decoded pixels');
     await evaluate('history.back()');
@@ -216,7 +216,7 @@ export async function run(browser, fixtures) {
     assert.equal(await evaluate('location.search'), '?folder=Album%2FChapter+1&compact=1', 'Child View and Browse use the same folder');
     await call('Page.reload');
     await waitFor("document.querySelector('.list-name')");
-    await click('read-folder');
+    await click('read-strip');
     await readyImage(second);
     await evaluate("document.querySelector('#item-path a').click()");
     await waitFor("document.getElementById('viewer').hidden");

@@ -8,7 +8,8 @@ export async function run(browser, {first, second, absoluteRoot}) {
     // Copy failures are visible beside their action without changing header geometry.
     for (const viewing of [false, true]) {
         if (viewing) { await open(viewerUrl(first)); await readyImage(first); }
-        const prefix = '#item-location';
+        await browser.openInfo();
+        const prefix = '#metadata-details';
         const geometry = await headerPositions();
         await evaluate(`window.originalExecCommand=document.execCommand; document.execCommand=()=>false;
             Object.defineProperty(navigator,'clipboard',{configurable:true,value:{writeText:async()=>{throw new Error('denied');}}});
@@ -24,6 +25,7 @@ export async function run(browser, {first, second, absoluteRoot}) {
     }
 
     // A failed Info request retries in place and keeps keyboard focus in the panel.
+    await nativeKey('Escape', 27);
     await call('Fetch.enable', {patterns:[{urlPattern:'*/api/metadata?*'}]});
     network.metadata = true;
     await evaluate("document.querySelector('#item-actions .item-info').click()");
@@ -35,6 +37,7 @@ export async function run(browser, {first, second, absoluteRoot}) {
     assert.equal(await evaluate("document.getElementById('metadata-status').firstChild.textContent"), 'Unable to load info. ');
     await screenshot('metadata-failure');
     network.metadata = false;
+    await nativeKey('Tab', 9);
     await nativeKey('Tab', 9);
     assert.ok(await evaluate("document.activeElement.matches('#metadata-status button')"));
     await nativeKey('Enter', 13);

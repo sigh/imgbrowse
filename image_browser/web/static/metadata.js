@@ -1,6 +1,7 @@
 import {getMetadata, fullPath} from './api.js';
 import {byId, element} from './dom.js';
 import {filename} from './state.js';
+import {setIconButton} from './icons.js';
 
 let request;
 
@@ -75,6 +76,7 @@ export function toggleMetadata(path, button) {
 }
 
 window.addEventListener('resize', positionMetadata);
+byId('metadata-close').addEventListener('click', () => closeMetadata(true));
 document.addEventListener('keydown', event => {
     if (event.key !== 'Escape' || !metadataOpen()) return;
     event.preventDefault();
@@ -84,7 +86,7 @@ document.addEventListener('keydown', event => {
 document.addEventListener('pointerdown', event => {
     if (!metadataOpen() || popover().contains(event.target) || context.button.contains(event.target)) return;
     // Reading controls stay available while inspecting consecutive images.
-    if (event.target.closest('.copy-path, .viewer-nav, .viewer-strip')) return;
+    if (event.target.closest('.viewer-nav, .viewer-strip')) return;
     closeMetadata();
 });
 
@@ -117,7 +119,11 @@ async function loadMetadata(path) {
         row('Taken', formatMetadataDate(exif.Taken));
         row(data.kind === 'directory' && data.archive_member ? 'Archive date' : 'Modified', formatMetadataDate(data.modified));
         for (const label of ['Artist', 'Copyright']) row(label, exif[label]);
-        row(data.archive_member ? 'Member path' : data.kind === 'archive' ? 'Archive' : 'Path', fullPath(data), 'metadata-path');
+        const pathRow = element('dd', 'metadata-path');
+        const pathText = fullPath(data);
+        copyPathButton(pathRow, pathText);
+        pathRow.append(element('span', 'metadata-path-text', pathText));
+        details.append(element('dt', '', data.archive_member ? 'Member path' : data.kind === 'archive' ? 'Archive' : 'Path'), pathRow);
         status.textContent = data.metadata_error ? 'Image details unavailable.' : '';
     } catch {
         if (controller.signal.aborted) return;
@@ -127,4 +133,54 @@ async function loadMetadata(path) {
         status.textContent = 'Unable to load info. ';
         status.append(retry);
     }
+}
+
+async function copyPath(path) {
+    if (navigator.clipboard?.writeText) {
+        try { await navigator.clipboard.writeText(path); return; } catch { /* Try the local HTTP fallback. */ }
+    }
+    // Clipboard API is unavailable over plain HTTP on the local network.
+    const input = element('textarea', 'clipboard-input');
+    input.value = path;
+    const focused = document.activeElement;
+    document.body.append(input);
+    input.select();
+    try {
+        if (!document.execCommand('copy')) throw new Error('Copy failed');
+    } finally {
+        input.remove();
+        focused?.focus({preventScroll: true});
+    }
+}
+
+/** Copy the full path displayed in Info, including archive member identity. */
+function copyPathButton(holder, path) {
+    const copy = element('button', 'copy-path');
+    copy.type = 'button';
+    const feedback = element('span', 'copy-feedback');
+    feedback.setAttribute('role', 'status');
+    holder.append(copy, feedback);
+    let feedbackTimer;
+    const reset = () => {
+        feedback.textContent = '';
+        setIconButton(copy, 'copy', 'Copy full path');
+    };
+    reset();
+    copy.addEventListener('click', async () => {
+        clearTimeout(feedbackTimer);
+        reset();
+        try {
+            await copyPath(path);
+            if (!copy.isConnected) return;
+            clearTimeout(feedbackTimer);
+            setIconButton(copy, 'check', 'Copied');
+            feedbackTimer = setTimeout(reset, 1500);
+        } catch {
+            if (copy.isConnected) {
+                feedback.textContent = 'Copy failed. Try again.';
+                setIconButton(copy, 'copy', feedback.textContent);
+            }
+        }
+    });
+    return copy;
 }

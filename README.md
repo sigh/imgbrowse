@@ -23,7 +23,7 @@ at any depth, including archive members. Hidden names and symlinks are omitted.
 
 - **Browse** shows immediate folder contents, with previews or a filtered list.
 - **Overview** shows media throughout the selected folder's descendants.
-- **View** opens media with sizing controls and an optional thumbnail tray.
+- **View** offers thumbnails with one image, one image alone, or continuous scrolling.
 
 All screens keep the same current folder. The sidebar opens a folder tree;
 arrows expand branches, names navigate, and the selected name toggles its branch.
@@ -32,6 +32,8 @@ Modified clicks open links in another tab.
 Use left/right arrows to turn pages and Escape to return to Browse.
 Back/Forward restores browsing context; Refresh picks up disk changes.
 Reading settings are remembered for the tab session.
+Use −/+ to adjust zoom. Click an image for 100%; click again to restore default sizing.
+Info shows metadata and lets you copy the full path.
 
 Supports JPG, JPEG, PNG, GIF, WebP and BMP, including images inside ZIP/CBZ files.
 Loose MP4, M4V, WebM, OGV and MOV videos use native browser playback, subject to

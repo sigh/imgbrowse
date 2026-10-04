@@ -1,7 +1,7 @@
 /** Exercise real browser caches and bounded windows with the --performance fixture. */
 import assert from 'node:assert/strict';
 import {connectBrowser} from './browser-harness.mjs';
-import {ScreenMode} from '../image_browser/web/static/state.js';
+import {ScreenMode, ReadingLayout, ImageSize} from '../image_browser/web/static/state.js';
 const [port, base] = process.argv.slice(2);
 const browser = await connectBrowser(port, base);
 const {call, evaluate, waitFor: wait} = browser;
@@ -66,5 +66,32 @@ await evaluate(`testApp.setMode(${JSON.stringify(ScreenMode.VIEW)})`);
 await wait("document.getElementById('viewer-image').dataset.path === 'Large/page5.jpg' && !document.getElementById('viewer-image').hidden");
 await evaluate(`testApp.setMode(${JSON.stringify(ScreenMode.BROWSE)})`);
 await wait("testApp.state.mode === 'browse'");
-console.log('Performance browser checks passed:' ,JSON.stringify({grid,strip,media}));
+
+// A direct middle-of-collection entry and sustained reading keep paths and originals bounded.
+await browser.open(browser.viewerUrl('Large/page1200.jpg', ImageSize.DEFAULT, 'Large', ReadingLayout.SCROLL));
+await browser.readyImage('Large/page1200.jpg');
+await evaluate("import('/gallery.js').then(({app})=>window.testApp=app)");
+await wait("testApp.viewer.continuous.paths.length > 8");
+assert.ok(await evaluate("testApp.viewer.continuous.paths.every(path=>Number(path.slice('Large/page'.length,-4))>1180)"), 'Scroll starts around the selected image without scanning from the start');
+for (let index=1201; index<=1250; index++) {
+    await evaluate('testApp.viewer.requestMove(false)');
+    await browser.readyImage(`Large/page${index}.jpg`);
+    assert.ok(await evaluate("document.querySelectorAll('.reader-item').length <= 32 && document.querySelectorAll('.reader-item img').length <= 5"));
+}
+const column = await evaluate("({paths:testApp.viewer.continuous.paths.length,first:testApp.viewer.continuous.paths[0],images:document.querySelectorAll('.reader-item img').length})");
+assert.ok(column.paths <= 32 && column.first !== 'Large/page1192.jpg',JSON.stringify(column));
+// Reverse across the discarded prefix; the same source point survives rediscovery.
+const atTop = () => evaluate("(()=>{const image=document.getElementById('viewer-image'),canvas=document.getElementById('viewer-canvas');return (canvas.getBoundingClientRect().top-image.getBoundingClientRect().top)/(image.width/image.naturalWidth)})()");
+for (let index=1249; index>=1200; index--) {
+    await evaluate('testApp.viewer.requestMove(true)');
+    await browser.readyImage(`Large/page${index}.jpg`);
+    assert.ok(Math.abs(await atTop())<2,'Previous navigation retains the selected page at the top while preceding items are inserted');
+}
+assert.ok(await evaluate('testApp.viewer.continuous.paths.length <= 32'));
+const continuousMedia = await evaluate("import('/static/media-cache.js').then(module=>({bytes:module.originals.bytes,entries:module.originals.values.size,pending:module.originals.pending.size}))");
+assert.ok(continuousMedia.bytes <= 96*1024*1024 && continuousMedia.entries <= 4);
+await evaluate(`testApp.setMode(${JSON.stringify(ScreenMode.BROWSE)})`);
+await wait("testApp.state.mode === 'browse' && document.querySelectorAll('.reader-item').length === 0");
+assert.equal(browser.exceptions.length,0,JSON.stringify(browser.exceptions));
+console.log('Performance browser checks passed:' ,JSON.stringify({grid,strip,media,column,continuousMedia}));
 browser.close();

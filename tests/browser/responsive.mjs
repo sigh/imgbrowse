@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import {readState, stateUrl, ScreenMode, ImageSize} from '../../image_browser/web/static/state.js';
 
 export async function run(browser, fixtures) {
-    const {call, evaluate, waitFor, open, click, key, nativeKey, screenshot, readyImage, position, viewerUrl, headerPositions} = browser;
+    const {call, evaluate, waitFor, open, click, key, nativeKey, screenshot, readyImage, position, viewerUrl, presentation, setZoom, headerPositions} = browser;
     const {first, last} = fixtures;
     await browser.start();
     // Special filenames and narrow screens retain controls, full names, and a visible focus target.
@@ -15,7 +15,7 @@ export async function run(browser, fixtures) {
     await click('overview-folder');
     await waitFor("!document.getElementById('overview').hidden");
     assert.equal(await evaluate("document.querySelector('#item-path .selected-folder').textContent"), 'Chapter 2');
-    await click('read-folder');
+    await click('read-strip');
     await readyImage(last);
     assert.equal(await evaluate("new URLSearchParams(location.search).get('folder')"), 'Album/Chapter 2');
     assert.equal(await evaluate("new URLSearchParams(location.search).get('collection')"), null);
@@ -37,30 +37,30 @@ export async function run(browser, fixtures) {
     assert.deepEqual(await headerPositions(), beforePathScroll);
     await screenshot('pinned-collection-mobile');
     assert.equal(beforePathScroll.height, 85);
-    assert.deepEqual(beforePathScroll.modes.map(rect => [rect.width, rect.height]), [[32,32], [32,32], [64,32]]);
-    const readingTools = await evaluate("[...document.querySelectorAll('#viewer-zoom, #view-strip')].map(button => button.getBoundingClientRect().toJSON())");
+    assert.deepEqual(beforePathScroll.modes.map(rect => [rect.width, rect.height]), [[32,32], [32,32], [40,32], [40,32], [40,32]]);
+    const readingTools = await evaluate("[...document.querySelectorAll('#viewer-zoom-out, #viewer-zoom-in')].map(button => button.getBoundingClientRect().toJSON())");
     assert.ok(readingTools.every(rect => rect.x >= beforePathScroll.navigation.right && rect.right <= 320));
-    await click('view-strip');
+    await presentation('single');
     assert.deepEqual(await headerPositions(), beforePathScroll);
-    assert.deepEqual(await evaluate("[...document.querySelectorAll('#viewer-zoom, #view-strip')].map(button => button.getBoundingClientRect().toJSON())"), readingTools);
+    assert.deepEqual(await evaluate("[...document.querySelectorAll('#viewer-zoom-out, #viewer-zoom-in')].map(button => button.getBoundingClientRect().toJSON())"), readingTools);
     await screenshot('mobile-320-image-only');
     await click('overview-folder');
     await waitFor("!document.getElementById('overview').hidden && document.querySelector('#overview .card')");
     assert.deepEqual(await headerPositions(), beforePathScroll, 'All navigation and item actions keep their anchors at 320px');
-    assert.ok(await evaluate("document.querySelector('.viewer-tools').hidden && document.documentElement.scrollWidth <= innerWidth"));
+    assert.ok(await evaluate("document.querySelector('.viewer-tools').classList.contains('unavailable') && document.documentElement.scrollWidth <= innerWidth"));
     await screenshot('mobile-320-overview');
     await click('browse-folder');
     await waitFor("document.getElementById('viewer').hidden && document.querySelectorAll('.folder-card').length === 2");
-    assert.deepEqual(await headerPositions(), beforePathScroll, 'Browse uses the same navigation, Copy and Info anchors');
+    assert.deepEqual(await headerPositions(), beforePathScroll, 'Browse uses the same navigation, path and Info anchors');
     await screenshot('mobile-320-browse');
     const currentBrowseEntry = await evaluate('({url:location.href,length:history.length})');
     await click('browse-folder');
     assert.deepEqual(await evaluate('({url:location.href,length:history.length})'), currentBrowseEntry);
     await call('Emulation.setDeviceMetricsOverride', {width:1440,height:900,deviceScaleFactor:1,mobile:false});
-    await open(viewerUrl('Odd & #/a ?#%.jpg', ImageSize.FIT_PAGE, 'Odd & #'));
+    await open(viewerUrl('Odd & #/a ?#%.jpg', ImageSize.DEFAULT, 'Odd & #'));
     await readyImage('Odd & #/a ?#%.jpg');
     await call('Emulation.setDeviceMetricsOverride', {width:390,height:844,deviceScaleFactor:1,mobile:true});
-    await open(viewerUrl(first,ImageSize.FIT_WIDTH));
+    await open(viewerUrl(first,'1.5'));
     await readyImage(first);
     assert.ok(await evaluate('document.documentElement.scrollWidth <= innerWidth'));
     assert.equal(await evaluate("document.querySelector('#item-path .selected-folder').textContent"), 'Album');
@@ -69,7 +69,7 @@ export async function run(browser, fixtures) {
     assert.ok(await evaluate("document.querySelector('.app-header').getBoundingClientRect().height <= 85"));
     assert.ok(await evaluate("document.getElementById('browse-folder').scrollWidth <= document.getElementById('browse-folder').clientWidth"));
     await screenshot('mobile-viewer');
-    const mobileModeAction = await evaluate("document.getElementById('read-folder').getBoundingClientRect().toJSON()");
+    const mobileModeAction = await evaluate("document.getElementById('read-strip').getBoundingClientRect().toJSON()");
     const mobileActions = await evaluate("document.getElementById('item-actions').getBoundingClientRect().toJSON()");
     const mobileFrame = await evaluate("document.getElementById('viewer-canvas').getBoundingClientRect().toJSON()");
     await evaluate("document.querySelector('#item-actions .item-info').click()");
@@ -84,7 +84,7 @@ export async function run(browser, fixtures) {
     assert.ok(await evaluate("document.activeElement.getClientRects().length > 0"));
     await open('/?folder=Names&compact=1');
     await waitFor("document.querySelector('.list-name')");
-    assert.deepEqual(await evaluate("document.getElementById('read-folder').getBoundingClientRect().toJSON()"), mobileModeAction, 'View keeps identical geometry on narrow screens');
+    assert.deepEqual(await evaluate("document.getElementById('read-strip').getBoundingClientRect().toJSON()"), mobileModeAction, 'View keeps identical geometry on narrow screens');
     assert.deepEqual(await evaluate("document.getElementById('item-actions').getBoundingClientRect().toJSON()"), mobileActions, 'The narrow layout uses the same action position in Browse and View');
     assert.ok(await evaluate("document.querySelector('.list-name').getBoundingClientRect().bottom <= document.querySelector('.list-item').getBoundingClientRect().bottom"));
     assert.ok(await evaluate("document.querySelector('.folder-view').getBoundingClientRect().right < document.querySelector('.list-name').getBoundingClientRect().left"));
@@ -92,7 +92,7 @@ export async function run(browser, fixtures) {
     await screenshot('long-names');
     await evaluate("document.querySelector('.list-name').click()");
     await waitFor("document.querySelector('#item-path [aria-current]').textContent.includes('Chapter 123')");
-    await click('read-folder');
+    await click('read-strip');
     await waitFor("document.querySelector('#item-path [aria-current]')?.textContent.includes('Chapter 123')");
     assert.ok(await evaluate("(() => {const link=document.querySelector('#item-path .collection-breadcrumb a'); return link.scrollWidth > link.clientWidth && link.title.includes('Chapter 123');})()"), 'Long collection names truncate within the path and retain their full tooltip');
     assert.ok(await evaluate("document.getElementById('browse-folder').getBoundingClientRect().right <= innerWidth"));

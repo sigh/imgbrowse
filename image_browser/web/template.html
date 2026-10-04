@@ -12,29 +12,24 @@
     <header class="app-header">
         <div class="header-start">
             <button id="folders-toggle" data-icon="sidebar" aria-label="Folders" title="Folders" aria-controls="folder-tree" aria-expanded="false"></button>
-            <nav class="mode-navigation choice-group" aria-label="Screens"></nav>
+            <nav class="mode-navigation choice-group" aria-label="Screens">
+                <a id="browse-folder" class="control-link" data-mode="browse" data-icon="folder" aria-label="Browse" title="Browse (Escape)"></a>
+                <a id="overview-folder" class="control-link" data-mode="overview" data-icon="grid" aria-label="Collection overview" title="Collection overview"></a>
+            </nav>
         </div>
+        <nav class="reading-navigation choice-group" aria-label="View presentation">
+            <a id="read-strip" class="control-link" data-reading-layout="strip" data-icon="readerStrip" aria-label="Thumbnails and single image" title="Thumbnails and single image"></a>
+            <a id="read-single" class="control-link" data-reading-layout="single" data-icon="readerSingle" aria-label="Single image" title="Single image"></a>
+            <a id="read-scroll" class="control-link" data-reading-layout="scroll" data-icon="readerScroll" aria-label="Continuous scroll" title="Continuous scroll"></a>
+        </nav>
         <div id="item-location" class="item-location">
-            <div class="path-copy"></div>
             <nav id="item-path" class="breadcrumbs" aria-label="Path">
                 <span id="item-name" class="item-name" hidden></span>
             </nav>
         </div>
-        <div class="viewer-tools" aria-label="Reading controls" hidden>
-            <div class="size-control">
-                <button id="viewer-zoom" aria-expanded="false" aria-controls="size-menu">Fit ▾</button>
-                <div id="size-menu" role="group" aria-label="Image size" hidden>
-                    <button data-size="page" title="Fit page (F)">Fit page</button>
-                    <button data-size="width" title="Fit width (W)">Fit width</button>
-                    <button data-size="1">Actual size</button>
-                    <div class="zoom-controls">
-                        <button id="viewer-zoom-out" aria-label="Zoom out" title="Zoom out (−)">−</button>
-                        <span id="zoom-value"></span>
-                        <button id="viewer-zoom-in" aria-label="Zoom in" title="Zoom in (+)">+</button>
-                    </div>
-                </div>
-            </div>
-            <button id="view-strip" data-icon="thumbnails" title="Thumbnails (T)" aria-label="Thumbnails" aria-pressed="true" aria-controls="viewer-strip"></button>
+        <div class="viewer-tools choice-group" role="group" aria-label="Zoom">
+            <button id="viewer-zoom-out" aria-label="Zoom out" title="Zoom out (−)">−</button>
+            <button id="viewer-zoom-in" aria-label="Zoom in" title="Zoom in (+)">+</button>
         </div>
         <div id="item-actions" class="item-actions"></div>
     </header>
@@ -60,7 +55,7 @@
                 <div id="overview" hidden></div>
                 <div id="viewer-stage" class="viewer-stage">
                     <button id="viewer-prev" class="viewer-nav" aria-label="Previous image" title="Previous image (←)"></button>
-                    <div id="viewer-canvas" tabindex="-1" aria-label="Image; scroll when enlarged">
+                    <div id="viewer-canvas" tabindex="0" aria-label="Media; scroll to read">
                         <div class="image-surface"><img id="viewer-image" alt="" hidden></div>
                     </div>
                     <button id="viewer-next" class="viewer-nav" aria-label="Next image" title="Next image (→)"></button>
@@ -76,6 +71,7 @@
     <section id="metadata-popover" popover="manual" tabindex="0" role="region" aria-labelledby="metadata-title">
         <header class="metadata-header">
             <h2 id="metadata-title">Info</h2>
+            <button id="metadata-close" class="metadata-close" data-icon="close" aria-label="Close Info" title="Close Info"></button>
         </header>
         <p id="metadata-status" role="status"></p>
         <dl id="metadata-details"></dl>
