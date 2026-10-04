@@ -42,6 +42,7 @@ export class ContinuousReader {
 
     get paths() { return this.window?.paths || []; }
     get edges() { return this.window?.edges; }
+    get warning() { return this.window?.warning || false; }
     get current() { return this.items.find(item => item.path === this.currentPath); }
     get image() { return this.current?.media; }
     get ready() { return this.image instanceof HTMLImageElement && this.image.naturalWidth > 0; }
@@ -252,8 +253,6 @@ export class ContinuousReader {
             }
         }
     }
-
-    scroll(delta) { this.canvas.scrollTop += delta; }
 
     stop() {
         this.scope?.dispose(); this.scope = null;

@@ -7,6 +7,7 @@ export class CollectionWindow {
     }
 
     canLoad(edge) { return !edge.done && !edge.loading && !edge.failed; }
+    get warning() { return this.edges.some(edge => edge.warning); }
 
     async load(edge, signal) {
         this.signal = signal;
@@ -29,7 +30,7 @@ export class CollectionWindow {
             }
             edge.cursor = result.cursor;
             edge.done = result.cursor === null;
-            edge.warning = result.warnings.length > 0;
+            edge.warning ||= result.warnings.length > 0;
             return {added, removed};
         } catch (error) {
             if (error.name !== 'AbortError' && !signal.aborted) edge.failed = true;

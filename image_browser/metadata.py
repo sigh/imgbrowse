@@ -8,6 +8,24 @@ from PIL import Image
 from PIL.ExifTags import Base, GPS, IFD
 
 
+def _capture_date(exif):
+    """Preserve valid capture offsets; unknown offsets retain the naive camera time."""
+    taken = exif.get(Base.DateTimeOriginal)
+    if not taken:
+        return None
+    try:
+        date = datetime.strptime(str(taken), '%Y:%m:%d %H:%M:%S')
+    except ValueError:
+        return str(taken)
+    offset = exif.get(Base.OffsetTimeOriginal)
+    if offset:
+        try:
+            date = date.replace(tzinfo=datetime.strptime(str(offset).strip(), '%z').tzinfo)
+        except ValueError:
+            pass
+    return date.isoformat()
+
+
 def _gps_location(gps):
     """Decode EXIF degrees/minutes/seconds into signed decimal coordinates."""
     try:
@@ -65,12 +83,9 @@ def metadata(gallery, relative, image_work, archive_work):
                 exif = image.getexif()
                 result['exif'] = {label: str(value) for tag, label in fields.items()
                                   if (value := exif.get(tag)) is not None}
-                taken = exif.get_ifd(IFD.Exif).get(Base.DateTimeOriginal) if IFD.Exif in exif else None
+                taken = _capture_date(exif.get_ifd(IFD.Exif))
                 if taken:
-                    try:
-                        result['exif']['Taken'] = datetime.strptime(str(taken), '%Y:%m:%d %H:%M:%S').isoformat()
-                    except ValueError:
-                        result['exif']['Taken'] = str(taken)
+                    result['exif']['Taken'] = taken
                 location = _gps_location(exif.get_ifd(IFD.GPSInfo))
                 if location is not None:
                     result['location'] = location

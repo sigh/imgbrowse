@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import {ImageSize, ReadingLayout} from '../../image_browser/web/static/state.js';
+import {ImageSize, ReadingLayout, ScreenMode} from '../../image_browser/web/static/state.js';
 
 export async function run(browser, {first, second, last, absoluteRoot}) {
     const {call, evaluate, waitFor, readyImage, click, presentation, setZoom, viewerUrl, headerPositions, screenshot, nativeKey, open, network, held} = browser;
@@ -155,4 +155,47 @@ export async function run(browser, {first, second, last, absoluteRoot}) {
     await evaluate("window.scrollVideo=document.getElementById('viewer-video')");
     await click('browse-folder');
     assert.ok(await evaluate("scrollVideo.paused && !scrollVideo.isConnected && !scrollVideo.hasAttribute('src')"));
+
+    // Successful partial discovery warns without failing accessible pages or changing layout.
+    await browser.start('/?folder=Album');
+    await waitFor("document.querySelectorAll('.folder-card').length === 2");
+    const reading = {mode:ScreenMode.VIEW, layout:ReadingLayout.SCROLL, image:first};
+    await evaluate(`window.actualFetch=window.fetch;
+        const paths=${JSON.stringify([first, second, last])};
+        window.fetch=(url, options)=>{
+            if(new URL(url, location.href).pathname!=='/api/walk') return actualFetch(url, options);
+            const request=JSON.parse(options.body);
+            if(window.failMoves && request.limit===1) return Promise.reject(new Error('Disconnected'));
+            const index=paths.indexOf(request.anchor);
+            const images=request.reverse ? paths.slice(0,index).reverse() : paths.slice(index+1);
+            return Promise.resolve(new Response(JSON.stringify({images:images.slice(0,request.limit), cursor:null,
+                warnings:request.reverse ? [] : ['Unreadable chapter']}), {headers:{'Content-Type':'application/json'}}));
+        };
+        import('/gallery.js').then(({app})=>app.navigate(${JSON.stringify(reading)}))`);
+    await readyImage(first);
+    const warning = 'Some folders could not be read.';
+    await waitFor(`document.getElementById('viewer-warning').textContent === ${JSON.stringify(warning)}`);
+    const partialPositions = await headerPositions();
+    assert.equal(await evaluate("getComputedStyle(document.querySelector('.viewer-feedback')).display"), 'flex');
+    assert.equal(await evaluate("document.getElementById('viewer-retry').hidden"), true, 'A skipped branch is not a failed current-image request');
+    await click('viewer-next');
+    await readyImage(second);
+    assert.equal(await evaluate("document.getElementById('viewer-warning').textContent"), warning);
+    assert.deepEqual(await headerPositions(), partialPositions, 'Partial-result feedback does not change header geometry');
+    await screenshot('continuous-partial');
+    await click('viewer-next');
+    await readyImage(last);
+    await evaluate('window.failMoves=true');
+    await click('viewer-next');
+    await waitFor("document.getElementById('viewer-status').textContent === 'Unable to find the next item.'");
+    assert.equal(await evaluate("getComputedStyle(document.getElementById('viewer-warning')).display"), 'none', 'Immediate failure feedback takes precedence over the collection warning');
+    assert.equal(await evaluate("document.getElementById('viewer-retry').hidden"), false);
+    await evaluate('window.failMoves=false');
+    await click('viewer-retry');
+    await waitFor("document.getElementById('viewer-status').textContent === 'End of collection. Some folders could not be read.'");
+    await evaluate("window.fetch=actualFetch; import('/gallery.js').then(({app})=>app.refresh())");
+    await readyImage(last);
+    await waitFor("import('/gallery.js').then(({app})=>app.viewer.continuous.edges.every(edge=>edge.done))");
+    assert.equal(await evaluate("document.getElementById('viewer-warning').textContent"), '', 'Successful refresh clears stale partial-result warnings');
+    assert.equal(await evaluate("getComputedStyle(document.querySelector('.viewer-feedback')).display"), 'none');
 }

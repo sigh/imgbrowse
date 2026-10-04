@@ -30,6 +30,7 @@ arrows expand branches, names navigate, and the selected name toggles its branch
 Modified clicks open links in another tab.
 
 Use left/right arrows to turn pages and Escape to return to Browse.
+Shift+left/right pans horizontally when the image canvas has focus.
 Back/Forward restores browsing context; Refresh picks up disk changes.
 Reading settings are remembered for the tab session.
 Use −/+ to adjust zoom. Click an image for 100%; click again to restore default sizing.

@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import {execFileSync} from 'node:child_process';
 import {metadataInfo, MetadataKind, formatMetadataDate, formatRelativeAge} from '../image_browser/web/static/metadata-data.js';
 
 const now = Date.parse('2026-10-04T12:00:00Z');
@@ -90,4 +91,21 @@ test('dates remain unambiguous and relative ages handle past, present and future
     }
     assert.equal(formatRelativeAge('invalid', now), undefined);
     assert.equal(formatRelativeAge(undefined, now), undefined);
+});
+
+test('capture offsets identify one instant across browser timezones', () => {
+    const moduleUrl = new URL('../image_browser/web/static/metadata-data.js', import.meta.url).href;
+    const script = `import {metadataInfo} from ${JSON.stringify(moduleUrl)};
+        const times = ['2026-10-04T10:00:00+02:00', '2026-10-04T02:30:00-05:30'];
+        console.log(JSON.stringify(times.map(Taken => metadataInfo({name:'photo.jpg', kind:'image',
+            filesystem_path:'/media/photo.jpg', exif:{Taken}}, Date.parse('2026-10-04T12:00:00Z')).rows[0])));`;
+    for (const [TZ, value] of [['UTC','2026-10-04 08:00'], ['America/New_York','2026-10-04 04:00'],
+        ['Australia/Sydney','2026-10-04 19:00']]) {
+        const rows = JSON.parse(execFileSync(process.execPath, ['--input-type=module', '-e', script],
+            {env:{...process.env, TZ}, encoding:'utf8'}));
+        for (const row of rows) {
+            assert.equal(row.value, value, TZ);
+            assert.equal(row.age, new Intl.RelativeTimeFormat(undefined, {numeric:'auto'}).format(-4, 'hour'), TZ);
+        }
+    }
 });

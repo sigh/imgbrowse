@@ -78,10 +78,10 @@ export async function connectBrowser(port, base, screenshots = '') {
     const imageIs = path => `import('/static/state.js').then(({readState}) => readState().image === ${JSON.stringify(path)})`;
     const waitImage = path => waitFor(imageIs(path));
     const key = (key, repeat = false) => evaluate(`document.dispatchEvent(new KeyboardEvent('keydown', ${JSON.stringify({key, repeat})}))`);
-    async function nativeKey(key, code) {
+    async function nativeKey(key, code, modifiers = 0) {
         for (const type of ['keyDown', 'keyUp']) {
-            await call('Input.dispatchKeyEvent', {type, key, code: key, windowsVirtualKeyCode: code});
-            if (type === 'keyDown' && key === 'Enter') await call('Input.dispatchKeyEvent', {type:'char', text:'\r'});
+            await call('Input.dispatchKeyEvent', {type, key, code: key, windowsVirtualKeyCode: code, modifiers});
+            if (type === 'keyDown' && key === 'Enter') await call('Input.dispatchKeyEvent', {type:'char', text:'\r', modifiers});
         }
     }
     const wheel = async (deltaY, interval = 70) => { await call('Input.dispatchMouseEvent', {type:'mouseWheel', x:700, y:350, deltaX:0, deltaY}); await new Promise(resolve => setTimeout(resolve, interval)); };

@@ -55,12 +55,13 @@
                 <div id="overview" hidden></div>
                 <div id="viewer-stage" class="viewer-stage">
                     <button id="viewer-prev" class="viewer-nav" aria-label="Previous image" title="Previous image (←)"></button>
-                    <div id="viewer-canvas" tabindex="0" aria-label="Media; scroll to read">
+                    <div id="viewer-canvas" tabindex="0" aria-label="Media; scroll to read" aria-description="Use Shift+Left/Right to pan horizontally.">
                         <div class="image-surface"><img id="viewer-image" alt="" hidden></div>
                     </div>
                     <button id="viewer-next" class="viewer-nav" aria-label="Next image" title="Next image (→)"></button>
                     <div class="viewer-feedback">
                         <span id="viewer-status" role="status"></span>
+                        <span id="viewer-warning" role="status"></span>
                         <button id="viewer-retry" hidden>Retry</button>
                     </div>
                 </div>

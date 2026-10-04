@@ -12,7 +12,7 @@ from unittest.mock import patch
 from urllib.parse import urlencode
 
 from PIL import Image
-from PIL.ExifTags import GPS, IFD
+from PIL.ExifTags import Base, GPS, IFD
 from PIL.TiffImagePlugin import IFDRational
 
 from image_browser.metadata import _gps_location
@@ -58,6 +58,32 @@ class MetadataTests(unittest.TestCase):
         self.assertAlmostEqual(data['location']['latitude'], -33.86)
         self.assertAlmostEqual(data['location']['longitude'], 151.2)
         self.assertIsNone(data['archive_member'])
+
+    def test_capture_offsets_survive_loose_and_archived_images(self):
+        for index, (offset, expected) in enumerate([
+            ('+02:00', '+02:00'), ('-05:30', '-05:30'), ('+00:00', '+00:00'),
+            (None, ''), ('invalid', ''), ('+25:00', ''),
+        ]):
+            with self.subTest(offset=offset):
+                exif = Image.Exif()
+                fields = {Base.DateTimeOriginal: '2026:10:04 10:00:00'}
+                if offset is not None:
+                    fields[Base.OffsetTimeOriginal] = offset
+                exif[IFD.Exif] = fields
+                exif[Base.Model] = 'Test camera'
+                buffer = io.BytesIO()
+                Image.new('RGB', (40, 60)).save(buffer, 'JPEG', exif=exif)
+                name = f'offset{index}.jpg'
+                (self.root / name).write_bytes(buffer.getvalue())
+                archive_name = f'offset{index}.cbz'
+                with zipfile.ZipFile(self.root / archive_name, 'w') as archive:
+                    archive.writestr(name, buffer.getvalue())
+                for path in [name, f'{archive_name}/{name}']:
+                    status, data = self.request(path)
+                    self.assertEqual(status, 200)
+                    self.assertEqual(data['exif']['Taken'], '2026-10-04T10:00:00' + expected)
+                    self.assertEqual(data['exif']['Camera model'], 'Test camera')
+                    self.assertNotIn('metadata_error', data)
 
     def test_directory_counts_do_not_traverse_descendants(self):
         (self.root / 'nested').mkdir()

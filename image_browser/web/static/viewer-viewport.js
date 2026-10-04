@@ -90,9 +90,4 @@ export class ViewerViewport {
         return reverse ? this.canvas.scrollTop > 2
             : this.canvas.scrollHeight - this.canvas.clientHeight - this.canvas.scrollTop > 2;
     }
-
-    scroll(delta) {
-        this.canvas.scrollTop += delta;
-    }
-
 }

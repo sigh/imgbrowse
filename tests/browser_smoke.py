@@ -53,7 +53,7 @@ def make_collection(root):
                 draw.text((340, y + 80), f'Panel {panel + 1}: sample reading text', fill='black')
         if name == 'Album/Chapter 1/page2.jpg':
             exif = Image.Exif()
-            exif[IFD.Exif] = {Base.DateTimeOriginal: '2024:03:14 12:30:00'}
+            exif[IFD.Exif] = {Base.DateTimeOriginal: '2024:03:14 12:30:00', Base.OffsetTimeOriginal: '+05:30'}
             exif[IFD.GPSInfo] = {GPS.GPSLatitudeRef: 'S', GPS.GPSLatitude: (33, 51, 36),
                                  GPS.GPSLongitudeRef: 'E', GPS.GPSLongitude: (151, 12, 0)}
             image.save(file, exif=exif)

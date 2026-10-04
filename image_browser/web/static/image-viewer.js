@@ -15,6 +15,12 @@ import {isVideo, canRetryMedia} from './media-kind.js';
 
 const NEARBY_COUNT = 16;
 const LOADING_DELAY = 700;
+const PARTIAL_COLLECTION_MESSAGE = 'Some folders could not be read.';
+const KEYBOARD_PAN_STEP = 80;
+const ARROW_DIRECTIONS = Object.freeze({
+    ArrowLeft: {x:-1, y:0}, ArrowRight: {x:1, y:0},
+    ArrowUp: {x:0, y:-1}, ArrowDown: {x:0, y:1},
+});
 
 /** Owns image loading and collection navigation; geometry and gestures are separate. */
 export class ImageViewer {
@@ -28,6 +34,7 @@ export class ImageViewer {
         this.wheel = new WheelGesture();
         this.strip = byId('viewer-strip');
         this.status = byId('viewer-status');
+        this.warning = byId('viewer-warning');
         this.previousButton = byId('viewer-prev');
         this.nextButton = byId('viewer-next');
         this.rootName = 'Collection';
@@ -97,6 +104,9 @@ export class ImageViewer {
 
     updateControls() {
         if (this.scrolling) this.singleImage = this.continuous.singleImage;
+        const warning = this.state.mode === ScreenMode.VIEW && this.scrolling && this.continuous.warning
+            ? PARTIAL_COLLECTION_MESSAGE : '';
+        if (this.warning.textContent !== warning) this.warning.textContent = warning;
         const unavailable = this.state.mode !== ScreenMode.VIEW || isVideo(this.state.image);
         const sizeControl = document.querySelector('.viewer-tools');
         sizeControl.classList.toggle('unavailable', unavailable);
@@ -327,7 +337,7 @@ export class ImageViewer {
         this.updateControls();
         scope.delay(() => { this.status.textContent = reverse ? 'Finding the previous item…' : 'Finding the next item…'; }, LOADING_DELAY);
         let cursor = null;
-        let warning = false;
+        let warning = this.scrolling && this.continuous.warning;
         try {
             do {
                 const result = await walkImages({root: this.state.collection,
@@ -344,12 +354,12 @@ export class ImageViewer {
                 cursor = result.cursor;
             } while (cursor !== null);
             if (!this.state.image) {
-                this.status.textContent = warning ? 'No accessible media found. Some folders could not be read.'
+                this.status.textContent = warning ? 'No accessible media found. ' + PARTIAL_COLLECTION_MESSAGE
                     : 'No images or videos in this collection.';
             } else {
                 this.boundaryDirection = reverse;
                 this.status.textContent = (reverse ? 'Beginning' : 'End') + ' of collection.'
-                    + (warning ? ' Some folders could not be read.' : '');
+                    + (warning ? ' ' + PARTIAL_COLLECTION_MESSAGE : '');
             }
         } catch (error) {
             if (error.name !== 'AbortError') {
@@ -377,14 +387,16 @@ export class ImageViewer {
         if (event.target instanceof Element && event.target.closest('video')) return;
         if (this.state.mode === ScreenMode.OVERVIEW) return;
         if (event.target instanceof Element && event.target.matches('select, input, textarea')) return;
-        const vertical = ['ArrowUp', 'ArrowDown'].includes(event.key);
-        if (vertical && this.scrolling && event.target === this.canvas) return;
-        if (vertical && !this.filmstrip.container.contains(event.target) && this.canvas.scrollHeight > this.canvas.clientHeight + 2) {
+        const direction = ARROW_DIRECTIONS[event.key];
+        if (direction) {
+            const canvasFocused = event.target === this.canvas;
+            // Continuous reading keeps the browser's native vertical keys.
+            if (direction.y && this.scrolling && canvasFocused) return;
+            const pan = direction.x ? event.shiftKey && canvasFocused
+                : !this.filmstrip.container.contains(event.target) && this.canvas.scrollHeight > this.canvas.clientHeight + 2;
             event.preventDefault();
-            this.viewport.scroll(event.key === 'ArrowUp' ? -80 : 80);
-        } else if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(event.key)) {
-            event.preventDefault();
-            this.requestMove(['ArrowLeft', 'ArrowUp'].includes(event.key), !event.repeat);
+            if (pan) this.canvas.scrollBy({left:direction.x * KEYBOARD_PAN_STEP, top:direction.y * KEYBOARD_PAN_STEP});
+            else this.requestMove(direction.x < 0 || direction.y < 0, !event.repeat);
         } else if (['+', '=', '-'].includes(event.key)) {
             event.preventDefault();
             this.zoom(event.key === '-' ? -1 : 1);

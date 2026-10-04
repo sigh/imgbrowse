@@ -1,7 +1,54 @@
 import assert from 'node:assert/strict';
+import {ReadingLayout} from '../../image_browser/web/static/state.js';
 
 export async function run(browser, {first, second}) {
     const {evaluate, waitFor, nativeKey, open, readyImage, viewerUrl, click, call} = browser;
+    await browser.start();
+    for (const layout of Object.values(ReadingLayout)) {
+        await open(viewerUrl(first, '2', 'Album', layout));
+        await readyImage(first);
+        await evaluate("document.getElementById('viewer-canvas').focus(); document.getElementById('viewer-canvas').scrollLeft=0; document.getElementById('viewer-canvas').scrollTop=200");
+        assert.ok(await evaluate("document.getElementById('viewer-canvas').scrollWidth-document.getElementById('viewer-canvas').clientWidth > 160"));
+        const opening = await evaluate('({url:location.href, length:history.length})');
+        await nativeKey('ArrowRight', 39, 8);
+        await waitFor("document.getElementById('viewer-canvas').scrollLeft === 80");
+        for (const type of ['keyDown', 'keyUp']) await call('Input.dispatchKeyEvent', {
+            type, key:'ArrowRight', code:'ArrowRight', windowsVirtualKeyCode:39, modifiers:8, autoRepeat:type==='keyDown',
+        });
+        await waitFor("document.getElementById('viewer-canvas').scrollLeft === 160");
+        await nativeKey('ArrowLeft', 37, 8);
+        await waitFor("document.getElementById('viewer-canvas').scrollLeft === 80");
+        await nativeKey('ArrowLeft', 37, 8);
+        await nativeKey('ArrowLeft', 37, 8);
+        assert.equal(await evaluate("document.getElementById('viewer-canvas').scrollLeft"), 0);
+        await evaluate("document.getElementById('viewer-canvas').scrollLeft=100000");
+        const edge = await evaluate("document.getElementById('viewer-canvas').scrollLeft");
+        await nativeKey('ArrowRight', 39, 8);
+        assert.equal(await evaluate("document.getElementById('viewer-canvas').scrollLeft"), edge, 'Panning stops at the edge');
+        assert.deepEqual(await evaluate('({url:location.href, length:history.length})'), opening, 'Panning and repeats do not navigate or create history');
+        const top = await evaluate("document.getElementById('viewer-canvas').scrollTop");
+        await nativeKey('ArrowDown', 40);
+        await waitFor(`document.getElementById('viewer-canvas').scrollTop > ${top}`);
+        assert.equal(await evaluate('location.href'), opening.url, 'Vertical panning retains its current behavior');
+
+        await evaluate("document.getElementById('viewer-canvas').scrollLeft=80");
+        const point = () => evaluate("import('/gallery.js').then(({app})=>app.viewer.viewport.point())");
+        const inspected = await point();
+        await click('viewer-zoom-in');
+        assert.ok(Math.abs((await point()).x-inspected.x)<2, 'Zoom retains the horizontally inspected point');
+        await browser.presentation(layout === ReadingLayout.SCROLL ? ReadingLayout.SINGLE : ReadingLayout.SCROLL);
+        await readyImage(first);
+        assert.ok(Math.abs((await point()).x-inspected.x)<2, 'Presentation changes retain the horizontally inspected point');
+        await nativeKey('f', 70);
+        await evaluate("document.getElementById('viewer-canvas').focus()");
+        const fitted = await evaluate('location.href');
+        await nativeKey('ArrowRight', 39, 8);
+        assert.equal(await evaluate('location.href'), fitted, 'Shift+arrow never falls back to a page turn when the image fits');
+        await nativeKey('ArrowRight', 39);
+        await readyImage(second);
+        await nativeKey('ArrowLeft', 37);
+        await readyImage(first);
+    }
     await browser.start(viewerUrl(first));
     await readyImage(first);
     await waitFor("document.querySelector('#viewer-strip button[data-path=\"Album/Chapter 1/page10.jpg\"]')");
@@ -15,8 +62,7 @@ export async function run(browser, {first, second}) {
     await nativeKey('ArrowRight', 39);
     await readyImage(second);
     assert.equal(await evaluate('document.activeElement.dataset.path'), second);
-    await call('Input.dispatchKeyEvent', {type:'keyDown', key:'Tab', code:'Tab', windowsVirtualKeyCode:9, modifiers:8});
-    await call('Input.dispatchKeyEvent', {type:'keyUp', key:'Tab', code:'Tab', windowsVirtualKeyCode:9, modifiers:8});
+    await nativeKey('Tab', 9, 8);
     assert.ok(await evaluate("document.activeElement.classList.contains('strip-resizer')"));
     await nativeKey('Tab', 9);
     assert.equal(await evaluate('document.activeElement.dataset.path'), second);
@@ -31,6 +77,8 @@ export async function run(browser, {first, second}) {
     assert.equal(await evaluate('document.activeElement.id'), 'metadata-popover');
     assert.ok(await evaluate("document.getElementById('item-actions').contains(document.getElementById('metadata-popover'))"));
     await nativeKey('ArrowRight', 39);
+    await readyImage(first);
+    await nativeKey('ArrowRight', 39, 8);
     await readyImage(first);
     await nativeKey('Escape', 27);
     assert.ok(await evaluate("document.activeElement.matches('#item-actions .item-info') && !document.getElementById('viewer').hidden"));
@@ -77,4 +125,5 @@ export async function run(browser, {first, second}) {
     await open(viewerUrl('Mixed/2.webm', undefined, 'Mixed'));
     await waitFor("document.getElementById('viewer-video')?.readyState >= 2");
     assert.ok(await evaluate("(() => { const video=document.getElementById('viewer-video'); video.focus(); return ['Tab', 'ArrowRight', ' '].every(key => video.dispatchEvent(new KeyboardEvent('keydown', {key, bubbles:true, cancelable:true}))); })()"), 'Video keys retain their native behavior');
+    assert.ok(await evaluate("document.getElementById('viewer-video').dispatchEvent(new KeyboardEvent('keydown', {key:'ArrowRight', shiftKey:true, bubbles:true, cancelable:true}))"), 'Shift+arrow retains native video behavior');
 }

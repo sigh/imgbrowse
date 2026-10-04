@@ -80,6 +80,26 @@ test('cancelled discovery cannot modify paths or become a retry failure', async 
     assert.equal(after.loading, false);
 });
 
+test('partial traversal warnings survive later successful pages until the window is reset', async () => {
+    const pages = [
+        {images:['p2'], cursor:'next', warnings:['Unreadable folder']},
+        {images:['p3'], cursor:null, warnings:[]},
+    ];
+    const request = async () => pages.shift();
+    const options = {root:'Album', image:'p1', pageSize:1, maxPaths:3};
+    const window = new CollectionWindow(request, options);
+    const after = window.edges[1];
+    const signal = new AbortController().signal;
+    await window.load(after, signal);
+    assert.equal(window.warning, true);
+    assert.equal(after.failed, false, 'Skipped branches do not fail accessible media discovery');
+    await window.load(after, signal);
+    assert.deepEqual(window.paths, ['p1', 'p2', 'p3']);
+    assert.equal(after.done, true);
+    assert.equal(window.warning, true);
+    assert.equal(new CollectionWindow(request, options).warning, false);
+});
+
 test('retry eligibility distinguishes download failures from unplayable media', () => {
     for (const code of [MediaErrorCode.ABORTED, MediaErrorCode.NETWORK]) assert.equal(canRetryMedia({code}), true);
     for (const code of [MediaErrorCode.DECODE, MediaErrorCode.UNSUPPORTED]) assert.equal(canRetryMedia({code}), false);

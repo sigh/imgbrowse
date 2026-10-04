@@ -527,8 +527,9 @@ input[type=search] {
     background: var(--color-surface);
     font-size: .8rem;
 }
-.viewer-feedback:has(#viewer-status:not(:empty), #viewer-retry:not([hidden])) { display: flex; }
-#viewer-status { min-width: 0; max-height: 80px; overflow: auto; color: var(--color-muted); }
+.viewer-feedback:has(#viewer-status:not(:empty), #viewer-warning:not(:empty), #viewer-retry:not([hidden])) { display: flex; }
+#viewer-status, #viewer-warning { min-width: 0; max-height: 80px; overflow: auto; color: var(--color-muted); }
+#viewer-status:empty, #viewer-warning:empty, #viewer-status:not(:empty) ~ #viewer-warning { display: none; }
 .viewer-feedback button, #metadata-status button { flex-shrink: 0; padding: 6px 9px; font-size: .8rem; }
 .strip-frame { position: relative; flex-shrink: 0; min-width: 0; }
 .strip-error { position: absolute; top: 12px; width: 40px; height: 44px; }
