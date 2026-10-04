@@ -41,5 +41,9 @@ export function fitFolderPath(items, widths, {available, spacing, separator, gap
         shown.delete(item);
         parts = segments();
     }
+    // A single overflow control leaves room for both identities on small headers.
+    if (width(parts) > available + 1 && parts.filter(item => item.kind === PathKind.GAP).length > 1) {
+        parts = [{kind:PathKind.GAP, items:items.filter(item => !shown.has(item))}, ...items.filter(item => shown.has(item))];
+    }
     return {parts, truncated:width(parts) > available + 1};
 }

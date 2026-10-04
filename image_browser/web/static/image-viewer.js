@@ -3,7 +3,7 @@ import {closeMetadata} from './metadata.js';
 import {loadOriginal} from './media-cache.js';
 import {walkImages} from './api.js';
 import {byId, plainClick, TaskScope} from './dom.js';
-import {filename, parentPath, ZOOM, ScreenMode, ReadingLayout, ImageSize, ViewerEntry} from './state.js';
+import {filename, parentPath, ZOOM, ScreenMode, ReadingLayout, ImageSize, ViewerEntry, sortKey, sortSettings} from './state.js';
 import {ViewerViewport, imageScale} from './viewer-viewport.js';
 import {ContinuousReader} from './continuous-reader.js';
 import {WheelGesture, WheelMode} from './wheel-gesture.js';
@@ -153,8 +153,9 @@ export class ImageViewer {
         const wasOverview = (this.state?.mode === ScreenMode.OVERVIEW);
         const folderChanged = this.state?.folder !== state.folder;
         const layoutChanged = this.state?.layout !== state.layout;
+        const orderingChanged = sortKey(this.state) !== sortKey(state);
         const sameImage = this.state?.collection === state.collection && this.state?.image === state.image;
-        const anchor = sameImage && layoutChanged && this.state?.mode === ScreenMode.VIEW && state.mode === ScreenMode.VIEW ? this.viewport.point() : null;
+        const anchor = sameImage && (layoutChanged || orderingChanged) && this.state?.mode === ScreenMode.VIEW && state.mode === ScreenMode.VIEW ? this.viewport.point() : null;
         if (!sameImage || state.mode === ScreenMode.BROWSE) this.overviewPoint = null;
         else if (!wasOverview && state.mode === ScreenMode.OVERVIEW) this.overviewPoint = this.viewport.point();
         const point = wasOverview && state.mode === ScreenMode.VIEW ? this.overviewPoint : anchor;
@@ -170,7 +171,7 @@ export class ImageViewer {
         // Capture the reading point before hiding the canvas, then size new media in the active screen.
         byId('overview').hidden = state.mode !== ScreenMode.OVERVIEW;
         byId('viewer-stage').hidden = state.mode === ScreenMode.OVERVIEW;
-        const key = JSON.stringify([state.mode, state.collection, state.image, this.scrolling]);
+        const key = JSON.stringify([state.mode, state.collection, state.image, this.scrolling, sortKey(state)]);
         if (!force && key === this.key) {
             if (this.viewport.size !== state.size) this.viewport.setSize(state.size);
             this.updateControls();
@@ -208,19 +209,22 @@ export class ImageViewer {
             this.updateCollectionLabel();
             return;
         }
-        if (force || this.nearbyCollection !== state.collection) this.nearbyImages = [];
+        if (force || orderingChanged || this.nearbyCollection !== state.collection) {
+            this.nearbyImages = [];
+            this.prefetchScope?.dispose(); this.prefetchPath = null;
+        }
         this.canvas.querySelector('.image-surface').hidden = this.scrolling;
         if (!this.scrolling || this.continuous.collection !== state.collection || !state.image) this.continuous.stop();
         this.updateCollectionLabel();
         this.updateControls();
         if (state.image) {
-            this.renderStrip(force);
+            this.renderStrip(force || orderingChanged);
             if (this.scrolling) {
                 if (this.singleViewport.image.id) {
                     this.singleViewport.clear();
                     this.singleViewport.image.removeAttribute('id');
                 }
-                this.continuous.show(state, force, entry, point);
+                this.continuous.show(state, force || orderingChanged, entry, point);
                 this.nearbyImages = this.continuous.paths;
                 this.nearbyCollection = state.collection;
             } else {
@@ -284,7 +288,7 @@ export class ImageViewer {
         if (index > 1 && index < this.nearbyImages.length - 2) return;
         const results = new Map();
         for (const reverse of [true, false]) {
-            walkImages({root: collection, anchor: image, reverse, limit: NEARBY_COUNT}, scope.signal)
+            walkImages({...sortSettings(this.state), root: collection, anchor: image, reverse, limit: NEARBY_COUNT}, scope.signal)
                 .then(result => {
                     scope.signal.throwIfAborted();
                     results.set(reverse, result);
@@ -339,7 +343,7 @@ export class ImageViewer {
         let warning = this.scrolling && this.continuous.warning;
         try {
             do {
-                const result = await walkImages({root: this.state.collection,
+                const result = await walkImages({...sortSettings(this.state), root: this.state.collection,
                     anchor: wrap ? null : this.state.image, reverse, cursor, limit: 1}, scope.signal);
                 scope.signal.throwIfAborted();
                 warning ||= result.warnings.length > 0;
@@ -377,7 +381,8 @@ export class ImageViewer {
 
     onKey(event) {
         if (!this.state || this.state.mode === ScreenMode.BROWSE || event.ctrlKey || event.metaKey || event.altKey) return;
-        if (document.fullscreenElement || event.target instanceof Element && event.target.closest('#metadata-popover')) return;
+        if (document.fullscreenElement || document.getElementById('sort-popover').matches(':popover-open')
+            || event.target instanceof Element && event.target.closest('#metadata-popover')) return;
         if (event.key === 'Escape') {
             event.preventDefault();
             this.close();

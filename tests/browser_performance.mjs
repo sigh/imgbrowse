@@ -4,9 +4,8 @@ import {connectBrowser} from './browser-harness.mjs';
 import {ScreenMode, ReadingLayout, ImageSize} from '../image_browser/web/static/state.js';
 const [port, base] = process.argv.slice(2);
 const browser = await connectBrowser(port, base);
-const {call, evaluate, waitFor: wait} = browser;
-await call('Emulation.setDeviceMetricsOverride', {width:1440,height:900,deviceScaleFactor:1,mobile:false});
-await call('Page.navigate', {url:base + '/?folder=Large&view=grid'});
+const {evaluate, waitFor: wait} = browser;
+await browser.start('/?folder=Large&view=grid');
 await wait("document.readyState === 'complete' && document.querySelector('.card')");
 await evaluate("import('/gallery.js').then(module=>window.testApp=module.app)");
 await evaluate(`(async()=>{

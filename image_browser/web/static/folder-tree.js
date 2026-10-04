@@ -1,7 +1,7 @@
 import {getFolder, onFolderListing} from './api.js';
 import {byId, element, plainClick} from './dom.js';
 import {setIconButton} from './icons.js';
-import {currentFolder, joinPath, parentPath, ScreenMode} from './state.js';
+import {currentFolder, joinPath, parentPath, ScreenMode, sortKey} from './state.js';
 
 const OVERSCAN = 3;
 const TYPEAHEAD_INTERVAL = 700;
@@ -57,7 +57,7 @@ export class FolderTree {
 
     update(state, rootName) {
         this.state = state;
-        const key = JSON.stringify([state.mode, this.current, state.layout, state.size, state.compact, rootName]);
+        const key = JSON.stringify([state.mode, this.current, state.layout, state.size, state.compact, sortKey(state), rootName]);
         this.rootName = rootName;
         if (key === this.key) return;
         this.key = key;

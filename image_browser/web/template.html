@@ -31,7 +31,15 @@
             <button id="viewer-zoom-out" aria-label="Zoom out" title="Zoom out (−)">−</button>
             <button id="viewer-zoom-in" aria-label="Zoom in" title="Zoom in (+)">+</button>
         </div>
-        <div id="item-actions" class="item-actions"></div>
+        <div class="header-actions">
+            <div class="sort-controls choice-group" role="group" aria-label="Sorting">
+                <button id="sort-toggle" popovertarget="sort-popover" aria-controls="sort-popover" aria-expanded="false" aria-label="Sort by Name" title="Sort by Name">
+                    <span class="sort-caption">Name</span><span class="sort-caret" data-icon="down" aria-hidden="true"></span>
+                </button>
+                <button id="sort-direction-toggle" aria-label="Switch to name descending" title="Name ascending; switch to name descending"><span aria-hidden="true">↑</span></button>
+            </div>
+            <div id="item-actions" class="item-actions"></div>
+        </div>
     </header>
     <div class="workspace">
         <nav id="folder-tree" class="folder-tree" aria-label="Folders" hidden>
@@ -69,6 +77,13 @@
             </section>
         </div>
     </div>
+    <section id="sort-popover" popover="auto" aria-labelledby="sort-title">
+        <fieldset>
+            <legend id="sort-title">Sort by</legend>
+            <label><input class="visually-hidden" type="radio" name="sort" value="natural" checked><span class="criterion-label">Name</span></label>
+            <label><input class="visually-hidden" type="radio" name="sort" value="modified"><span class="criterion-label">File modified</span></label>
+        </fieldset>
+    </section>
     <section id="metadata-popover" popover="manual" tabindex="0" role="region" aria-labelledby="metadata-title">
         <header class="metadata-header">
             <h2 id="metadata-title">Info</h2>

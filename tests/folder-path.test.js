@@ -56,8 +56,9 @@ test('Narrow paths collapse ancestors first and preserve both browsing and file 
 
 test('Names are truncated only after collapsible folders have been removed', () => {
     const items = readingPath();
-    const fitted = fitFolderPath(items, widths, {...geometry, available:180});
+    const fitted = fitFolderPath(items, widths, {...geometry, available:108});
     assert.equal(fitted.truncated, true);
+    assert.deepEqual(fitted.parts[0], {kind:PathKind.GAP, items:[...items.slice(0, 2), ...items.slice(3, 5)]});
     assert.deepEqual(fitted.parts.filter(item => item.kind !== PathKind.GAP), [items[2], items[5]]);
     const root = folderPath({folder:'', rootName:'A long collection name'});
     assert.deepEqual(fitFolderPath(root, [200], {...geometry, available:100}), {parts:root, truncated:true});

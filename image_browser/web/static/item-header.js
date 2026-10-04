@@ -1,6 +1,7 @@
 import {folderPath} from './folder-path.js';
 import {Breadcrumbs} from './breadcrumbs.js';
 import {InfoButton} from './metadata.js';
+import {sortKey} from './state.js';
 
 /** One shared header, explicitly owned by the app and used by Browse and reading. */
 export class ItemHeader {
@@ -10,9 +11,10 @@ export class ItemHeader {
     }
 
     update(options) {
-        // Folder layout changes native link URLs; the path model stays independent of it.
-        this.breadcrumbs.update(folderPath(options), this.compact !== options.compact);
-        this.compact = options.compact;
+        // Native folder links carry the layout and ordering as well as the path.
+        const key = JSON.stringify([options.compact, sortKey(options)]);
+        this.breadcrumbs.update(folderPath(options), this.linkKey !== key);
+        this.linkKey = key;
         this.info.update(options);
     }
 }

@@ -4,7 +4,7 @@ import {getFolder, walkImages, sequence} from './api.js';
 import {byId, element, plainClick, setButtonLabel, TaskScope} from './dom.js';
 import {icon} from './icons.js';
 import {GridLayout} from './grid-layout.js';
-import {filename, joinPath, parentPath, ScreenMode, ItemType} from './state.js';
+import {filename, joinPath, parentPath, ScreenMode, ItemType, sortKey, sortSettings} from './state.js';
 
 const OVERSCAN = 230;
 const DISCOVERY_MARGIN = 400;
@@ -32,7 +32,7 @@ export class FolderGrid {
                     if (index >= 0) {
                         const start = Math.max(0, index - 32), end = Math.min(images.length, index + 33);
                         sequence.seed(collection, images.slice(start, end).map(name => joinPath(collection, name)),
-                            {start: start === 0, end: end === images.length && !folders.length});
+                            {...this.directory.ordering, start: start === 0, end: end === images.length && !folders.length});
                     }
                 }
             }, {capture: true});
@@ -74,7 +74,7 @@ export class FolderGrid {
         if (!state.active) return;
         if (position) this.restorePosition = position;
         this.viewport.classList.toggle('compact', state.compact);
-        if (force || previous?.folder !== state.folder || this.directory?.path !== state.folder) {
+        if (force || previous?.folder !== state.folder || this.directory?.key !== this.directoryKey(state)) {
             this.loadFolder(force);
         } else if (this.directory && !this.loadingFolder
             && (!previous.active || ['recursive', 'compact', 'filter'].some(key => previous[key] !== state[key]))) {
@@ -333,8 +333,8 @@ export class FolderGrid {
 
     rememberDirectory() {
         if (!this.directory?.listing) return;
-        this.cache.delete(this.directory.path);
-        this.cache.set(this.directory.path, this.directory);
+        this.cache.delete(this.directory.key);
+        this.cache.set(this.directory.key, this.directory);
         // Keep recently discovered names for Back, bounded independently of images.
         const count = () => [...this.cache.values()].reduce((sum, item) => sum + item.images.length
             + item.listing.folders.length + item.listing.images.length + item.listing.other_files.length, 0);
@@ -343,9 +343,13 @@ export class FolderGrid {
         }
     }
 
+    directoryKey(state) { return JSON.stringify([state.folder, sortKey(state)]); }
+
     async loadFolder(force) {
         this.rememberDirectory();
-        if (force) this.cache.delete(this.state.folder);
+        const key = this.directoryKey(this.state);
+        const ordering = sortSettings(this.state);
+        if (force) this.cache.delete(key);
         this.scope?.dispose();
         const scope = this.scope = new TaskScope();
         this.loadingFolder = true;
@@ -362,17 +366,17 @@ export class FolderGrid {
         this.viewport.setAttribute('aria-busy', 'true');
         const path = this.state.folder;
         try {
-            this.directory = !force && this.cache.get(path);
+            this.directory = !force && this.cache.get(key);
             if (!this.directory) {
-                const listing = await getFolder(path, scope.signal);
+                const listing = await getFolder(path, scope.signal, ordering);
                 scope.signal.throwIfAborted();
-                this.directory = {path, listing, images: [], cursor: null, done: false, failed: false, warning: ''};
+                this.directory = {path, key, ordering, listing, images: [], cursor: null, done: false, failed: false, warning: ''};
             }
             this.rootName = this.directory.listing.root_name || 'Collection';
             this.folderLoaded(this.rootName);
             const {listing} = this.directory;
             sequence.seed(path, listing.images.slice(0, 2048).map(name => joinPath(path, name)),
-                {start: true, end: listing.images.length <= 2048 && !listing.folders.length});
+                {...ordering, start: true, end: listing.images.length <= 2048 && !listing.folders.length});
             this.loadingFolder = false;
             this.displayFolder();
         } catch (error) {
@@ -433,7 +437,7 @@ export class FolderGrid {
         this.moreButton.hidden = true;
         const scope = this.scope;
         try {
-            const result = await walkImages({root: directory.path, reverse,
+            const result = await walkImages({...directory.ordering, root: directory.path, reverse,
                 anchor: reverse ? directory.images[0]?.path : null, cursor: reverse ? null : directory.cursor}, scope.signal);
             scope.signal.throwIfAborted();
             const added = result.images.map(path => ({type: ItemType.MEDIA, path}));

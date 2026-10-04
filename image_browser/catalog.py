@@ -3,18 +3,18 @@
 from __future__ import annotations
 
 import os
-import re
 import stat
-from bisect import bisect_left, bisect_right
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from time import monotonic
+from uuid import uuid4
 
 from .archives import ARCHIVE_EXTENSIONS, ArchiveCache, ArchiveIndex
 from .cache import SharedCache
+from .ordering import DEFAULT_ORDERING, archive_modified, natural_key
 from .sources import MEDIA_EXTENSIONS, MediaSource
 from .visibility import visible_name
-from .work import WorkGate, check_cancelled
+from .work import Busy, Cancelled, Invalidated, WorkGate, check_cancelled
 
 WALK_BUDGET = 24
 PAGE_SIZE = 60
@@ -48,20 +48,14 @@ class ResolvedEntry:
         return source
 
 
-def natural_key(name):
-    parts = tuple(
-        (1, int(part)) if part.isdigit() else (0, part.casefold())
-        for part in re.split(r'(\d+)', name)
-    )
-    return parts, name
-
-
 class Gallery:
     def __init__(self, root, exclude=()):
         self.root = Path(root).resolve()
         self.excluded = frozenset(exclude)
         self.directory_work = WorkGate()
         self.listings = SharedCache(32 * 1024 * 1024)
+        self.ordered = SharedCache(32 * 1024 * 1024)
+        self.modified_dates = SharedCache(16 * 1024 * 1024)
         self.previews = SharedCache(4 * 1024 * 1024)
         self.sources = SharedCache(4 * 1024 * 1024, ttl=5)
         self.generation = 0
@@ -108,6 +102,8 @@ class Gallery:
         within = lambda path: not relative or path == relative or path.startswith(relative + '/')
         related = lambda path: within(path) or not path or relative.startswith(path + '/')
         self.listings.invalidate(related)
+        self.ordered.invalidate(lambda key: related(key[0]))
+        self.modified_dates.invalidate(lambda key: related(key[0]))
         self.sources.invalidate(within)
         self.previews.invalidate(related)
         self.archives.invalidate()
@@ -154,18 +150,71 @@ class Gallery:
         with self.directory_work:
             return self._locate(relative).media_source()
 
-    def listing(self, relative: str, *, entry=None, valid=None) -> dict:
-        return self.snapshot(relative, entry=entry, valid=valid)['listing']
+    def listing(self, relative: str, *, entry=None, valid=None, ordering=DEFAULT_ORDERING) -> dict:
+        return self.snapshot(relative, entry=entry, valid=valid, ordering=ordering)['listing']
 
-    def snapshot(self, relative, *, entry=None, valid=None):
+    def snapshot(self, relative, *, entry=None, valid=None, ordering=DEFAULT_ORDERING):
         self.validate(relative)
+        generation = self.generation
+        valid = valid or (lambda: generation == self.generation)
         def load():
             listing = self._listing(relative, entry=entry)
-            keys = {kind: [natural_key(name) for name in names] for kind, names in listing.items()}
-            return {'listing': listing, 'keys': keys}
-        return self.listings.get(relative, load,
+            keys = {kind: [DEFAULT_ORDERING.key(name) for name in names] for kind, names in listing.items()}
+            return {'listing': listing, 'keys': keys, 'dates': {}, 'revision': uuid4().hex}
+        snapshot = self.listings.get(relative, load,
                                  lambda item: sum(256 + len(name) * 4 for names in item['listing'].values() for name in names) + 256,
                                  valid=valid)
+        if not valid():
+            raise Invalidated('Refreshed during request')
+        if ordering == DEFAULT_ORDERING:
+            return snapshot
+        key = (relative, ordering, snapshot['revision'])
+        result = self.ordered.get(key, lambda: self._ordered_snapshot(relative, snapshot, ordering, entry, valid),
+                                lambda item: sum(320 + len(name) * 4 for names in item['listing'].values() for name in names) + 256,
+                                valid=valid)
+        if not valid():
+            raise Invalidated('Refreshed during request')
+        return result
+
+    def _ordered_snapshot(self, relative, snapshot, ordering, entry, valid):
+        listing = dict(snapshot['listing'])
+        keys, dates = dict(snapshot['keys']), {}
+        if ordering.sort == 'modified':
+            dates = self.modified_dates.get((relative, snapshot['revision']),
+                lambda: self._modified_dates(relative, listing, entry),
+                lambda groups: sum(128 + len(name) * 4 for values in groups.values() for name in values) + 128,
+                valid=valid)
+        for kind in ('images', 'folders'):
+            values = dates.get(kind, {})
+            records = sorted(((name, ordering.key(name, values.get(name))) for name in listing[kind]),
+                             key=lambda record: record[1])
+            listing[kind] = [name for name, _ in records]
+            keys[kind] = [key for _, key in records]
+        return {'listing': listing, 'keys': keys, 'dates': dates, 'revision': snapshot['revision']}
+
+    def _modified_dates(self, relative, listing, entry):
+        with self.directory_work:
+            entry = entry or self._locate(relative)
+        dates = {}
+        for kind in ('images', 'folders'):
+            values = dates[kind] = {}
+            for name in listing[kind]:
+                check_cancelled()
+                if entry.archive is not None:
+                    inner = str(PurePosixPath(entry.inner) / name)
+                    infos = entry.archive.folder_info if kind == 'folders' else entry.archive.files
+                    values[name] = archive_modified(infos.get(inner))
+                else:
+                    try:
+                        with self.directory_work:
+                            attributes = (entry.file / name).lstat()
+                        values[name] = None if stat.S_ISLNK(attributes.st_mode) else attributes.st_mtime_ns
+                    except (Busy, Cancelled):
+                        raise
+                    except OSError:
+                        check_cancelled()
+                        values[name] = None
+        return dates
 
     def _listing(self, relative: str, *, entry=None) -> dict:
         """Read one directory; never inspect its descendants."""
@@ -244,7 +293,7 @@ class Gallery:
         selected = self.representative(relative, entry=entry, valid=valid)
         return self.source(selected, valid=valid) if selected is not None else None
 
-    def walk(self, root='', anchor=None, reverse=False, cursor=None, limit=PAGE_SIZE):
+    def walk(self, root='', anchor=None, reverse=False, cursor=None, limit=PAGE_SIZE, ordering=DEFAULT_ORDERING):
         """Page through a depth-first sequence; each request visits bounded folders.
 
         An anchor seeds the stack from its ancestors, so opening a deep image
@@ -252,11 +301,23 @@ class Gallery:
         Cursors hold names rather than array offsets and contain no server state.
         """
         self.validate(root)
+        generation = self.generation
+        valid = lambda: generation == self.generation
         if type(limit) is not int or not 1 <= limit <= PAGE_SIZE:
             raise ValueError('Invalid page size')
         if type(reverse) is not bool:
             raise ValueError('Invalid traversal direction')
         phases = ['folders', 'images'] if reverse else ['images', 'folders']
+        if isinstance(cursor, dict):
+            if (cursor.get('version') != 1 or cursor.get('root') != root
+                    or cursor.get('ordering') != ordering.params() or cursor.get('reverse') is not reverse
+                    or cursor.get('generation') != self.generation):
+                raise ValueError('Continuation no longer matches this collection or sort order; refresh the view')
+            cursor = cursor.get('frames')
+            if cursor is None:
+                raise ValueError('Invalid continuation')
+        elif cursor is not None and ordering != DEFAULT_ORDERING:
+            raise ValueError('Invalid ordered continuation')
         stack = self._walk_stack(root, anchor, cursor, phases)
         items, warnings, listings, keys = [], [], {}, {}
         started = monotonic()
@@ -271,7 +332,7 @@ class Gallery:
                 if len(listings) >= WALK_BUDGET or (listings and monotonic() - started > .15):
                     break
                 try:
-                    listings[path] = self.listing(path)
+                    listings[path] = self.listing(path, ordering=ordering, valid=valid)
                 except (OSError, ValueError) as error:
                     check_cancelled()
                     listings[path] = {'folders': [], 'images': []}
@@ -279,25 +340,42 @@ class Gallery:
             phase = phases[frame['phase']]
             names = listings[path][phase]
             if (path, phase) not in keys:
-                keys[path, phase] = self.snapshot(path)['keys'][phase] if names else []
+                keys[path, phase] = self.snapshot(path, ordering=ordering, valid=valid) if names else None
             after = frame['after']
-            index = next_index(keys[path, phase], after, reverse)
+            snapshot = keys[path, phase]
+            values = snapshot['dates'].get(phase, {}) if snapshot else {}
+            if snapshot and frame.get('revision', snapshot['revision']) != snapshot['revision']:
+                raise ValueError('Folder listing changed during traversal; refresh the view')
+            if snapshot:
+                frame['revision'] = snapshot['revision']
+            position = frame.get('position')
+            if after is not None and position is None:
+                if ordering.sort == 'modified' and after not in values:
+                    raise ValueError('Selected item is no longer listed; refresh or reopen the folder')
+                position = ordering.position(after, values.get(after))
+            index = ordering.seek(snapshot['keys'][phase] if snapshot else [], position, reverse)
             if not 0 <= index < len(names):
                 frame['phase'] += 1
                 frame['after'] = None
+                frame.pop('position', None)
                 continue
             name = names[index]
             frame['after'] = name
+            frame['position'] = ordering.position(name, values.get(name))
             child = str(PurePosixPath(path) / name)
             if phase == 'images':
                 items.append(child)
             else:
                 stack.append({'path': child, 'phase': 0, 'after': None})
-        result = {'images': items, 'cursor': stack or None, 'warnings': warnings}
+        if not valid():
+            raise Invalidated('Refreshed during traversal')
+        continuation = {'version': 1, 'root': root, 'ordering': ordering.params(), 'reverse': reverse,
+                        'generation': generation, 'frames': stack} if stack else None
+        result = {'images': items, 'cursor': continuation, 'warnings': warnings}
         # Share the selected collection's listing already read by traversal.
         # Do not scan another directory just to supply tree metadata.
         if root in listings and not any(warning['path'] == root for warning in warnings):
-            result['folders'] = listings[root]['folders']
+            result['folders'] = self.snapshot(root, valid=valid)['listing']['folders']
         return result
 
     def _walk_stack(self, root, anchor, cursor, phases):
@@ -342,18 +420,20 @@ class Gallery:
             if not isinstance(frame['after'], (str, type(None))):
                 # All invalid cursor values share the API's ValueError contract.
                 raise ValueError('Invalid continuation position')  # noqa: TRY004
+            after = frame['after']
+            if after is not None and (not visible_name(after, self.excluded) or '/' in after):
+                raise ValueError('Invalid continuation name')
+            position = frame.get('position')
+            if position is not None:
+                if (not isinstance(position, dict) or set(position) != {'name', 'modified'}
+                        or position['name'] != after):
+                    raise ValueError('Invalid continuation position')
+                value = position['modified']
+                if value is not None and (not isinstance(value, str) or not value.lstrip('-').isdigit() or len(value) > 30):
+                    raise ValueError('Invalid continuation date')
             stack.append(dict(frame))
         return stack
 
 
 def relative_name(path: PurePosixPath) -> str:
     return '' if path == PurePosixPath('.') else str(path)
-
-
-def next_index(keys, after, reverse):
-    """Seek by name rather than offset, tolerating deleted anchor images."""
-    if after is None:
-        return len(keys) - 1 if reverse else 0
-    if reverse:
-        return bisect_left(keys, natural_key(after)) - 1
-    return bisect_right(keys, natural_key(after))

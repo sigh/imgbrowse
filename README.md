@@ -21,6 +21,17 @@ at any depth, including archive members. Hidden names and symlinks are omitted.
 
 ## Browse and read
 
+The **Name ▾** or **File modified ▾** button in the shared header chooses the
+sort criterion. Its adjacent **↑ / ↓** button reverses direction immediately.
+One setting orders folders and media across Browse, Overview, and all reading
+presentations. Browse orders folders and direct media as separate groups;
+Overview and reading show direct media first, then visit child folders
+recursively in the selected order. Natural name ascending is the default.
+Equal modification dates retain natural name order;
+unavailable dates appear last. Sort choices are included in bookmarkable URLs.
+ZIP/CBZ members use their stored local modification dates; implicit archive
+folders have no date. Folder covers and the navigation tree retain natural order.
+
 - **Browse** shows immediate folder contents, with previews or a filtered list.
 - **Overview** shows media throughout the selected folder's descendants.
 - **View** offers thumbnails with one image, one image alone, or continuous scrolling.

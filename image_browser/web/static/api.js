@@ -1,5 +1,6 @@
 import {ResourceCache} from './resource-cache.js';
 import {Sequence} from './sequence.js';
+import {sortSettings} from './state.js';
 
 /** HTTP details live here; views work with folder listings and traversal pages. */
 async function request(url, signal, data) {
@@ -47,12 +48,13 @@ export const getInfo = () => request('/api/info');
 export const getLocation = path => request('/api/location?' + new URLSearchParams({path}));
 export const getMetadata = (path, signal) => request('/api/metadata?' + new URLSearchParams({path}), signal);
 
-export async function getFolder(path, signal) {
-    const listing = await folders.get(path,
-        shared => request('/api/folder?' + new URLSearchParams({path}), shared), signal,
+export async function getFolder(path, signal, ordering = {}) {
+    const settings = sortSettings(ordering);
+    const listing = await folders.get(JSON.stringify([path, settings]),
+        shared => request('/api/folder?' + new URLSearchParams({path, ...settings}), shared), signal,
         value => JSON.stringify(value).length * 2);
     signal?.throwIfAborted();
-    publishFolders(path, listing.folders);
+    publishFolders(path, listing.natural_folders || listing.folders);
     return listing;
 }
 

@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {ResourceCache} from '../image_browser/web/static/resource-cache.js';
 import {Sequence} from '../image_browser/web/static/sequence.js';
+import {SortCriterion, SortOrder} from '../image_browser/web/static/state.js';
 
 test('shared work survives one cancelled consumer and caches its result', async () => {
     const cache = new ResourceCache(10);
@@ -34,6 +35,17 @@ test('sequence reuses grid discoveries and remembers collection boundaries', asy
     assert.deepEqual((await sequence.walk({root: 'album', anchor: 'a.jpg', limit: 16})).images, ['b.jpg', 'c.jpg']);
     assert.deepEqual((await sequence.walk({root: 'album', anchor: 'c.jpg', reverse: true, limit: 16})).images, ['b.jpg', 'a.jpg']);
     assert.equal(requests, 0);
+});
+
+test('sequence isolates adjacency and endpoints for each sort and direction', async () => {
+    const sequence = new Sequence(async () => { throw Error('Unexpected request'); });
+    const orders = [{}, {order:SortOrder.DESCENDING}, {sort:SortCriterion.MODIFIED}, {sort:SortCriterion.MODIFIED, order:SortOrder.DESCENDING}];
+    const images = [['a','b','c'], ['c','b','a'], ['b','c','a'], ['b','a','c']];
+    orders.forEach((ordering, index) => sequence.seed('album', images[index], {...ordering, start:true, end:true}));
+    for (const [index, ordering] of orders.entries()) {
+        assert.deepEqual((await sequence.walk({root:'album', ...ordering})).images, images[index]);
+        assert.deepEqual((await sequence.walk({root:'album', reverse:true, ...ordering})).images, [...images[index]].reverse());
+    }
 });
 
 test('sequence carries the latest anchor through empty server continuation pages', async () => {

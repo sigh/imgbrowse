@@ -13,6 +13,7 @@ from PIL import Image
 
 from .catalog import PAGE_SIZE, Gallery
 from .metadata import metadata
+from .ordering import Ordering
 from .previews import PreviewService
 from .ranges import UnsatisfiableRange, byte_range
 from .sources import VIDEO_TYPES
@@ -31,7 +32,7 @@ STATIC_FILES = {
         'api', 'dom', 'state', 'preview-loader', 'grid-layout', 'folder-grid', 'folder-tree', 'image-viewer',
         'viewer-viewport', 'continuous-reader', 'collection-window', 'wheel-gesture', 'icons', 'thumbnail-strip',
         'resource-cache', 'sequence', 'media-cache', 'folder-path', 'breadcrumbs', 'item-header',
-        'video-player', 'media-kind', 'metadata', 'metadata-data',
+        'video-player', 'media-kind', 'metadata', 'metadata-data', 'sort-controls',
     )},
 }
 
@@ -146,7 +147,10 @@ class GalleryHandler(BaseHTTPRequestHandler):
             self.send_json(metadata(gallery, path, self.gallery_server.image_work,
                                     self.gallery_server.archive_work))
         elif url.path == '/api/folder':
-            self.send_json({'path': path, 'root_name': gallery.root.name, **gallery.listing(path)})
+            ordering = Ordering.from_params({name: values[0] for name, values in query.items()})
+            self.send_json({'path': path, 'root_name': gallery.root.name,
+                            **gallery.listing(path, ordering=ordering),
+                            'natural_folders': gallery.snapshot(path)['listing']['folders']})
         elif url.path == '/thumbnail':
             self._serve_thumbnail(path)
         elif url.path == '/image':
@@ -284,6 +288,7 @@ class GalleryHandler(BaseHTTPRequestHandler):
             anchor=request.get('anchor'),
             reverse=request.get('reverse', False),
             cursor=request.get('cursor'),
+            ordering=Ordering.from_params(request),
             limit=request.get('limit', PAGE_SIZE),
         )
         self.send_json(result)

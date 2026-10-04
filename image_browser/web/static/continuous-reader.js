@@ -3,7 +3,7 @@ import {element, TaskScope} from './dom.js';
 import {loadOriginal} from './media-cache.js';
 import {isVideo, canRetryMedia} from './media-kind.js';
 import {CollectionWindow} from './collection-window.js';
-import {filename, ImageSize, ReadingLayout, ViewerEntry} from './state.js';
+import {filename, ImageSize, ReadingLayout, ViewerEntry, sortKey, sortSettings} from './state.js';
 import {imageScale} from './viewer-viewport.js';
 
 const PAGE_SIZE = 8;
@@ -60,7 +60,8 @@ export class ContinuousReader {
     setSize(size) { const point = this.point(); this.size = size; this.resize(point); }
 
     show(state, force, entry, point) {
-        const reset = force || !this.scope || this.collection !== state.collection || !this.items.some(item => item.path === state.image);
+        const reset = force || !this.scope || this.collection !== state.collection
+            || sortKey(this.ordering) !== sortKey(state) || !this.items.some(item => item.path === state.image);
         if (!reset && entry === ViewerEntry.KEEP && this.size === state.size && !point) {
             this.currentPath = state.image;
             this.identify(); this.changed();
@@ -70,9 +71,10 @@ export class ContinuousReader {
             this.stop();
             this.scope = new TaskScope();
             this.collection = state.collection;
+            this.ordering = sortSettings(state);
             this.items = [this.createItem(state.image)];
             this.surface.insertBefore(this.items[0].row, this.failures[1]);
-            this.window = new CollectionWindow(walkImages, {root:state.collection, image:state.image, pageSize:PAGE_SIZE, maxPaths:MAX_ITEMS});
+            this.window = new CollectionWindow(walkImages, {root:state.collection, image:state.image, pageSize:PAGE_SIZE, maxPaths:MAX_ITEMS, ordering:this.ordering});
         }
         this.surface.hidden = false;
         this.currentPath = state.image;

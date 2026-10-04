@@ -8,7 +8,8 @@ import {FolderTree} from './static/folder-tree.js';
 import {ImageViewer} from './static/image-viewer.js';
 import {closeMetadata} from './static/metadata.js';
 import {PreviewLoader} from './static/preview-loader.js';
-import {currentFolder, filename, imageSize, readingLayout, readState, stateUrl, ScreenMode, ReadingLayout, FolderLayout} from './static/state.js';
+import {SortControls} from './static/sort-controls.js';
+import {currentFolder, filename, imageSize, readingLayout, readState, stateUrl, ScreenMode, ReadingLayout, FolderLayout, sortSettings, sortKey} from './static/state.js';
 
 const FILTER_DELAY = 150;
 
@@ -42,7 +43,7 @@ class GalleryApp {
             changeLayout: layout => this.changeLayout(layout),
             close: () => this.setMode(ScreenMode.BROWSE),
             refresh: () => this.refresh(),
-            renderHeader: options => this.header.update(options),
+            renderHeader: options => this.header.update({...options, ...sortSettings(this.state)}),
         });
         this.tree = new FolderTree({
             destination: path => stateUrl(this.treeDestination(path)),
@@ -50,6 +51,7 @@ class GalleryApp {
             closeTransient: closeMetadata,
         });
         history.scrollRestoration = 'manual';
+        this.sortControls = new SortControls(byId('sort-popover'), changes => this.navigate(changes));
         this.bindControls();
         this.render(false, true);
         this.tree.setOpen(!this.tree.narrow.matches && sessionStorage.getItem('foldersOpen') === '1', false);
@@ -163,6 +165,7 @@ class GalleryApp {
     }
 
     updateControls() {
+        this.sortControls.update(this.state);
         for (const button of document.querySelectorAll('[data-mode]')) {
             button.setAttribute('aria-current', button.dataset.mode === this.state.mode ? 'page' : 'false');
             button.href = stateUrl(this.modeDestination(button.dataset.mode));
@@ -225,6 +228,7 @@ class GalleryApp {
         if (this.state.mode !== ScreenMode.BROWSE) return;
         this.header.update({
             folder: this.state.folder, rootName: this.rootName, compact: this.state.compact,
+            ...sortSettings(this.state),
         });
     }
 
@@ -240,7 +244,8 @@ class GalleryApp {
         byId('filter').value = this.state.filter;
         document.querySelector('.toolbar').inert = this.state.mode !== ScreenMode.BROWSE;
         document.querySelector('.toolbar').hidden = this.state.mode !== ScreenMode.BROWSE;
-        if (force || !previous || previous.mode !== this.state.mode || previous.folder !== this.state.folder || previous.compact !== this.state.compact) this.renderBreadcrumbs();
+        if (force || !previous || previous.mode !== this.state.mode || previous.folder !== this.state.folder
+            || previous.compact !== this.state.compact || sortKey(previous) !== sortKey(this.state)) this.renderBreadcrumbs();
         const overview = this.state.mode === ScreenMode.OVERVIEW;
         const host = byId('overview');
         if (overview && this.grid.viewport.parentNode !== host) {
@@ -265,6 +270,7 @@ class GalleryApp {
             this.grid.focusSelector = browseFocus.selector;
         }
         const gridState = {folder: overview ? this.state.collection : this.state.folder,
+            ...sortSettings(this.state),
             active: this.state.mode !== ScreenMode.VIEW, recursive: overview,
             compact: overview ? false : this.state.compact, filter: overview ? '' : this.state.filter,
             selected: overview ? this.state.image : null};

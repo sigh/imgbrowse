@@ -59,6 +59,12 @@ def make_collection(root):
             image.save(file, exif=exif)
         else:
             image.save(file)
+    # Deliberately oppose name order, with nanoseconds preserved by filesystem sorting.
+    for name, modified in [('Album/Chapter 1/page2.jpg', 1_700_000_000_000_000_002),
+                           ('Album/Chapter 1/page10.jpg', 1_700_000_000_000_000_001),
+                           ('Album/Chapter 1', 1_700_000_000_000_000_002),
+                           ('Album/Chapter 2', 1_700_000_000_000_000_001)]:
+        os.utime(root / name, ns=(modified, modified))
     with zipfile.ZipFile(root / 'Packed.cbz', 'w') as archive:
         for name in ('page10.jpg', 'page2.jpg', 'Chapter 3/page1.jpg'):
             archive.writestr(name, (root / 'root2.jpg').read_bytes())

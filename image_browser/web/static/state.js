@@ -2,6 +2,8 @@
 export const ScreenMode = Object.freeze({BROWSE: 'browse', OVERVIEW: 'overview', VIEW: 'view'});
 export const ReadingLayout = Object.freeze({STRIP: 'strip', SINGLE: 'single', SCROLL: 'scroll'});
 export const FolderLayout = Object.freeze({PREVIEWS: 'previews', LIST: 'list'});
+export const SortCriterion = Object.freeze({NAME: 'natural', MODIFIED: 'modified'});
+export const SortOrder = Object.freeze({ASCENDING: 'asc', DESCENDING: 'desc'});
 export const ImageSize = Object.freeze({DEFAULT: 'auto', ORIGINAL: '1'});
 export const ViewerEntry = Object.freeze({TOP: 'top', BOTTOM: 'bottom', KEEP: 'keep'});
 export const ItemType = Object.freeze({FOLDER: 'folder', MEDIA: 'image', FILE: 'file'});
@@ -10,6 +12,16 @@ export const joinPath = (parent, name) => parent ? parent + '/' + name : name;
 export const parentPath = path => path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : '';
 export const filename = path => path.split('/').pop();
 export const currentFolder = state => state.mode === ScreenMode.BROWSE ? state.folder : state.collection;
+
+/** One normalized ordering identity for URLs, requests, caches, and readers. */
+export function sortSettings(state = {}) {
+    return {sort: Object.values(SortCriterion).includes(state.sort) ? state.sort : SortCriterion.NAME,
+        order: Object.values(SortOrder).includes(state.order) ? state.order : SortOrder.ASCENDING};
+}
+export function sortKey(state) {
+    const {sort, order} = sortSettings(state);
+    return JSON.stringify([sort, order]);
+}
 
 /** Display a path relative to its browsing folder; that folder itself is empty. */
 export function relativePath(base, path) {
@@ -42,6 +54,7 @@ export function readState(search = location.search) {
     const image = query.get('image');
     const view = query.get('view');
     return {
+        ...sortSettings({sort: query.get('sort'), order: query.get('order')}),
         folder,
         size: imageSize(query.get('size')),
         mode: view === OVERVIEW_QUERY_VALUE ? ScreenMode.OVERVIEW
@@ -59,6 +72,9 @@ export function stateUrl(next) {
     if (next.folder) query.set('folder', next.folder);
     if (next.compact) query.set('compact', '1');
     if (next.filter) query.set('filter', next.filter);
+    const {sort, order} = sortSettings(next);
+    if (sort !== SortCriterion.NAME) query.set('sort', sort);
+    if (order !== SortOrder.ASCENDING) query.set('order', order);
     if (next.mode !== ScreenMode.BROWSE) {
         if (next.mode === ScreenMode.OVERVIEW) query.set('view', OVERVIEW_QUERY_VALUE);
         else if (next.layout !== ReadingLayout.STRIP) query.set('view', next.layout);

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import {readState, stateUrl, relativePath, ScreenMode, ReadingLayout, ImageSize} from '../image_browser/web/static/state.js';
+import {readState, stateUrl, relativePath, sortSettings, sortKey, ScreenMode, ReadingLayout, ImageSize, SortCriterion, SortOrder} from '../image_browser/web/static/state.js';
 
 test('strip paths use the browsing folder, including an empty current-folder label', () => {
     const state = readState('folder=Album&collection=Album/Chapter%202&image=Chapter%202/page.jpg');
@@ -14,11 +14,35 @@ test('strip paths use the browsing folder, including an empty current-folder lab
 
 test('legacy image URLs retain their collection override', () => {
     const state = {
+        ...readState(''),
         folder: 'Album & photos', layout: ReadingLayout.SCROLL, compact: true, size: ImageSize.DEFAULT, filter: 'chapter',
         mode: ScreenMode.VIEW, collection: 'Album & photos/Chapter 2',
         image: 'Album & photos/Chapter 2/page #1%.jpg',
     };
     assert.deepEqual(readState(new URL(stateUrl(state), 'http://localhost').search), state);
+});
+
+test('shared sort and direction round trip in every presentation', () => {
+    for (const view of ['', 'grid', 'strip', 'single', 'scroll']) {
+        for (const sort of Object.values(SortCriterion)) for (const order of Object.values(SortOrder)) {
+            const state = readState(new URLSearchParams({folder:'Album', image:'page.jpg', view, sort, order}));
+            assert.deepEqual(readState(new URL(stateUrl(state), 'http://localhost').search), state);
+            const browse = readState(new URL(stateUrl({...state, mode:ScreenMode.BROWSE}), 'http://localhost').search);
+            assert.deepEqual(sortSettings(browse), {sort, order});
+            assert.equal(sortKey(browse), sortKey(state));
+        }
+    }
+    const invalid = readState('sort=capture&order=sideways');
+    assert.deepEqual(sortSettings(invalid), {sort:SortCriterion.NAME, order:SortOrder.ASCENDING});
+    assert.equal(sortKey(invalid), sortKey({}));
+    assert.equal(stateUrl(invalid), '/');
+});
+
+test('legacy folder sort fields are omitted while the shared setting is retained', () => {
+    const state = readState('sort=modified&order=desc&folder_sort=natural&folder_order=asc');
+    assert.equal(stateUrl(state), '/?sort=modified&order=desc');
+    assert.equal('folder_sort' in state, false);
+    assert.equal('folder_order' in state, false);
 });
 
 test('literal percent filenames are preserved', () => {

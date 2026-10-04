@@ -42,9 +42,10 @@ export class Breadcrumbs {
         const previous = new Map(this.rows.map(row => [itemKey(row.item), row]));
         this.rows = items.map(item => {
             const old = previous.get(itemKey(item));
-            const reuse = old && old.item.link === item.link && !(refreshLinks && item.link);
+            const reuse = old && old.item.link === item.link;
             const node = reuse ? old.node : item.kind === PathKind.FILE ? this.name
                 : item.link ? this.folderLink(item.path, item.label) : element('span');
+            if (reuse && refreshLinks && item.link) node.href = this.folderLink(item.path, item.label).href;
             node.classList.add('breadcrumb-item');
             if (!reuse) node.replaceChildren(element('span', 'breadcrumb-label'));
             node.firstElementChild.textContent = item.label;

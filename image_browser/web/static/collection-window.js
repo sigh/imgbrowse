@@ -1,7 +1,7 @@
 /** Bounded collection paths and discovery state; views own elements and geometry. */
 export class CollectionWindow {
-    constructor(request, {root, image, pageSize, maxPaths}) {
-        Object.assign(this, {request, root, pageSize, maxPaths});
+    constructor(request, {root, image, pageSize, maxPaths, ordering = {}}) {
+        Object.assign(this, {request, root, pageSize, maxPaths, ordering});
         this.paths = image ? [image] : [];
         this.edges = [true, false].map(reverse => ({reverse, cursor:null, done:false, loading:false, failed:false, warning:false}));
     }
@@ -13,7 +13,7 @@ export class CollectionWindow {
         this.signal = signal;
         edge.loading = true;
         try {
-            const result = await this.request({root:this.root,
+            const result = await this.request({...this.ordering, root:this.root,
                 anchor:edge.reverse ? this.paths[0] : this.paths.at(-1),
                 reverse:edge.reverse, cursor:edge.cursor, limit:this.pageSize}, signal);
             signal.throwIfAborted();

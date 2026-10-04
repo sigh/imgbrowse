@@ -3,7 +3,7 @@ import {walkImages} from './api.js';
 import {CollectionWindow} from './collection-window.js';
 import {element, TaskScope} from './dom.js';
 import {icon} from './icons.js';
-import {filename, parentPath, relativePath} from './state.js';
+import {filename, parentPath, relativePath, sortKey, sortSettings} from './state.js';
 
 const PAGE_SIZE = 32;
 const MAX_PATHS = 2048;
@@ -38,7 +38,7 @@ export class ThumbnailStrip {
         }, {passive: false});
         container.addEventListener('focusin', event => {
             if (event.target === container) {
-                this.show({collection: this.collection, folder: this.labelRoot, image: this.image}, true, true);
+                this.show({...this.ordering, collection: this.collection, folder: this.labelRoot, image: this.image}, true, true);
                 return;
             }
             if (event.target.dataset.path === this.image) {
@@ -146,17 +146,20 @@ export class ThumbnailStrip {
         for (const edge of this.edges || []) edge.loading = false;
     }
 
-    reset(collection, image) {
+    reset(collection, image, ordering) {
         this.stop(); this.collection = collection;
-        this.window = new CollectionWindow(walkImages, {root:collection, image, pageSize:PAGE_SIZE, maxPaths:MAX_PATHS});
+        this.ordering = ordering;
+        this.window = new CollectionWindow(walkImages, {root:collection, image, pageSize:PAGE_SIZE, maxPaths:MAX_PATHS, ordering});
         this.scrollTo(0);
     }
 
-    show({collection, folder, image}, visible, force = false) {
+    show(state, visible, force = false) {
+        const {collection, folder, image} = state;
         const hadFocus = this.container.contains(document.activeElement);
         // Collection controls traversal; the URL folder controls displayed paths.
         this.labelRoot = folder;
-        if (force || collection !== this.collection || (image && !this.paths.includes(image))) this.reset(collection, image);
+        if (force || collection !== this.collection || sortKey(this.ordering) !== sortKey(state)
+            || (image && !this.paths.includes(image))) this.reset(collection, image, sortSettings(state));
         const opening = !this.visible;
         this.visible = visible; this.container.hidden = !visible; this.frame.hidden = !visible;
         if (!visible) { this.stop(); return; }

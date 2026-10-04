@@ -27,6 +27,7 @@ class ArchiveIndex:
     def __init__(self, file, exclude=()):
         self.folders = {'': set()}
         self.files = {}
+        self.folder_info = {}
         self.direct_files = {}
         self.reader = zipfile.ZipFile(file)
         self.lock = threading.Lock()
@@ -49,6 +50,7 @@ class ArchiveIndex:
                 parent = '/'.join(parts[:-1])
                 self.folders.setdefault(parent, set()).add(parts[-1])
                 self.folders.setdefault(name, set())
+                self.folder_info.setdefault(name, info)
             else:
                 # Duplicates are ambiguous in ZIP files; keep the first visible entry.
                 if name not in self.files:
