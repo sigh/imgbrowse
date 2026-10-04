@@ -45,7 +45,6 @@ export const imageUrl = (path, thumbnail = false) =>
 
 export const getInfo = () => request('/api/info');
 export const getLocation = path => request('/api/location?' + new URLSearchParams({path}));
-export const fullPath = location => location.filesystem_path + (location.archive_member ? '/' + location.archive_member : '');
 export const getMetadata = (path, signal) => request('/api/metadata?' + new URLSearchParams({path}), signal);
 
 export async function getFolder(path, signal) {

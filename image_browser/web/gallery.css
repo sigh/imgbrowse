@@ -216,7 +216,7 @@ a {
     width: var(--control-height);
 }
 .copy-path .icon, .item-info .icon { width: var(--control-icon-small); height: var(--control-icon-small); }
-.copy-feedback { grid-column: 1 / -1; grid-row: 2; font-size: var(--font-size-small); }
+.copy-feedback { display: block; margin-top: var(--space-sm); font-size: var(--font-size-small); }
 .copy-feedback:empty { display: none; }
 .clipboard-input { position: fixed; left: -9999px; top: 0; }
 
@@ -237,14 +237,23 @@ a {
 }
 .metadata-header { display: flex; align-items: center; gap: var(--space-lg); justify-content: space-between; }
 .metadata-header h2 { margin: 0; font-size: .95rem; overflow-wrap: anywhere; }
+.metadata-header .metadata-close { flex-shrink: 0; }
 #metadata-status { color: var(--color-muted); }
 #metadata-status:empty { display: none; }
-#metadata-details { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 4px 10px; margin: 8px 0 0; line-height: 1.4; }
-#metadata-details dt { color: var(--color-muted); }
+#metadata-details { line-height: 1.45; }
 #metadata-details dd { margin: 0; overflow-wrap: anywhere; }
-#metadata-details .metadata-path { display: grid; grid-template-columns: var(--control-height) minmax(0, 1fr); column-gap: var(--space-sm); align-items: start; }
-.metadata-path .copy-path { grid-column: 1; grid-row: 1; }
-.metadata-path-text { grid-column: 2; grid-row: 1; min-width: 0; user-select: all; }
+.metadata-path-heading { display: flex; align-items: center; justify-content: space-between; gap: var(--space-md); color: var(--color-muted); }
+.metadata-path-text { overflow-wrap: anywhere; user-select: all; }
+.metadata-summary { display: flex; align-items: center; border-top: 1px solid var(--color-border-subtle); padding-top: 10px; margin: var(--space-lg) 0; }
+.metadata-summary > div { padding-inline: var(--space-lg); }
+.metadata-summary > div:first-child { padding-left: 0; flex: 1; font-weight: 600; }
+.metadata-summary > div:last-child { padding-right: 0; }
+.metadata-summary > div + div { border-left: 1px solid var(--color-muted); }
+.metadata-summary dd { white-space: nowrap; }
+.metadata-attributes { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 4px var(--space-lg); margin: 0; }
+.metadata-attributes dt, .metadata-age { color: var(--color-muted); }
+.metadata-date { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--space-sm); }
+.visually-hidden { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 
 .toolbar {
     display: flex;

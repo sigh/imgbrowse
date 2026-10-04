@@ -2,8 +2,31 @@
 
 from contextlib import ExitStack
 from datetime import datetime, timezone
+from math import isfinite
 
 from PIL import Image
+from PIL.ExifTags import Base, GPS, IFD
+
+
+def _gps_location(gps):
+    """Decode EXIF degrees/minutes/seconds into signed decimal coordinates."""
+    try:
+        location = {}
+        for name, tag, reference, directions, limit in (
+            ('latitude', GPS.GPSLatitude, GPS.GPSLatitudeRef, 'NS', 90),
+            ('longitude', GPS.GPSLongitude, GPS.GPSLongitudeRef, 'EW', 180),
+        ):
+            degrees, minutes, seconds = map(float, gps[tag])
+            direction = gps[reference]
+            coordinate = degrees + minutes / 60 + seconds / 3600
+            if (direction not in (directions[0], directions[1]) or not isfinite(coordinate)
+                    or not 0 <= degrees <= limit or not 0 <= coordinate <= limit
+                    or not 0 <= minutes < 60 or not 0 <= seconds < 60):
+                return None
+            location[name] = -coordinate if direction == directions[1] else coordinate
+        return location
+    except (KeyError, TypeError, ValueError, ZeroDivisionError, OverflowError):
+        return None
 
 
 def metadata(gallery, relative, image_work, archive_work):
@@ -37,17 +60,20 @@ def metadata(gallery, relative, image_work, archive_work):
                 image = stack.enter_context(Image.open(stream))
                 result.update(width=image.width, height=image.height, format=image.format,
                               color_mode=image.mode)
-                fields = {271: 'Camera make', 272: 'Camera model', 306: 'Image date',
-                          315: 'Artist', 33432: 'Copyright', 274: 'Orientation'}
+                fields = {Base.Make: 'Camera make', Base.Model: 'Camera model', Base.DateTime: 'Image date',
+                          Base.Artist: 'Artist', Base.Copyright: 'Copyright', Base.Orientation: 'Orientation'}
                 exif = image.getexif()
                 result['exif'] = {label: str(value) for tag, label in fields.items()
                                   if (value := exif.get(tag)) is not None}
-                taken = exif.get_ifd(34665).get(36867) if 34665 in exif else None
+                taken = exif.get_ifd(IFD.Exif).get(Base.DateTimeOriginal) if IFD.Exif in exif else None
                 if taken:
                     try:
                         result['exif']['Taken'] = datetime.strptime(str(taken), '%Y:%m:%d %H:%M:%S').isoformat()
                     except ValueError:
                         result['exif']['Taken'] = str(taken)
+                location = _gps_location(exif.get_ifd(IFD.GPSInfo))
+                if location is not None:
+                    result['location'] = location
         except (OSError, ValueError, Image.DecompressionBombError) as error:
             result['metadata_error'] = str(error)
     return result

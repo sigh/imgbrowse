@@ -79,7 +79,14 @@ export async function run(browser, fixtures) {
     assert.equal(await evaluate("document.querySelector('#item-actions > .item-info').textContent.trim()"), '', 'Header actions use icons with accessible names');
     await browser.openInfo();
     await waitFor("document.getElementById('metadata-details').textContent.includes('1000 × 1800')");
-    assert.equal(await evaluate("(() => { const path=document.querySelector('.metadata-path'); const size=[...document.querySelectorAll('#metadata-details dt')].find(row => row.textContent==='Size').nextElementSibling; return path.getBoundingClientRect().left===size.getBoundingClientRect().left && getComputedStyle(path).fontSize===getComputedStyle(size).fontSize; })()"), true, 'Paths use the same value column and type size as other details');
+    assert.ok(await evaluate("(() => { const path=document.querySelector('.metadata-path'), text=path.querySelector('.metadata-path-text'), facts=document.querySelector('.metadata-summary'), copy=path.querySelector('.copy-path'), heading=path.querySelector('.metadata-path-heading'); return path===document.getElementById('metadata-details').firstElementChild && path.getBoundingClientRect().bottom <= facts.getBoundingClientRect().top && text.getBoundingClientRect().width===path.getBoundingClientRect().width && copy.getBoundingClientRect().right===heading.getBoundingClientRect().right; })()"), 'Location is first, the path spans the panel and Copy stays beside its heading');
+    assert.deepEqual(await evaluate("[...document.querySelectorAll('.metadata-date')].map(row => ({label:row.previousElementSibling.textContent, date:!!row.querySelector('time').dateTime, age:row.querySelector('.metadata-age')?.textContent.startsWith('(')}))"),
+        [{label:'Modified', date:true, age:true}, {label:'Taken', date:true, age:true}], 'Modified and Taken share exact-date and relative-age rendering');
+    const location = await evaluate("(() => { const label=[...document.querySelectorAll('.metadata-attributes dt')].find(row => row.textContent==='Location'), link=label.nextElementSibling.querySelector('a'); return {value:link.textContent, href:link.href, target:link.target, rel:link.rel}; })()");
+    assert.equal(location.value, '33.86000° S, 151.20000° E');
+    assert.equal(new URL(location.href).searchParams.get('mlat'), '-33.86');
+    assert.equal(location.target, '_blank', 'A map can be opened while keeping the reader in place');
+    assert.equal(location.rel, 'noopener noreferrer');
     assert.deepEqual(await evaluate("({header:document.querySelector('.app-header').offsetHeight, canvas:document.getElementById('viewer-canvas').getBoundingClientRect().toJSON()})"), viewerFrame, 'Opening Info must not resize or move the viewer');
     assert.equal(await evaluate("document.querySelector('#item-path .item-info') === null"), true);
     assert.match(await evaluate("document.querySelector('#metadata-details .copy-path').getAttribute('aria-label')"), /^(Copy full path|Copied)$/);

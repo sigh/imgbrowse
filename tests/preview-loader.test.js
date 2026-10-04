@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {TaskScope} from '../image_browser/web/static/dom.js';
-import {PreviewLoader, durationLabel} from '../image_browser/web/static/preview-loader.js';
+import {PreviewLoader} from '../image_browser/web/static/preview-loader.js';
+import {durationLabel} from '../image_browser/web/static/media-kind.js';
 
 function scheduler() {
     return new PreviewLoader(

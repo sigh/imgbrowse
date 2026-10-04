@@ -16,6 +16,7 @@ from urllib.request import Request, urlopen
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from PIL import Image, ImageDraw
+from PIL.ExifTags import Base, GPS, IFD
 
 from image_browser.server import GalleryHandler, GalleryServer
 
@@ -50,7 +51,14 @@ def make_collection(root):
                 draw.rectangle((40, y, 960, y + 290), outline='black', width=4)
                 draw.ellipse((90, y + 30, 280, y + 250), fill='#647b83')
                 draw.text((340, y + 80), f'Panel {panel + 1}: sample reading text', fill='black')
-        image.save(file)
+        if name == 'Album/Chapter 1/page2.jpg':
+            exif = Image.Exif()
+            exif[IFD.Exif] = {Base.DateTimeOriginal: '2024:03:14 12:30:00'}
+            exif[IFD.GPSInfo] = {GPS.GPSLatitudeRef: 'S', GPS.GPSLatitude: (33, 51, 36),
+                                 GPS.GPSLongitudeRef: 'E', GPS.GPSLongitude: (151, 12, 0)}
+            image.save(file, exif=exif)
+        else:
+            image.save(file)
     with zipfile.ZipFile(root / 'Packed.cbz', 'w') as archive:
         for name in ('page10.jpg', 'page2.jpg', 'Chapter 3/page1.jpg'):
             archive.writestr(name, (root / 'root2.jpg').read_bytes())

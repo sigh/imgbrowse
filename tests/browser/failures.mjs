@@ -83,12 +83,12 @@ export async function run(browser, {first, second, absoluteRoot}) {
     await readyImage('Packed.cbz/page2.jpg');
     await evaluate("document.querySelector('#item-actions .item-info').click()");
     await waitFor("document.querySelector('.metadata-path')");
-    assert.equal(await evaluate("document.querySelector('.metadata-path').previousElementSibling.textContent"), 'Member path');
-    assert.equal(await evaluate("document.querySelector('.metadata-path').textContent"), absoluteRoot + '/Packed.cbz/page2.jpg');
+    assert.equal(await evaluate("document.querySelector('.metadata-path-heading').textContent"), 'Member path');
+    assert.equal(await evaluate("document.querySelector('.metadata-path-text').textContent"), absoluteRoot + '/Packed.cbz/page2.jpg');
     await nativeKey('Escape', 27);
     await open('/?folder=Packed.cbz');
     await evaluate("document.querySelector('#item-actions .item-info').click()");
-    await waitFor("document.querySelector('.metadata-path')?.previousElementSibling.textContent === 'Archive'");
+    await waitFor("document.querySelector('.metadata-path-heading')?.textContent === 'Archive'");
     await nativeKey('Escape', 27);
     await open('/?folder=Empty&viewer=1');
     await waitFor("document.getElementById('viewer-status').textContent === 'No images or videos in this collection.'");

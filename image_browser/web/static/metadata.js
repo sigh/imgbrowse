@@ -1,27 +1,10 @@
-import {getMetadata, fullPath} from './api.js';
+import {getMetadata, getVideoInfo} from './api.js';
+import {metadataInfo, MetadataKind} from './metadata-data.js';
 import {byId, element} from './dom.js';
 import {filename} from './state.js';
 import {setIconButton} from './icons.js';
 
 let request;
-
-function bytes(value) {
-    if (value < 1024) return `${value} bytes`;
-    const units = ['KiB', 'MiB', 'GiB', 'TiB'];
-    let index = -1;
-    do { value /= 1024; index++; } while (value >= 1024 && index < units.length - 1);
-    return `${value.toLocaleString(undefined, {maximumFractionDigits: 2})} ${units[index]}`;
-}
-
-/** Unambiguous numeric date and 24-hour time, at minute precision. */
-export function formatMetadataDate(value) {
-    if (!value) return undefined;
-    const date = new Date(value);
-    if (Number.isNaN(date.getTime())) return undefined;
-    const pad = part => String(part).padStart(2, '0');
-    return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
-}
-
 let context;
 const popover = () => byId('metadata-popover');
 const metadataOpen = () => popover().matches(':popover-open');
@@ -102,29 +85,12 @@ async function loadMetadata(path) {
     try {
         const data = await getMetadata(path, controller.signal);
         if (controller.signal.aborted) return;
-        byId('metadata-title').textContent = data.name;
-        const row = (label, value, className = '') => {
-            if (value !== undefined && value !== null) details.append(element('dt', '', label), element('dd', className, String(value)));
-        };
-        if (data.width !== undefined) row('Dimensions', `${data.width} × ${data.height}`);
-        if (data.size !== undefined) row('Size', bytes(data.size));
-        row('Format', data.format);
-        if (data.archive_size !== undefined) row('Archive size', bytes(data.archive_size));
-        if (data.folders !== undefined) {
-            row('Media', data.media);
-            row('Folders', data.folders);
+        const summary = renderMetadata(metadataInfo(data));
+        if (data.kind === MetadataKind.VIDEO) {
+            getVideoInfo(path, controller.signal).then(video => {
+                if (!controller.signal.aborted) renderSummary(summary, metadataInfo({...data, duration:video.duration}).summary);
+            }).catch(() => {});
         }
-        const exif = data.exif || {};
-        row('Camera', [exif['Camera make'], exif['Camera model']].filter(Boolean).join(' ') || undefined);
-        row('Taken', formatMetadataDate(exif.Taken));
-        row(data.kind === 'directory' && data.archive_member ? 'Archive date' : 'Modified', formatMetadataDate(data.modified));
-        for (const label of ['Artist', 'Copyright']) row(label, exif[label]);
-        const pathRow = element('dd', 'metadata-path');
-        const pathText = fullPath(data);
-        copyPathButton(pathRow, pathText);
-        pathRow.append(element('span', 'metadata-path-text', pathText));
-        details.append(element('dt', '', data.archive_member ? 'Member path' : data.kind === 'archive' ? 'Archive' : 'Path'), pathRow);
-        status.textContent = data.metadata_error ? 'Image details unavailable.' : '';
     } catch {
         if (controller.signal.aborted) return;
         const retry = element('button', '', 'Retry');
@@ -133,6 +99,52 @@ async function loadMetadata(path) {
         status.textContent = 'Unable to load info. ';
         status.append(retry);
     }
+}
+
+function renderSummary(container, facts) {
+    container.replaceChildren();
+    container.hidden = facts.length === 0;
+    for (const {label, value} of facts) {
+        const group = element('div');
+        group.append(element('dt', 'visually-hidden', label), element('dd', '', value));
+        container.append(group);
+    }
+}
+
+/** Presentation consumes prepared values; it does not interpret API metadata. */
+function renderMetadata(info) {
+    byId('metadata-title').textContent = info.name;
+    const path = element('section', 'metadata-path');
+    const heading = element('div', 'metadata-path-heading', info.pathLabel);
+    const copy = copyPathControl(info.path);
+    heading.append(copy.button);
+    path.append(heading, element('div', 'metadata-path-text', info.path), copy.feedback);
+    const summary = element('dl', 'metadata-summary');
+    renderSummary(summary, info.summary);
+    const attributes = element('dl', 'metadata-attributes');
+    for (const row of info.rows) attributes.append(element('dt', '', row.label), renderAttribute(row));
+    attributes.hidden = attributes.childElementCount === 0;
+    byId('metadata-details').replaceChildren(path, summary, attributes);
+    byId('metadata-status').textContent = info.status;
+    return summary;
+}
+
+function renderAttribute({value, datetime, age, href}) {
+    const content = element('dd');
+    if (datetime) {
+        content.className = 'metadata-date';
+        const date = element('time', '', value);
+        date.dateTime = datetime;
+        content.append(date);
+        if (age) content.append(element('span', 'metadata-age', `(${age})`));
+    } else if (href) {
+        const link = element('a', '', value);
+        link.href = href;
+        link.target = '_blank';
+        link.rel = 'noopener noreferrer';
+        content.append(link);
+    } else content.textContent = value;
+    return content;
 }
 
 async function copyPath(path) {
@@ -154,12 +166,11 @@ async function copyPath(path) {
 }
 
 /** Copy the full path displayed in Info, including archive member identity. */
-function copyPathButton(holder, path) {
+function copyPathControl(path) {
     const copy = element('button', 'copy-path');
     copy.type = 'button';
     const feedback = element('span', 'copy-feedback');
     feedback.setAttribute('role', 'status');
-    holder.append(copy, feedback);
     let feedbackTimer;
     const reset = () => {
         feedback.textContent = '';
@@ -182,5 +193,5 @@ function copyPathButton(holder, path) {
             }
         }
     });
-    return copy;
+    return {button:copy, feedback};
 }

@@ -1,6 +1,6 @@
 import {getThumbnail, cachedThumbnail, getVideoInfo} from './api.js';
 import {element} from './dom.js';
-import {isVideo} from './media-kind.js';
+import {isVideo, durationLabel} from './media-kind.js';
 import {icon} from './icons.js';
 
 const PREVIEW_CONCURRENCY = 8;
@@ -153,12 +153,4 @@ export class PreviewLoader {
             });
         }
     }
-}
-
-export function durationLabel(seconds) {
-    if (!Number.isFinite(seconds) || seconds < 0) return '';
-    const total = Math.floor(seconds);
-    const minutes = Math.floor(total / 60);
-    return (minutes >= 60 ? Math.floor(minutes / 60) + ':' + String(minutes % 60).padStart(2, '0') : minutes)
-        + ':' + String(total % 60).padStart(2, '0');
 }

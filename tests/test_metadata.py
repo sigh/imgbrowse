@@ -12,7 +12,10 @@ from unittest.mock import patch
 from urllib.parse import urlencode
 
 from PIL import Image
+from PIL.ExifTags import GPS, IFD
+from PIL.TiffImagePlugin import IFDRational
 
+from image_browser.metadata import _gps_location
 from image_browser.server import GalleryServer
 
 
@@ -29,6 +32,8 @@ class MetadataTests(unittest.TestCase):
         exif = Image.Exif()
         exif[272] = 'Test camera'
         exif[34665] = {36867: '2024:03:14 12:30:00'}
+        exif[IFD.GPSInfo] = {GPS.GPSLatitudeRef: 'S', GPS.GPSLatitude: (33, 51, IFDRational(36)),
+                             GPS.GPSLongitudeRef: 'E', GPS.GPSLongitude: (151, 12, IFDRational(0))}
         Image.new('RGB', (40, 60)).save(buffer, 'JPEG', exif=exif)
         self.image = buffer.getvalue()
         (self.root / 'photo.jpg').write_bytes(self.image)
@@ -50,6 +55,8 @@ class MetadataTests(unittest.TestCase):
         self.assertEqual(data['size'], len(self.image))
         self.assertEqual(data['exif']['Camera model'], 'Test camera')
         self.assertEqual(data['exif']['Taken'], '2024-03-14T12:30:00')
+        self.assertAlmostEqual(data['location']['latitude'], -33.86)
+        self.assertAlmostEqual(data['location']['longitude'], 151.2)
         self.assertIsNone(data['archive_member'])
 
     def test_directory_counts_do_not_traverse_descendants(self):
@@ -72,6 +79,8 @@ class MetadataTests(unittest.TestCase):
         self.assertEqual(data['archive_member'], 'chapter/page.jpg')
         self.assertEqual(data['filesystem_path'], str(self.root / 'book.cbz'))
         self.assertEqual((data['width'], data['height'], data['size']), (40, 60, len(self.image)))
+        self.assertAlmostEqual(data['location']['latitude'], -33.86)
+        self.assertAlmostEqual(data['location']['longitude'], 151.2)
         self.assertLess(data['compressed_size'], data['size'])
         self.assertEqual(self.request('book.cbz')[1]['kind'], 'archive')
         folder = self.request('book.cbz/chapter')[1]
@@ -84,6 +93,24 @@ class MetadataTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertEqual(data['size'], 6)
         self.assertIn('metadata_error', data)
+
+    def test_image_without_gps_has_no_location(self):
+        Image.new('RGB', (40, 60)).save(self.root / 'plain.jpg')
+        status, data = self.request('plain.jpg')
+        self.assertEqual(status, 200)
+        self.assertNotIn('location', data)
+        self.assertNotIn('metadata_error', data)
+
+    def test_gps_coordinates_require_both_axes_and_valid_values(self):
+        gps = {GPS.GPSLatitudeRef: 'N', GPS.GPSLatitude: (0, 0, 0),
+               GPS.GPSLongitudeRef: 'W', GPS.GPSLongitude: (74, 0, 0)}
+        self.assertEqual(_gps_location(gps), {'latitude': 0, 'longitude': -74})
+        for invalid in [{}, {**gps, GPS.GPSLatitudeRef: ''}, {**gps, GPS.GPSLatitudeRef: 'X'},
+                        {**gps, GPS.GPSLatitude: (91, 0, 0)}, {**gps, GPS.GPSLatitude: (33, 60, 0)},
+                        {**gps, GPS.GPSLatitude: (33, 0)}, {**gps, GPS.GPSLatitude: (float('nan'), 0, 0)},
+                        {**gps, GPS.GPSLongitude: (74, 0, IFDRational(0, 0))}]:
+            with self.subTest(gps=invalid):
+                self.assertIsNone(_gps_location(invalid))
 
     def test_rejects_hidden_escaping_missing_and_symlink_paths(self):
         (self.root / 'link.jpg').symlink_to(self.root / 'photo.jpg')

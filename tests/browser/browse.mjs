@@ -64,13 +64,13 @@ export async function run(browser, fixtures) {
     const absoluteRoot = await evaluate('window.copiedPath');
     assert.ok(absoluteRoot.startsWith('/'));
     await evaluate("{ const info=document.querySelector('#item-actions .item-info'); info.focus(); }");
-    await waitFor("document.getElementById('metadata-details').textContent.includes('Media')");
+    await waitFor("document.getElementById('metadata-details').textContent.includes('direct media')");
     assert.equal(await evaluate("getComputedStyle(document.querySelector('#item-actions .item-info')).backgroundColor"), actionColors.selected, 'Expanded Info shares the selected-layout treatment');
 
     assert.equal(await evaluate("document.getElementById('metadata-popover').matches(':popover-open')"), true);
     assert.ok(await evaluate("document.querySelector('#metadata-popover #metadata-close') && document.querySelector('#metadata-details .copy-path') && !document.querySelector('.app-header > .item-location .copy-path')"), 'Copy belongs in Info alongside the full path');
     assert.equal(await evaluate("[...document.querySelectorAll('#metadata-details dt')].some(row => row.textContent === 'Type')"), false);
-    assert.equal(await evaluate("import('/static/metadata.js').then(({formatMetadataDate}) => formatMetadataDate('2005-01-10T17:08:17'))"), '2005-01-10 17:08');
+    assert.equal(await evaluate("import('/static/metadata-data.js').then(({formatMetadataDate}) => formatMetadataDate('2005-01-10T17:08:17'))"), '2005-01-10 17:08');
     const folderActions = await evaluate("document.getElementById('item-actions').getBoundingClientRect().toJSON()");
 
     assert.equal(await evaluate("document.getElementById('metadata-details').textContent.includes('including archives') || document.getElementById('metadata-details').textContent.includes('Scope')"), false);
