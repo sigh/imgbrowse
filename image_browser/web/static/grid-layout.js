@@ -30,8 +30,9 @@ export class GridLayout {
         this.captionGap = number('--space-md');
         this.folderIconWidth = number('--control-icon-size') + number('--space-sm');
         this.listGap = number('--list-gap');
+        this.listMinHeight = number('--list-row-height');
         this.listBaseWidth = this.captionPadding * 2 + number('--list-kind-width') + this.listGap;
-        this.listDurationWidth = number('--list-duration-width');
+        this.listDetailWidth = number('--list-detail-width');
         this.rowPadding = number('--grid-row-padding');
         this.fontFamily = style.fontFamily;
         this.compact = this.viewport.classList.contains('compact');
@@ -79,11 +80,20 @@ export class GridLayout {
         return height;
     }
 
-    append(items) {
+    appendDisclosure(path, label, files, expanded) {
+        const row = {top:this.height, height:this.listMinHeight, path, label, expanded, disclosure:true};
+        this.rows.push(row);
+        this.byPath.set('heading:' + path, row);
+        this.height += row.height;
+        if (expanded) this.append(files, true);
+    }
+
+    append(items, compact = this.compact) {
         const last = this.rows.at(-1);
-        let current = last?.items ? last : null;
+        let current = last?.items && last.compact === compact ? last : null;
         let previousFolder = current ? parentPath(current.items.at(-1).path) : null;
-        const cardWidth = (this.contentWidth - (this.columns - 1) * this.gap) / this.columns;
+        const columns = compact ? 1 : this.columns;
+        const cardWidth = (this.contentWidth - (columns - 1) * this.gap) / columns;
         for (const item of items) {
             const folder = parentPath(item.path);
             if (this.recursive && folder !== previousFolder) {
@@ -96,8 +106,8 @@ export class GridLayout {
                 this.height += height;
                 previousFolder = folder;
             }
-            if (!current || current.items.length === this.columns) {
-                current = {top: this.height, height: this.minHeight, items: [], startIndex: this.itemCount};
+            if (!current || current.items.length === columns) {
+                current = {top: this.height, height: compact ? this.listMinHeight : this.minHeight, items: [], startIndex: this.itemCount, compact, columns};
                 this.rows.push(current);
                 this.height += current.height;
             }
@@ -105,12 +115,12 @@ export class GridLayout {
             this.itemCount++;
             this.byPath.set('item:' + item.path, current);
             const isFolder = item.type === ItemType.FOLDER;
-            const controlsWidth = this.compact
+            const controlsWidth = compact
                 ? this.listBaseWidth + (isFolder ? this.folderActionsWidth + this.listGap
-                    : isVideo(item.path) ? this.listDurationWidth + this.listGap : 0)
+                    : item.type === ItemType.FILE || isVideo(item.path) ? this.listDetailWidth + this.listGap : 0)
                 : this.captionPadding * 2 + 2 + (isFolder ? this.folderActionsWidth + this.captionGap + this.folderIconWidth : 0);
             const labelWidth = cardWidth - controlsWidth;
-            const contentHeight = this.compact
+            const contentHeight = compact
                 ? this.labelHeight(filename(item.path), labelWidth, this.cardFont) + 16
                 : this.imageHeight + this.captionPadding * 2 + 2 + this.rowPadding * 2
                 + this.labelHeight(filename(item.path), labelWidth, this.cardFont);

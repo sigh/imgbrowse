@@ -55,11 +55,11 @@ class ExclusionTests(unittest.TestCase):
 
     def test_listings_and_paged_traversal_omit_excluded_branches(self):
         self.assertEqual(self.gallery.listing(''),
-                         {'folders': ['@eaDir-old', 'Album', 'book.cbz'], 'images': []})
-        self.assertEqual(self.gallery.listing('Album'), {'folders': [], 'images': ['page.jpg']})
-        self.assertEqual(self.gallery.listing('book.cbz'), {'folders': ['Chapter'], 'images': []})
+                         {'folders': ['@eaDir-old', 'Album', 'book.cbz'], 'images': [], 'other_files': []})
+        self.assertEqual(self.gallery.listing('Album'), {'folders': [], 'images': ['page.jpg'], 'other_files': []})
+        self.assertEqual(self.gallery.listing('book.cbz'), {'folders': ['Chapter'], 'images': [], 'other_files': []})
         self.assertEqual(self.gallery.listing('book.cbz/Chapter'),
-                         {'folders': [], 'images': ['page.jpg']})
+                         {'folders': [], 'images': ['page.jpg'], 'other_files': []})
         expected = ['@eaDir-old/page.jpg', 'Album/page.jpg', 'book.cbz/Chapter/page.jpg']
         self.assertEqual(self.sequence(), expected)
         self.assertEqual(self.sequence(reverse=True), expected[::-1])

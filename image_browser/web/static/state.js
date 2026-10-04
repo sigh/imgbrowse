@@ -4,7 +4,7 @@ export const ReadingLayout = Object.freeze({STRIP: 'strip', SINGLE: 'single', SC
 export const FolderLayout = Object.freeze({PREVIEWS: 'previews', LIST: 'list'});
 export const ImageSize = Object.freeze({DEFAULT: 'auto', ORIGINAL: '1'});
 export const ViewerEntry = Object.freeze({TOP: 'top', BOTTOM: 'bottom', KEEP: 'keep'});
-export const ItemType = Object.freeze({FOLDER: 'folder', MEDIA: 'image'});
+export const ItemType = Object.freeze({FOLDER: 'folder', MEDIA: 'image', FILE: 'file'});
 
 export const joinPath = (parent, name) => parent ? parent + '/' + name : name;
 export const parentPath = path => path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : '';

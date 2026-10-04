@@ -26,8 +26,8 @@ def visible_member(name, excluded=()):
 class ArchiveIndex:
     def __init__(self, file, exclude=()):
         self.folders = {'': set()}
-        self.images = {}
-        self.direct_images = {}
+        self.files = {}
+        self.direct_files = {}
         self.reader = zipfile.ZipFile(file)
         self.lock = threading.Lock()
         self.sorted_listings = {}
@@ -49,20 +49,22 @@ class ArchiveIndex:
                 parent = '/'.join(parts[:-1])
                 self.folders.setdefault(parent, set()).add(parts[-1])
                 self.folders.setdefault(name, set())
-            elif PurePosixPath(name).suffix.lower() in IMAGE_EXTENSIONS:
+            else:
                 # Duplicates are ambiguous in ZIP files; keep the first visible entry.
-                if name not in self.images:
-                    self.images[name] = info
-                    self.direct_images.setdefault('/'.join(parts[:-1]), set()).add(parts[-1])
+                if name not in self.files:
+                    self.files[name] = info
+                    self.direct_files.setdefault('/'.join(parts[:-1]), set()).add(parts[-1])
 
     def listing(self, inner, natural_key):
         if inner not in self.folders:
             raise FileNotFoundError('Archive folder not found')
         with self.lock:
             if inner not in self.sorted_listings:
+                names = sorted(self.direct_files.get(inner, ()), key=natural_key)
                 self.sorted_listings[inner] = {
                     'folders': sorted(self.folders[inner], key=natural_key),
-                    'images': sorted(self.direct_images.get(inner, ()), key=natural_key)}
+                    'images': [name for name in names if PurePosixPath(name).suffix.lower() in IMAGE_EXTENSIONS],
+                    'other_files': [name for name in names if PurePosixPath(name).suffix.lower() not in IMAGE_EXTENSIONS]}
             return self.sorted_listings[inner]
 
     @contextmanager
@@ -78,12 +80,12 @@ class ArchiveIndex:
         if hasattr(self, 'reader'):
             self.reader.close()
 
-    def image(self, inner):
+    def member(self, inner):
         try:
-            info = self.images[inner]
+            info = self.files[inner]
         except KeyError as error:
-            raise FileNotFoundError('Archive image not found') from error
-        if info.file_size > MAX_IMAGE_BYTES:
+            raise FileNotFoundError('Archive file not found') from error
+        if PurePosixPath(inner).suffix.lower() in IMAGE_EXTENSIONS and info.file_size > MAX_IMAGE_BYTES:
             raise ValueError('Archive image is too large')
         return info
 

@@ -26,7 +26,10 @@ class MediaSource:
 
     @property
     def kind(self):
-        return 'video' if self.member is None and self.file.suffix.lower() in VIDEO_TYPES else 'image'
+        suffix = Path(self.member.filename if self.member else self.file.name).suffix.lower()
+        if self.member is None and suffix in VIDEO_TYPES:
+            return 'video'
+        return 'image' if suffix in IMAGE_EXTENSIONS else 'file'
 
     @property
     def size(self):

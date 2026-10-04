@@ -64,7 +64,7 @@ def metadata(gallery, relative, image_work, archive_work):
             result['archive_size'] = entry.stat.st_size
         return result
 
-    source = entry.media_source()
+    source = entry.file_source()
     result.update(kind=source.kind, size=source.size)
     if source.member:
         result['modified'] = datetime(*source.member.date_time).isoformat()

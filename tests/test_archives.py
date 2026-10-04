@@ -55,10 +55,10 @@ class ArchiveTests(unittest.TestCase):
         self.make_archive()
         Image.new('RGB', (8, 8), 'blue').save(self.root / 'cover.jpg')
         self.assertEqual(self.gallery.listing(''),
-                         {'folders': ['Book 2.cbz'], 'images': ['cover.jpg']})
+                         {'folders': ['Book 2.cbz'], 'images': ['cover.jpg'], 'other_files': []})
         self.assertEqual(self.gallery.listing('Book 2.cbz'),
                          {'folders': ['Chapter 2', 'Chapter 10'],
-                          'images': ['page2.jpg', 'page10.jpg']})
+                          'images': ['page2.jpg', 'page10.jpg'], 'other_files': ['notes.txt']})
         self.assertEqual(self.gallery.representative('Book 2.cbz'), 'Book 2.cbz/page2.jpg')
         expected = ['cover.jpg', 'Book 2.cbz/page2.jpg', 'Book 2.cbz/page10.jpg',
                     'Book 2.cbz/Chapter 2/1.jpg', 'Book 2.cbz/Chapter 2/2.jpg',
@@ -82,6 +82,17 @@ class ArchiveTests(unittest.TestCase):
         (self.root / 'bad.zip').write_bytes(b'not a zip')
         with self.assertRaises(ValueError):
             self.gallery.listing('bad.zip')
+
+    def test_other_files_have_visible_naturally_sorted_names_without_entering_reading(self):
+        path = self.root / 'trip.zip'
+        with zipfile.ZipFile(path, 'w') as archive:
+            for name in ('notes10.txt', 'notes2.txt', 'chapter/clip.mp4', '.hidden.txt', '../unsafe.txt'):
+                archive.writestr(name, b'file')
+        self.assertEqual(self.gallery.listing('trip.zip'), {
+            'folders':['chapter'], 'images':[], 'other_files':['notes2.txt', 'notes10.txt']})
+        self.assertEqual(self.gallery.listing('trip.zip/chapter')['other_files'], ['clip.mp4'])
+        self.assertIsNone(self.gallery.representative('trip.zip'))
+        self.assertEqual(self.sequence(root='trip.zip'), [])
 
     def test_physical_locations_distinguish_archive_members_and_real_folders(self):
         archive = self.make_archive()

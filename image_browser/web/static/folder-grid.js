@@ -1,4 +1,5 @@
-import {isVideo} from './media-kind.js';
+import {isVideo, fileExtension} from './media-kind.js';
+import {toggleMetadata} from './metadata.js';
 import {getFolder, walkImages, sequence} from './api.js';
 import {byId, element, plainClick, setButtonLabel, TaskScope} from './dom.js';
 import {icon} from './icons.js';
@@ -9,6 +10,12 @@ const OVERSCAN = 230;
 const DISCOVERY_MARGIN = 400;
 const MAX_RECURSIVE_IMAGES = 2000;
 const RETURN_NEIGHBORS = 8;
+
+function positionRow(node, row) {
+    node.style.top = row.top + 'px';
+    node.style.height = row.height + 'px';
+    node.style.gridTemplateColumns = row.items ? `repeat(${row.columns}, minmax(0, 1fr))` : '1fr';
+}
 
 /** Owns folder loading, incremental discovery, and the lifetime of visible rows. */
 export class FolderGrid {
@@ -41,6 +48,8 @@ export class FolderGrid {
         this.layout = new GridLayout(this.viewport);
         this.rowNodes = new Map();
         this.items = [];
+        this.otherFiles = [];
+        this.othersOpen = false;
         this.rootName = 'Collection';
         this.directory = null;
         this.cache = new Map();
@@ -74,11 +83,12 @@ export class FolderGrid {
     }
 
     position() {
-        const [index] = this.layout.visibleRange(this.viewport.scrollTop + 1, this.viewport.scrollTop + 1);
+        const top = this.viewport.scrollTop - this.gridOffset;
+        const [index] = this.layout.visibleRange(top + 1, top + 1);
         const row = this.layout.rows[index];
         if (!row) return null;
         const position = {path: row.items?.[0].path ?? row.path, heading: !row.items,
-            offset: this.viewport.scrollTop - row.top, rowHeight: row.height};
+            offset: top - row.top, rowHeight: row.height};
         if (!this.state.recursive && row.items) {
             // Original filtered order: next item wins ties with the previous one.
             position.neighbors = [];
@@ -114,7 +124,7 @@ export class FolderGrid {
         }
         if (this.restorePosition.reveal) this.focusPath = path;
         // Restoring ordinary history never initiates a traversal.
-        this.viewport.scrollTop = row ? Math.max(0, row.top + offset * row.height / (rowHeight || row.height)) : 0;
+        this.viewport.scrollTop = row ? Math.max(0, this.gridOffset + row.top + offset * row.height / (rowHeight || row.height)) : 0;
         this.restorePosition = null;
     }
 
@@ -145,8 +155,25 @@ export class FolderGrid {
 
     relayout() {
         this.layout.reset(this.items, this.state.recursive, this.rootName);
+        if (!this.state.recursive && !this.loadingFolder && this.directory?.listing.other_files.length) {
+            const count = this.state.filter ? this.otherFiles.length : this.directory.listing.other_files.length;
+            const label = this.state.filter ? `${count} matching other ${count === 1 ? 'file' : 'files'}` : `Other files (${count})`;
+            this.layout.appendDisclosure(this.state.folder, label, this.otherFiles, this.othersOpen);
+        }
         this.container.style.height = this.layout.height + 'px';
+        this.gridOffset = this.container.getBoundingClientRect().top - this.viewport.getBoundingClientRect().top + this.viewport.scrollTop;
         this.renderRows();
+    }
+
+    toggleOtherFiles() {
+        this.othersOpen = !this.othersOpen;
+        this.relayout();
+        if (this.othersOpen) {
+            const heading = this.layout.byPath.get('heading:' + this.state.folder);
+            this.viewport.scrollTop = this.gridOffset + heading.top;
+            this.renderRows();
+        }
+        this.container.querySelector('.other-files-toggle')?.focus({preventScroll:true});
     }
 
     appendRows(items) {
@@ -158,26 +185,44 @@ export class FolderGrid {
         this.renderRows();
     }
 
-    createListItem(item, scope) {
+    itemLink(item, label = filename(item.path)) {
+        const name = filename(item.path);
+        let link, action;
+        if (item.type === ItemType.FILE) {
+            link = element('button', '', label);
+            link.type = 'button';
+            link.setAttribute('aria-controls', 'metadata-popover');
+            link.addEventListener('click', () => toggleMetadata(item.path, link));
+            action = 'File info for';
+        } else if (item.type === ItemType.FOLDER) {
+            link = this.folderLink(item.path, label);
+            action = 'Open folder';
+        } else {
+            link = this.mediaLink(item.path, this.state.folder, label);
+            action = isVideo(item.path) ? 'View video' : 'View image';
+        }
+        link.setAttribute('aria-label', `${action} ${name}`);
+        return link;
+    }
+
+    renderListItem(node, item, scope) {
         const folder = item.type === ItemType.FOLDER;
-        const node = element('article', 'card list-item');
-        node.dataset.path = item.path;
-        node.classList.toggle('selected-media', this.state.selected === item.path);
-        const name = folder ? this.folderLink(item.path, filename(item.path))
-            : this.mediaLink(item.path, this.state.folder, filename(item.path));
+        const other = item.type === ItemType.FILE;
+        node.classList.add('list-item');
+        node.classList.toggle('other-file', other);
+        const name = this.itemLink(item);
         name.classList.add('list-name');
         name.title = item.path;
-        const kind = icon(folder ? 'folder' : isVideo(item.path) ? 'video' : 'image');
+        const kind = icon(other ? 'file' : folder ? 'folder' : isVideo(item.path) ? 'video' : 'image');
         kind.classList.add('list-kind');
-        name.setAttribute('aria-label', `${folder ? 'Open folder' : isVideo(item.path) ? 'View video' : 'View image'} ${filename(item.path)}`);
         node.append(kind, name);
-        if (!folder && isVideo(item.path)) {
+        if (other) node.append(element('span', 'list-file-type', fileExtension(item.path) || ''));
+        else if (!folder && isVideo(item.path)) {
             const duration = element('span', 'list-duration');
             node.append(duration);
             this.previews.duration(duration, item.path, scope);
         }
         if (folder) node.prepend(this.folderActions(item.path));
-        return node;
     }
 
     folderActions(path) {
@@ -192,46 +237,52 @@ export class FolderGrid {
         return group;
     }
 
-    createCard(item, scope) {
-        if (this.state.compact) return this.createListItem(item, scope);
+    createCard(item, scope, compact) {
         const node = element('article', 'card');
         node.dataset.path = item.path;
         node.classList.toggle('selected-media', this.state.selected === item.path);
+        if (compact) this.renderListItem(node, item, scope);
+        else this.renderPreview(node, item, scope);
+        return node;
+    }
+
+    renderPreview(node, item, scope) {
         const isFolder = item.type === ItemType.FOLDER;
-        const picture = isFolder ? this.folderLink(item.path, 'Folder') : this.mediaLink(item.path, this.state.folder, 'Loading…');
+        const picture = this.itemLink(item, isFolder ? 'Folder' : 'Loading…');
         picture.classList.add('picture');
-        picture.setAttribute('aria-label', (isFolder ? 'Open folder ' : isVideo(item.path) ? 'View video ' : 'View image ') + filename(item.path));
         const caption = element('div', 'card-caption');
-        let preview;
+        const name = this.itemLink(item);
         if (isFolder) {
             node.classList.add('folder-card');
-            const name = this.folderLink(item.path, filename(item.path));
             name.prepend(icon('folder'));
             caption.append(name, this.folderActions(item.path));
-            preview = this.previews.thumbnail(picture, item.path, scope);
         } else {
-            const name = this.mediaLink(item.path, this.state.folder, filename(item.path));
             name.classList.add('image-name');
             caption.append(name);
-            preview = this.previews.thumbnail(picture, item.path, scope);
         }
-        preview.catch(error => {
+        this.previews.thumbnail(picture, item.path, scope).catch(() => {
             if (!scope.signal.aborted) picture.textContent = 'Preview unavailable';
         });
         caption.title = item.path;
         node.append(picture, caption);
-        return node;
     }
 
     createRow(index) {
         const row = this.layout.rows[index];
         const node = element('div', 'grid-row');
-        node.style.top = row.top + 'px';
-        node.style.height = row.height + 'px';
-        node.style.gridTemplateColumns = row.items ? `repeat(${this.layout.columns}, minmax(0, 1fr))` : '1fr';
+        node.classList.toggle('compact-row', Boolean(row.compact));
+        positionRow(node, row);
         const scope = new TaskScope();
-        if (row.items) row.items.forEach(item => node.append(this.createCard(item, scope)));
-        else {
+        if (row.items) row.items.forEach(item => node.append(this.createCard(item, scope, row.compact)));
+        else if (row.disclosure) {
+            node.classList.add('other-files-heading');
+            const control = element('button', 'other-files-toggle', row.label);
+            control.type = 'button';
+            control.setAttribute('aria-expanded', String(row.expanded));
+            control.prepend(icon('down'));
+            control.addEventListener('click', () => this.toggleOtherFiles());
+            node.append(control);
+        } else {
             const heading = element('h2', 'folder-heading');
             heading.append(this.folderLink(row.path, row.label));
             node.append(heading);
@@ -241,22 +292,22 @@ export class FolderGrid {
     }
 
     rowSignature(row) {
-        return JSON.stringify([this.state.compact, this.state.linkPresentation,
+        return JSON.stringify([row.compact, this.state.linkPresentation, row.label, row.expanded,
             this.state.selected, row.items?.map(item => item.path) ?? row.path]);
     }
 
     renderRows() {
         this.restore();
-        const start = Math.max(0, this.viewport.scrollTop - OVERSCAN);
-        const end = this.viewport.scrollTop + this.viewport.clientHeight + OVERSCAN;
+        const top = this.viewport.scrollTop - this.gridOffset;
+        const start = Math.max(0, top - OVERSCAN);
+        const end = top + this.viewport.clientHeight + OVERSCAN;
         const [first, last] = this.layout.visibleRange(start, end);
         for (const index of this.rowNodes.keys()) {
             const row = this.layout.rows[index];
             if (index < first || index >= last || !row || this.rowNodes.get(index).signature !== this.rowSignature(row)) this.removeRow(index);
             else {
                 const node = this.rowNodes.get(index).node;
-                node.style.top = row.top + 'px'; node.style.height = row.height + 'px';
-                node.style.gridTemplateColumns = row.items ? `repeat(${this.layout.columns}, minmax(0, 1fr))` : '1fr';
+                positionRow(node, row);
             }
         }
         for (let index = first; index < last; index++) {
@@ -286,7 +337,7 @@ export class FolderGrid {
         this.cache.set(this.directory.path, this.directory);
         // Keep recently discovered names for Back, bounded independently of images.
         const count = () => [...this.cache.values()].reduce((sum, item) => sum + item.images.length
-            + item.listing.folders.length + item.listing.images.length, 0);
+            + item.listing.folders.length + item.listing.images.length + item.listing.other_files.length, 0);
         while (this.cache.size > 3 || (count() > 20000 && this.cache.size > 0)) {
             this.cache.delete(this.cache.keys().next().value);
         }
@@ -301,6 +352,8 @@ export class FolderGrid {
         this.loadingPage = false;
         this.clearRows();
         this.items = [];
+        this.otherFiles = [];
+        this.othersOpen = false;
         this.viewport.scrollTop = 0;
         this.relayout();
         this.status.textContent = 'Opening folder…';
@@ -339,12 +392,14 @@ export class FolderGrid {
     displayFolder() {
         const {listing} = this.directory;
         const filter = this.state.filter.toLocaleLowerCase();
+        const children = (names, type) => names.filter(name => name.toLocaleLowerCase().includes(filter))
+            .map(name => ({type, path:joinPath(this.state.folder, name)}));
         this.items = this.state.recursive ? this.directory.images : [
-            ...listing.folders.map(name => ({type: ItemType.FOLDER, path: joinPath(this.state.folder, name)})),
-            ...listing.images.map(name => ({type: ItemType.MEDIA, path: joinPath(this.state.folder, name)})),
-        ].filter(item => filename(item.path).toLocaleLowerCase().includes(filter));
-        this.relayout();
+            ...children(listing.folders, ItemType.FOLDER), ...children(listing.images, ItemType.MEDIA),
+        ];
+        this.otherFiles = this.state.recursive ? [] : children(listing.other_files, ItemType.FILE);
         this.updateSummary();
+        this.relayout();
     }
 
     updateSummary() {
@@ -357,11 +412,16 @@ export class FolderGrid {
         } else {
             const {listing} = directory;
             this.status.textContent = this.items.length ? '' : (this.state.filter
-                ? 'No matching names.' : 'This folder has no visible folders or supported images or videos.');
+                ? this.otherFiles.length ? 'No matching media or folders.' : 'No matching names.'
+                : listing.other_files.length ? 'No supported media.' : 'This folder is empty.');
             this.summary.textContent = `${listing.folders.length} folders · ${listing.images.length} direct items`
+                + (listing.other_files.length ? ` · ${listing.other_files.length} other ${listing.other_files.length === 1 ? 'file' : 'files'}` : '')
                 + (this.state.filter ? ` · ${this.items.length} matches` : '');
         }
         this.moreButton.hidden = !directory.failed;
+        // Empty Browse feedback precedes the disclosure; Overview's end marker follows its grid.
+        if (this.state.recursive) this.container.after(this.status);
+        else this.container.before(this.status);
     }
 
     async loadPage(reverse = false) {

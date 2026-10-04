@@ -49,7 +49,8 @@
     --label-line-height: 20px;
     --list-gap: 10px;
     --list-kind-width: 22px;
-    --list-duration-width: 42px;
+    --list-detail-width: 42px;
+    --list-row-height: 44px;
 
     font-size: 14px;
     color-scheme: dark;
@@ -310,6 +311,7 @@ input[type=search] {
     gap: var(--grid-column-gap);
     padding: var(--grid-row-padding) 0;
 }
+.grid-row.compact-row { padding-block: 0; }
 
 .folder-heading {
     font-size: var(--folder-label-font-size);
@@ -374,6 +376,13 @@ input[type=search] {
     padding: 20px 8px;
     text-align: center;
 }
+#grid-status:empty { display: none; }
+.other-files-heading { border-top: 1px solid var(--color-border-subtle); padding: 4px 0; }
+.other-files-toggle { display: flex; align-items: center; gap: var(--space-md); height: var(--control-height); padding: 0; border: 0; border-radius: 3px; font-size: var(--font-size-small); }
+.other-files-toggle[aria-expanded] { --button-background: transparent; --button-border: transparent; }
+.other-files-toggle .icon { width: var(--control-icon-small); height: var(--control-icon-small); transform: rotate(-90deg); }
+.other-files-toggle[aria-expanded="true"] .icon { transform: none; }
+.other-file .list-name { text-decoration: underline; text-underline-offset: 3px; }
 
 #load-more {
     display: block;
@@ -419,7 +428,7 @@ input[type=search] {
 
 /* List rows request no previews; full names determine their height. */
 #grid-viewport.compact {
-    --grid-min-row-height: 44px;
+    --grid-min-row-height: var(--list-row-height);
     --grid-row-padding: 0px;
 }
 .list-item {
@@ -607,7 +616,7 @@ input[type=search] {
 
 .video-duration { position: absolute; left: 6px; bottom: 6px; padding: 2px 4px; border-radius: 3px; background: #000b; color: white; font-size: 11px; pointer-events: none; }
 .video-duration:empty { display: none; }
-.list-duration { flex-shrink: 0; min-width: var(--list-duration-width); margin-left: auto; padding-right: var(--card-caption-padding); color: var(--color-muted); font-variant-numeric: tabular-nums; }
+.list-duration, .list-file-type { flex: 0 0 auto; min-width: var(--list-detail-width); margin-left: auto; padding-right: var(--card-caption-padding); color: var(--color-muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .viewer-strip .video-preview > .video-badge { width: var(--control-icon-small); height: var(--control-icon-small); padding: 1px; right: 3px; bottom: 3px; }
 .viewer-strip .video-duration { left: 3px; bottom: 3px; font-size: 10px; }
 

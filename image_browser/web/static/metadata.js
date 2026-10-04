@@ -39,12 +39,12 @@ export function closeMetadata(restoreFocus = false) {
 }
 
 function positionMetadata() {
-    if (!metadataOpen() || !context?.button.isConnected) return;
+    if (!metadataOpen()) return;
     const panel = popover();
-    const anchor = context.button.getBoundingClientRect();
-    const header = context.button.closest('.app-header').getBoundingClientRect();
+    const anchor = document.querySelector('.item-actions').getBoundingClientRect();
+    const header = document.querySelector('.app-header').getBoundingClientRect();
     const left = Math.max(12, Math.min(anchor.right - panel.offsetWidth, innerWidth - panel.offsetWidth - 12));
-    const top = Math.min(Math.max(anchor.bottom, header.bottom) + 8, innerHeight - 60);
+    const top = Math.min(header.bottom + 8, innerHeight - 60);
     panel.style.left = `${left}px`;
     panel.style.top = `${top}px`;
     panel.style.maxHeight = `${Math.max(48, innerHeight - top - 12)}px`;
@@ -62,7 +62,7 @@ function updateMetadataTarget(path, button) {
     if (changed) loadMetadata(path);
 }
 
-function toggleMetadata(path, button) {
+export function toggleMetadata(path, button) {
     if (metadataOpen() && context?.button === button) {
         closeMetadata(true);
         return;
@@ -70,7 +70,8 @@ function toggleMetadata(path, button) {
     closeMetadata();
     context = {path, button};
     button.setAttribute('aria-expanded', 'true');
-    button.parentElement.append(popover());
+    // Keep the shared panel in the header, outside virtual rows and in its existing tab order.
+    byId('item-actions').append(popover());
     popover().showPopover();
     popover().focus({preventScroll: true});
     positionMetadata();

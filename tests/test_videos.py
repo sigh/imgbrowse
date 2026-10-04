@@ -41,7 +41,8 @@ class VideoTests(unittest.TestCase):
         self.assertEqual(gallery.listing('')['images'], ['1.jpg', '2.MP4', '3.jpg'])
         self.assertEqual(gallery.walk()['images'], ['1.jpg', '2.MP4', '3.jpg', 'book.cbz/page.jpg'])
         self.assertEqual(gallery.source('2.MP4').kind, 'video')
-        with self.assertRaises(FileNotFoundError):
+        self.assertEqual(gallery.listing('book.cbz')['other_files'], ['video.mp4'])
+        with self.assertRaises(ValueError):
             gallery.source('book.cbz/video.mp4')
         self.assertEqual(self.request(path='/thumbnail?path=2.MP4')[0], 422)
 

@@ -1,5 +1,6 @@
 /** Loose video formats accepted by the server; codecs remain browser-dependent. */
 export const isVideo = path => /\.(mp4|m4v|webm|ogv|mov)$/i.test(path || '');
+export const fileExtension = path => path.match(/\.([^./]+)$/)?.[1].toUpperCase();
 
 export const MediaErrorCode = Object.freeze({ABORTED:1, NETWORK:2, DECODE:3, UNSUPPORTED:4});
 

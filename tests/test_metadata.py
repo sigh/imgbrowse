@@ -120,6 +120,24 @@ class MetadataTests(unittest.TestCase):
         self.assertEqual(data['size'], 6)
         self.assertIn('metadata_error', data)
 
+    def test_other_files_share_metadata_without_decoding(self):
+        (self.root / 'sunrise.heic').write_bytes(b'unsupported image')
+        with zipfile.ZipFile(self.root / 'trip.zip', 'w') as archive:
+            archive.writestr('chapter/clip.mp4', b'unsupported archived video')
+            archive.writestr('chapter/notes.txt', b'notes')
+        with patch('image_browser.metadata.Image.open', side_effect=AssertionError('Other files must not be decoded')):
+            for path, size, member in [('sunrise.heic', 17, None),
+                                       ('trip.zip/chapter/clip.mp4', 26, 'chapter/clip.mp4'),
+                                       ('trip.zip/chapter/notes.txt', 5, 'chapter/notes.txt')]:
+                with self.subTest(path=path):
+                    status, data = self.request(path)
+                    self.assertEqual(status, 200)
+                    self.assertEqual((data['kind'], data['size'], data['archive_member']), ('file', size, member))
+                    self.assertIn('modified', data)
+                    self.assertNotIn('metadata_error', data)
+                    with self.assertRaises(ValueError):
+                        self.server.gallery.source(path)
+
     def test_image_without_gps_has_no_location(self):
         Image.new('RGB', (40, 60)).save(self.root / 'plain.jpg')
         status, data = self.request('plain.jpg')

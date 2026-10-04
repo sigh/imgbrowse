@@ -1,6 +1,6 @@
-import {durationLabel} from './media-kind.js';
+import {durationLabel, fileExtension, isVideo} from './media-kind.js';
 
-export const MetadataKind = Object.freeze({IMAGE:'image', VIDEO:'video', DIRECTORY:'directory', ARCHIVE:'archive'});
+export const MetadataKind = Object.freeze({IMAGE:'image', VIDEO:'video', FILE:'file', DIRECTORY:'directory', ARCHIVE:'archive'});
 
 function bytes(value) {
     if (value < 1024) return `${value} bytes`;
@@ -43,7 +43,7 @@ export function metadataInfo(data, now = Date.now()) {
     };
     if (data.width !== undefined && data.height !== undefined) add(summary, 'Dimensions', `${data.width} × ${data.height}`);
     add(summary, 'Duration', durationLabel(data.duration));
-    add(summary, 'Format', data.format || (data.kind === MetadataKind.VIDEO ? data.name.split('.').pop().toUpperCase() : undefined));
+    add(summary, 'Format', data.format || ([MetadataKind.VIDEO, MetadataKind.FILE].includes(data.kind) ? fileExtension(data.name) : undefined));
     if (data.size !== undefined) add(summary, 'Size', bytes(data.size));
     if (data.media !== undefined) add(summary, 'Contents', `${data.media} direct media`);
     if (data.folders !== undefined) add(summary, 'Subfolders', `${data.folders} subfolders`);
@@ -68,6 +68,8 @@ export function metadataInfo(data, now = Date.now()) {
         pathLabel:data.archive_member ? 'Member path' : data.kind === MetadataKind.ARCHIVE ? 'Archive' : 'Path',
         summary,
         rows,
-        status:data.metadata_error ? 'Image details unavailable.' : '',
+        status:data.kind === MetadataKind.FILE
+            ? data.archive_member && isVideo(data.name) ? 'Videos inside archives cannot be viewed.' : 'This file type cannot be viewed.'
+            : data.metadata_error ? 'Image details unavailable.' : '',
     };
 }

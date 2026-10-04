@@ -18,6 +18,7 @@ const paths = {
     info: '<circle cx="12" cy="12" r="9"/><path d="M12 11v6m0-10v1"/>',
     check: '<path d="m5 12 4 4L19 6"/>',
     folder: '<path d="M3 7V5h6l2 2h10v12H3Z"/>',
+    file: '<path d="M5 2h9l5 5v15H5ZM14 2v6h5M8 12h8M8 16h8"/>',
     image: '<rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8" cy="8" r="1"/><path d="m3 17 6-6 4 4 3-3 5 5"/>',
     brokenImage: '<path d="M9 3H3v18h18v-6M14 3l-3 6 6 2-3 5M3 17l5-5 5 6M18 3l3 3m0-3-3 3"/>',
     readerStrip: '<rect x="5" y="2" width="14" height="14" rx="1"/><path d="M3 19h4v3H3zM10 19h4v3h-4zM17 19h4v3h-4z"/>',

@@ -101,8 +101,11 @@ class GalleryTests(unittest.TestCase):
         self.image('.hidden/1.jpg')
         (self.root / 'empty').mkdir()
         (self.root / 'notes.txt').write_text('notes')
+        (self.root / '.hidden.txt').write_text('hidden')
+        (self.root / 'shortcut.txt').symlink_to(self.root / 'notes.txt')
         (self.root / 'link').symlink_to(self.root / 'visible', target_is_directory=True)
         self.assertEqual(self.gallery.listing('')['folders'], ['empty', 'visible'])
+        self.assertEqual(self.gallery.listing('')['other_files'], ['notes.txt'])
         for path in ['../outside', '/etc/passwd', '.hidden/1.jpg', 'link/1.jpg']:
             with self.assertRaises(ValueError):
                 self.gallery.resolve(path)

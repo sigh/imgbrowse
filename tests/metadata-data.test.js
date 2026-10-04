@@ -51,6 +51,19 @@ test('video duration is optional and uses the same format as previews', () => {
     assert.equal(metadataInfo({...video, duration:0}, now).summary[0].value, '0:00');
 });
 
+test('other files retain generic facts and explain why they cannot be viewed', () => {
+    const file = {kind:MetadataKind.FILE, name:'sunrise.heic', filesystem_path:'/media/sunrise.heic', size:1024, modified:image.modified};
+    const info = metadataInfo(file, now);
+    assert.deepEqual(info.summary.map(({value}) => value), ['HEIC','1 KiB']);
+    assert.equal(info.status, 'This file type cannot be viewed.');
+    assert.equal(info.rows[0].label, 'Modified');
+    assert.ok(info.rows[0].age);
+    assert.deepEqual(metadataInfo({...file, name:'README'}, now).summary.map(({value}) => value), ['1 KiB']);
+    const archived = metadataInfo({...file, name:'clip.mp4', filesystem_path:'/media/trip.zip', archive_member:'chapter/clip.mp4'}, now);
+    assert.equal(archived.path, '/media/trip.zip/chapter/clip.mp4');
+    assert.equal(archived.status, 'Videos inside archives cannot be viewed.');
+});
+
 test('unreadable image details retain path and size without invented facts', () => {
     const info = metadataInfo({kind:MetadataKind.IMAGE, name:'broken.jpg', filesystem_path:'/media/broken.jpg', size:180000,
         modified:'invalid', metadata_error:'Bad image', exif:{Taken:'invalid'}}, now);

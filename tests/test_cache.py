@@ -110,10 +110,10 @@ class CacheTests(unittest.TestCase):
                 reader = cache.get(file)
                 for i in range(12):
                     self.assertIs(cache.get(file), reader)
-                    self.assertEqual(reader.read(reader.image(f'{i}.jpg')), b'fixture')
+                self.assertEqual(reader.read(reader.member(f'{i}.jpg')), b'fixture')
                 self.assertEqual(open_archive.call_count, 1)
                 cache.invalidate()
-                self.assertEqual(reader.read(reader.image('0.jpg')), b'fixture')
+                self.assertEqual(reader.read(reader.member('0.jpg')), b'fixture')
 
 
 class SchedulingTests(unittest.TestCase):

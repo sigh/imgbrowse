@@ -62,6 +62,12 @@ def make_collection(root):
     with zipfile.ZipFile(root / 'Packed.cbz', 'w') as archive:
         for name in ('page10.jpg', 'page2.jpg', 'Chapter 3/page1.jpg'):
             archive.writestr(name, (root / 'root2.jpg').read_bytes())
+        archive.writestr('notes.txt', b'Archive notes')
+        archive.writestr('clip.mp4', b'Archived video')
+    other = root / 'Other files'
+    other.mkdir()
+    (other / 'sunrise.heic').write_bytes(b'Unsupported image')
+    (other / 'notes.txt').write_text('Photo notes')
     mixed = root / 'Mixed'
     mixed.mkdir()
     shutil.copyfile(root / 'root2.jpg', mixed / '1.jpg')

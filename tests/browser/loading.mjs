@@ -98,7 +98,7 @@ export async function run(browser, fixtures) {
     assert.ok(await evaluate("document.getElementById('viewer-zoom-in').disabled"));
     await call('Fetch.disable');
     await click('browse-folder');
-    await waitFor("document.getElementById('viewer').hidden && document.getElementById('grid-status').textContent.includes('no visible')");
+    await waitFor("document.getElementById('viewer').hidden && document.getElementById('grid-status').textContent === 'This folder is empty.'");
     await click('overview-folder');
     await waitFor("!document.getElementById('overview').hidden && document.getElementById('grid-status').textContent.includes('No images')");
     await click('read-strip');

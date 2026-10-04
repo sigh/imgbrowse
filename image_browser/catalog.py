@@ -34,12 +34,18 @@ class ResolvedEntry:
     def is_container(self):
         return self.inner in self.archive.folders if self.archive else stat.S_ISDIR(self.stat.st_mode)
 
-    def media_source(self):
+    def file_source(self):
         if self.archive is not None:
-            return MediaSource(self.file, self.stat, self.archive.image(self.inner))
-        if self.file.suffix.lower() not in MEDIA_EXTENSIONS or not stat.S_ISREG(self.stat.st_mode):
-            raise ValueError('Unsupported media file')
+            return MediaSource(self.file, self.stat, self.archive.member(self.inner))
+        if not stat.S_ISREG(self.stat.st_mode):
+            raise ValueError('Not a regular file')
         return MediaSource(self.file, self.stat)
+
+    def media_source(self):
+        source = self.file_source()
+        if source.kind == 'file':
+            raise ValueError('Unsupported media file')
+        return source
 
 
 def natural_key(name):
@@ -170,7 +176,7 @@ class Gallery:
             return self._scan_directory(entry.file)
 
     def _scan_directory(self, directory):
-        folders, images = [], []
+        folders, images, other_files = [], [], []
         with os.scandir(directory) as entries:
             for index, entry in enumerate(entries):
                 if index % 128 == 0:
@@ -181,12 +187,13 @@ class Gallery:
                     folders.append(entry.name)
                     continue
                 suffix = Path(entry.name).suffix.lower()
-                if suffix in ARCHIVE_EXTENSIONS or suffix in MEDIA_EXTENSIONS:
-                    if entry.is_file(follow_symlinks=False):
-                        (folders if suffix in ARCHIVE_EXTENSIONS else images).append(entry.name)
+                if entry.is_file(follow_symlinks=False):
+                    target = folders if suffix in ARCHIVE_EXTENSIONS else images if suffix in MEDIA_EXTENSIONS else other_files
+                    target.append(entry.name)
         return {
             'folders': sorted(folders, key=natural_key),
             'images': sorted(images, key=natural_key),
+            'other_files': sorted(other_files, key=natural_key),
         }
 
     def representative(self, relative, *, entry=None, valid=None):
