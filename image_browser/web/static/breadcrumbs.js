@@ -26,15 +26,15 @@ export class Breadcrumbs {
         container.parentElement.addEventListener('keydown', event => {
             if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End'].includes(event.key)) event.stopPropagation();
         });
-        document.addEventListener('keydown', event => {
-            if (event.key !== 'Escape') return;
-            const open = this.menus.find(menu => menu.isOpen);
-            if (!open) return;
-            event.preventDefault();
-            event.stopImmediatePropagation();
-            open.close(true);
-        }, true);
         new ResizeObserver(() => this.fit()).observe(container);
+    }
+
+    onKey(event) {
+        if (event.key !== 'Escape') return;
+        const open = this.menus.find(menu => menu.isOpen);
+        if (!open) return;
+        event.preventDefault();
+        open.close(true);
     }
 
     update(items, refreshLinks = false) {

@@ -72,18 +72,28 @@ export async function run(browser, {first, second}) {
     await readyImage(first);
     assert.equal(await evaluate('document.activeElement.id'), 'viewer-prev', 'Navigation outside the strip keeps its focus');
 
-    await evaluate("document.querySelector('#item-actions .item-info').click()");
-    await waitFor("document.getElementById('metadata-details').textContent.includes('1000 × 1800')");
-    assert.equal(await evaluate('document.activeElement.id'), 'metadata-popover');
-    assert.ok(await evaluate("document.getElementById('item-actions').contains(document.getElementById('metadata-popover'))"));
+    await browser.openInfo();
+    await waitFor("document.getElementById('metadata-panel').textContent.includes('1000 × 1800')");
+    assert.equal(await evaluate('document.activeElement.id'), 'metadata-toggle');
+    assert.ok(await evaluate("document.getElementById('folder-tree').contains(document.getElementById('item-info'))"));
     await nativeKey('ArrowRight', 39);
+    await readyImage(second);
+    await nativeKey('ArrowLeft', 37, 8);
     await readyImage(first);
-    await nativeKey('ArrowRight', 39, 8);
+    await evaluate("window.copyControl=document.getElementById('metadata-copy');copyControl.focus()");
+    await nativeKey('ArrowRight', 39);
+    await readyImage(second);
+    await waitFor("!document.getElementById('metadata-details').classList.contains('loading')");
+    assert.ok(await evaluate("document.activeElement === copyControl && copyControl === document.getElementById('metadata-copy')"), 'Metadata updates retain copy-control focus without moving it');
+    const beforeVerticalKey = await evaluate('location.href');
+    await nativeKey('ArrowDown', 40);
+    assert.equal(await evaluate('location.href'), beforeVerticalKey, 'Vertical keys outside the reader keep native behavior');
+    await nativeKey('ArrowLeft', 37);
     await readyImage(first);
     await nativeKey('Escape', 27);
-    assert.ok(await evaluate("document.activeElement.matches('#item-actions .item-info') && !document.getElementById('viewer').hidden"));
+    assert.ok(await evaluate("document.activeElement.id === 'folders-toggle' && !document.getElementById('viewer').hidden"));
     await nativeKey('Tab', 9);
-    assert.equal(await evaluate('document.activeElement.id'), 'viewer-prev', 'Native Tab follows the header order');
+    assert.equal(await evaluate('document.activeElement.id'), 'browse-folder', 'Native Tab follows the header order');
 
     await click('overview-folder');
     await waitFor("!document.getElementById('overview').hidden && document.querySelector('#overview .picture')");

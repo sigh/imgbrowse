@@ -1,5 +1,4 @@
 import {setIconButton} from './icons.js';
-import {closeMetadata} from './metadata.js';
 import {loadOriginal} from './media-cache.js';
 import {walkImages} from './api.js';
 import {byId, plainClick, TaskScope} from './dom.js';
@@ -55,7 +54,6 @@ export class ImageViewer {
         byId('viewer-retry').addEventListener('click', () => this.retryMove ? this.retryMove() : this.refresh());
         this.previousButton.addEventListener('click', () => this.requestMove(true));
         this.nextButton.addEventListener('click', () => this.requestMove(false));
-        document.addEventListener('keydown', event => this.onKey(event));
         this.wheelListener = event => this.onWheel(event);
         this.canvas.addEventListener('click', event => this.inspect(event));
     }
@@ -194,14 +192,12 @@ export class ImageViewer {
         this.container.hidden = state.mode === ScreenMode.BROWSE;
         if (state.mode !== ScreenMode.VIEW) this.stopReading();
         if (state.mode === ScreenMode.BROWSE) {
-            closeMetadata();
             this.nearbyImages = [];
             this.nearbyCollection = null;
             this.updateControls();
             return;
         }
         if (!wasOpen) {
-            closeMetadata();
             if (state.mode !== ScreenMode.OVERVIEW) this.canvas.focus({preventScroll: true});
         } else if (wasOverview && state.mode !== ScreenMode.OVERVIEW) this.canvas.focus({preventScroll: true});
         if (state.mode === ScreenMode.OVERVIEW) {
@@ -381,8 +377,7 @@ export class ImageViewer {
 
     onKey(event) {
         if (!this.state || this.state.mode === ScreenMode.BROWSE || event.ctrlKey || event.metaKey || event.altKey) return;
-        if (document.fullscreenElement || document.getElementById('sort-popover').matches(':popover-open')
-            || event.target instanceof Element && event.target.closest('#metadata-popover')) return;
+        if (document.fullscreenElement) return;
         if (event.key === 'Escape') {
             event.preventDefault();
             this.close();
@@ -394,10 +389,12 @@ export class ImageViewer {
         const direction = ARROW_DIRECTIONS[event.key];
         if (direction) {
             const canvasFocused = event.target === this.canvas;
+            const stripFocused = this.filmstrip.container.contains(event.target);
+            if (direction.y && !canvasFocused && !stripFocused) return;
             // Continuous reading keeps the browser's native vertical keys.
             if (direction.y && this.scrolling && canvasFocused) return;
             const pan = direction.x ? event.shiftKey && canvasFocused
-                : !this.filmstrip.container.contains(event.target) && this.canvas.scrollHeight > this.canvas.clientHeight + 2;
+                : !stripFocused && this.canvas.scrollHeight > this.canvas.clientHeight + 2;
             event.preventDefault();
             if (pan) this.canvas.scrollBy({left:direction.x * KEYBOARD_PAN_STEP, top:direction.y * KEYBOARD_PAN_STEP});
             else this.requestMove(direction.x < 0 || direction.y < 0, !event.repeat);

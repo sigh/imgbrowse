@@ -28,6 +28,13 @@ export async function run(browser, fixtures) {
     await pause(150);
     assert.ok(await evaluate("(()=>{const v=document.getElementById('viewer-video'), r=v.getBoundingClientRect(); return Math.abs(r.width/r.height-v.videoWidth/v.videoHeight)<.02 && r.right<=innerWidth})()"));
     await screenshot('video-mobile');
+    await browser.openInfo();
+    if (videoPreviewAvailable) {
+        await waitFor("document.getElementById('metadata-facts').textContent.includes('Duration')");
+        assert.ok(await evaluate("document.getElementById('metadata-facts').textContent.includes(document.getElementById('viewer-video').videoWidth + ' × ' + document.getElementById('viewer-video').videoHeight)"), 'Video dimensions appear alongside a visibly labelled duration');
+    }
+    await screenshot('video-info-mobile');
+    await click('folders-toggle');
     await call('Emulation.setDeviceMetricsOverride', {width:1440,height:900,deviceScaleFactor:1,mobile:false});
     await open(viewerUrl('Mixed/1.jpg', ImageSize.DEFAULT, 'Mixed'));
     await readyImage('Mixed/1.jpg');

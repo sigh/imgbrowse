@@ -7,7 +7,7 @@ export async function run(browser, fixtures) {
     await browser.start();
     await waitFor("document.querySelectorAll('.card').length > 5");
     const folderModeAction = await evaluate("document.getElementById('read-strip').getBoundingClientRect().toJSON()");
-    const folderActions = await evaluate("document.getElementById('item-actions').getBoundingClientRect().toJSON()");
+    const folderActions = await evaluate("document.querySelector('.sort-controls').getBoundingClientRect().toJSON()");
     const folderHeaderHeight = await evaluate("document.querySelector('.app-header').offsetHeight");
     assert.ok(await evaluate("(() => {const buttons=document.querySelector('.browse-controls').getBoundingClientRect(), filter=document.getElementById('filter').getBoundingClientRect(); return buttons.left===16 && buttons.right < filter.left && buttons.top===filter.top && buttons.height===32 && filter.height===32;})()"), 'Layout controls sit left of the filter in one compact row');
     // The layout choice keeps the header geometry fixed and survives history and reload.
@@ -44,7 +44,7 @@ export async function run(browser, fixtures) {
     await open(viewerUrl(first));
     await readyImage(first);
     await browser.openInfo();
-    await evaluate("Object.defineProperty(navigator, 'clipboard', {configurable:true, value:undefined}); window.originalExecCommand=document.execCommand; document.execCommand=command => { if(command==='copy') { window.copiedPath=document.querySelector('.clipboard-input').value; return true; } return false; }; document.querySelector('#metadata-details .copy-path').click()");
+    await evaluate("Object.defineProperty(navigator, 'clipboard', {configurable:true, value:undefined}); window.originalExecCommand=document.execCommand; document.execCommand=command => { if(command==='copy') { window.copiedPath=document.querySelector('.clipboard-input').value; return true; } return false; }; document.querySelector('#metadata-panel .copy-path').click()");
     await waitFor("window.copiedPath");
     assert.equal(await evaluate('window.copiedPath'), absoluteRoot + '/' + first);
     await evaluate('document.execCommand=window.originalExecCommand');
@@ -75,12 +75,12 @@ export async function run(browser, fixtures) {
         x:canvasBounds.x+canvasBounds.width/2, y:canvasBounds.y+canvasBounds.height/2, button:'left', clickCount:1});
     assert.equal(await evaluate("(new URLSearchParams(location.search).get('size') || 'auto')"), 'auto', 'Image click returns adjusted zoom to the presentation default');
     assert.deepEqual(await headerPositions(), initialPositions, 'Click zoom does not move header controls');
-    assert.deepEqual(await evaluate("document.getElementById('item-actions').getBoundingClientRect().toJSON()"), folderActions, 'Info keeps the same position and size across modes');
-    assert.equal(await evaluate("document.querySelector('#item-actions > .item-info').textContent.trim()"), '', 'Header actions use icons with accessible names');
+    assert.deepEqual(await evaluate("document.querySelector('.sort-controls').getBoundingClientRect().toJSON()"), folderActions, 'Sort keeps the same position and size across modes');
+    assert.ok(await evaluate("!document.querySelector('.app-header #metadata-toggle') && document.getElementById('metadata-toggle').textContent === 'Info'"), 'Info is a named sidebar disclosure');
     await browser.openInfo();
-    await waitFor("document.getElementById('metadata-details').textContent.includes('1000 × 1800')");
-    assert.ok(await evaluate("(() => { const path=document.querySelector('.metadata-path'), text=path.querySelector('.metadata-path-text'), facts=document.querySelector('.metadata-summary'), copy=path.querySelector('.copy-path'), heading=path.querySelector('.metadata-path-heading'); return path===document.getElementById('metadata-details').firstElementChild && path.getBoundingClientRect().bottom <= facts.getBoundingClientRect().top && text.getBoundingClientRect().width===path.getBoundingClientRect().width && copy.getBoundingClientRect().right===heading.getBoundingClientRect().right; })()"), 'Location is first, the path spans the panel and Copy stays beside its heading');
-    assert.deepEqual(await evaluate("[...document.querySelectorAll('.metadata-date')].map(row => ({label:row.previousElementSibling.textContent, date:!!row.querySelector('time').dateTime, age:row.querySelector('.metadata-age')?.textContent.startsWith('(')}))"),
+    await waitFor("document.getElementById('metadata-panel').textContent.includes('1000 × 1800')");
+    assert.ok(await evaluate("(() => { const path=document.querySelector('.metadata-path'), text=path.querySelector('.metadata-path-text'), facts=document.getElementById('metadata-facts'), copy=path.querySelector('.copy-path'); return path===document.getElementById('metadata-panel').firstElementChild && path.getBoundingClientRect().bottom <= facts.getBoundingClientRect().top && text.getBoundingClientRect().width===path.getBoundingClientRect().width && copy.getBoundingClientRect().right===path.getBoundingClientRect().right; })()"), 'The full path is first, with Copy beside it and no redundant heading');
+    assert.deepEqual(await evaluate("[...document.querySelectorAll('.metadata-date')].map(row => ({label:row.previousElementSibling.textContent, date:!!row.querySelector('time').dateTime, age:!!row.querySelector('time').title}))"),
         [{label:'Modified', date:true, age:true}, {label:'Taken', date:true, age:true}], 'Modified and Taken share exact-date and relative-age rendering');
     assert.equal(await evaluate("[...document.querySelectorAll('.metadata-attributes dt')].find(row => row.textContent==='Taken').nextElementSibling.querySelector('time').dateTime"),
         '2024-03-14T12:30:00+05:30', 'Capture timezone survives extraction and date rendering');
@@ -90,34 +90,38 @@ export async function run(browser, fixtures) {
     assert.equal(location.target, '_blank', 'A map can be opened while keeping the reader in place');
     assert.equal(location.rel, 'noopener noreferrer');
     assert.deepEqual(await evaluate("({header:document.querySelector('.app-header').offsetHeight, canvas:document.getElementById('viewer-canvas').getBoundingClientRect().toJSON()})"), viewerFrame, 'Opening Info must not resize or move the viewer');
-    assert.equal(await evaluate("document.querySelector('#item-path .item-info') === null"), true);
-    assert.match(await evaluate("document.querySelector('#metadata-details .copy-path').getAttribute('aria-label')"), /^(Copy full path|Copied)$/);
+    assert.equal(await evaluate("document.querySelector('.app-header #metadata-toggle') === null"), true);
+    assert.match(await evaluate("document.querySelector('#metadata-panel .copy-path').getAttribute('aria-label')"), /^(Copy full path|Copied)$/);
+    assert.ok(await evaluate("!document.querySelector('#metadata-panel h2, .metadata-path-heading') && document.getElementById('metadata-panel').getAttribute('aria-labelledby') === 'metadata-toggle' && !document.getElementById('metadata-panel').hasAttribute('tabindex')"));
     await screenshot('image-metadata');
-    await evaluate("window.headerInfo=document.querySelector('#item-actions .item-info'); window.headerFolder=document.querySelector('#item-path a')");
-    assert.equal(await evaluate("document.activeElement.id"), 'metadata-popover');
+    await evaluate("window.sidebarInfo=document.querySelector('#metadata-toggle'); window.headerFolder=document.querySelector('#item-path a')");
+    assert.equal(await evaluate("document.activeElement.id"), 'metadata-toggle');
     await nativeKey('ArrowRight', 39);
+    await readyImage(second);
+    assert.equal(await evaluate('document.activeElement.id'), 'metadata-toggle', 'Info keeps focus while reader arrows navigate');
+    await nativeKey('ArrowLeft', 37);
     await readyImage(first);
     await evaluate("document.getElementById('viewer-canvas').focus()");
     await nativeKey('ArrowRight', 39);
     await readyImage(second);
-    assert.ok(await evaluate("headerInfo===document.querySelector('#item-actions .item-info') && headerFolder===document.querySelector('#item-path a')"),
+    assert.ok(await evaluate("sidebarInfo===document.querySelector('#metadata-toggle') && headerFolder===document.querySelector('#item-path a')"),
         'Changing an image keeps header controls and folder breadcrumbs in place');
-    await waitFor("document.getElementById('metadata-title').textContent === 'page10.jpg' && document.querySelector('#metadata-details .copy-path')");
-    assert.deepEqual(await evaluate("document.getElementById('item-actions').getBoundingClientRect().toJSON()"), folderActions, 'Changing the current item must not move its controls');
-    assert.equal(await evaluate("document.getElementById('metadata-popover').matches(':popover-open')"), true);
+    await waitFor("document.querySelector('.metadata-path-text')?.textContent.endsWith('/page10.jpg') && document.querySelector('#metadata-panel .copy-path')");
+    assert.deepEqual(await evaluate("document.querySelector('.sort-controls').getBoundingClientRect().toJSON()"), folderActions, 'Changing the current item must not move its controls');
+    assert.equal(await evaluate("(!document.getElementById('folder-tree').hidden && document.getElementById('item-info').open)"), true);
     await evaluate("window.copiedPath=null; Object.defineProperty(navigator, 'clipboard', {configurable:true, value:{writeText:async text => { window.copiedPath=text; }}})");
-    const copyBounds = await evaluate("document.querySelector('#metadata-details .copy-path').getBoundingClientRect().toJSON()");
+    const copyBounds = await evaluate("document.querySelector('#metadata-panel .copy-path').getBoundingClientRect().toJSON()");
     for (const type of ['mousePressed', 'mouseReleased']) await call('Input.dispatchMouseEvent', {type, x:copyBounds.x+copyBounds.width/2, y:copyBounds.y+copyBounds.height/2, button:'left', clickCount:1});
     await waitFor('window.copiedPath');
     assert.equal(await evaluate('window.copiedPath'), absoluteRoot + '/' + second);
-    assert.equal(await evaluate("document.getElementById('metadata-popover').matches(':popover-open')"), true);
+    assert.equal(await evaluate("(!document.getElementById('folder-tree').hidden && document.getElementById('item-info').open)"), true);
     const previousBounds = await evaluate("document.getElementById('viewer-prev').getBoundingClientRect().toJSON()");
     for (const type of ['mousePressed', 'mouseReleased']) await call('Input.dispatchMouseEvent', {type, x:previousBounds.x+previousBounds.width/2, y:previousBounds.y+previousBounds.height/2, button:'left', clickCount:1});
     await readyImage(first);
-    await waitFor("document.getElementById('metadata-title').textContent === 'page2.jpg'");
-    assert.equal(await evaluate("document.getElementById('metadata-popover').matches(':popover-open')"), true);
-    await nativeKey('Escape', 27);
-    await waitFor("!document.getElementById('metadata-popover').matches(':popover-open')");
+    await waitFor("document.querySelector('.metadata-path-text')?.textContent.endsWith('/page2.jpg')");
+    assert.equal(await evaluate("(!document.getElementById('folder-tree').hidden && document.getElementById('item-info').open)"), true);
+    await click('metadata-toggle');
+    await waitFor("!document.getElementById('item-info').open");
     assert.equal(await evaluate("document.getElementById('viewer').hidden"), false);
 
     await readyImage(first);

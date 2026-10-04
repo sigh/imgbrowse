@@ -49,12 +49,21 @@ class VideoThumbnailTests(unittest.TestCase):
                 self.assertLessEqual(image.height, 300)
         verify(FIXTURE)
         if shutil.which('ffprobe'):
-            self.assertAlmostEqual(video_metadata(FIXTURE)['duration'], 2, delta=.1)
+            metadata = video_metadata(FIXTURE)
+            self.assertAlmostEqual(metadata['duration'], 2, delta=.1)
+            self.assertGreater(metadata['width'], 0)
+            self.assertGreater(metadata['height'], 0)
         with tempfile.TemporaryDirectory() as directory:
             short = Path(directory) / 'short.webm'
             subprocess.run([ffmpeg, '-loglevel', 'error', '-i', str(FIXTURE),
                             '-t', '0.2', '-c', 'copy', str(short)], check=True)
             verify(short)
+
+    def test_dimensions_without_duration(self):
+        with patch('image_browser.video_thumbnails.shutil.which', return_value='ffprobe'), \
+             patch('image_browser.video_thumbnails.run_video_tool',
+                   return_value=b'{"streams":[{"width":320,"height":180}],"format":{}}'):
+            self.assertEqual(video_metadata(FIXTURE), {'width':320, 'height':180})
 
     def test_timeout_and_cancellation_reap_child(self):
         for cancelled in (False, True):

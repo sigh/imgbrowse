@@ -1,153 +1,116 @@
 import {getMetadata, getVideoInfo} from './api.js';
 import {metadataInfo, MetadataKind} from './metadata-data.js';
-import {byId, element} from './dom.js';
-import {filename} from './state.js';
+import {element} from './dom.js';
 import {setIconButton} from './icons.js';
-import {isVideo} from './media-kind.js';
 
-let request;
-let context;
-const popover = () => byId('metadata-popover');
-const metadataOpen = () => popover().matches(':popover-open');
+/** Selection and its path are immediate; only fetched facts have a loading state. */
+export class MetadataPanel {
+    constructor(section, openSidebar) {
+        this.section = section;
+        this.openSidebar = openSidebar;
+        this.visible = false;
+        this.pathText = section.querySelector('#metadata-path');
+        this.copy = section.querySelector('#metadata-copy');
+        this.details = section.querySelector('#metadata-details');
+        this.facts = section.querySelector('#metadata-facts');
+        this.status = section.querySelector('#metadata-status');
+        this.message = section.querySelector('#metadata-message');
+        this.retry = section.querySelector('#metadata-retry');
+        this.resetCopy = copyPathControl(this.copy, section.querySelector('#metadata-copy-feedback'), () => this.fullPath);
+        this.retry.addEventListener('click', () => this.refresh());
+        section.addEventListener('toggle', () => this.sync());
+    }
 
-/** The persistent Info action owns its target and keeps an open panel in sync. */
-export class InfoButton {
-    constructor(container) {
-        this.button = element('button', 'item-info');
-        this.button.type = 'button';
-        this.button.setAttribute('aria-controls', 'metadata-popover');
-        this.button.addEventListener('click', () => toggleMetadata(this.button.dataset.path, this.button));
-        container.append(this.button);
+    setRoot(root) {
+        this.root = root;
+        this.updatePath();
     }
 
     update({folder, image = null}) {
-        const path = image || folder;
-        const kind = image ? (isVideo(image) ? 'Video' : 'Image') : 'Folder';
-        this.button.dataset.path = path;
-        setIconButton(this.button, 'info', `${kind} info`);
-        updateMetadataTarget(path, this.button);
+        const selected = image || folder;
+        if (selected === this.selected) return;
+        this.selected = selected;
+        this.setPath(selected);
     }
-}
 
-export function closeMetadata(restoreFocus = false) {
-    if (!metadataOpen()) return;
-    popover().hidePopover();
-    request?.abort();
-    context?.button.setAttribute('aria-expanded', 'false');
-    if (restoreFocus && context?.button.isConnected) context.button.focus({preventScroll: true});
-    context = null;
-}
-
-function positionMetadata() {
-    if (!metadataOpen()) return;
-    const panel = popover();
-    const anchor = document.querySelector('.item-actions').getBoundingClientRect();
-    const header = document.querySelector('.app-header').getBoundingClientRect();
-    const left = Math.max(12, Math.min(anchor.right - panel.offsetWidth, innerWidth - panel.offsetWidth - 12));
-    const top = Math.min(header.bottom + 8, innerHeight - 60);
-    panel.style.left = `${left}px`;
-    panel.style.top = `${top}px`;
-    panel.style.maxHeight = `${Math.max(48, innerHeight - top - 12)}px`;
-}
-
-// Keep an open panel in sync with the persistent header action.
-function updateMetadataTarget(path, button) {
-    button.setAttribute('aria-expanded', 'false');
-    if (!metadataOpen() || context?.button !== button) return;
-    const changed = context.path !== path;
-    context = {path, button};
-    button.setAttribute('aria-expanded', 'true');
-    positionMetadata();
-    requestAnimationFrame(positionMetadata);
-    if (changed) loadMetadata(path);
-}
-
-export function toggleMetadata(path, button) {
-    if (metadataOpen() && context?.button === button) {
-        closeMetadata(true);
-        return;
-    }
-    closeMetadata();
-    context = {path, button};
-    button.setAttribute('aria-expanded', 'true');
-    // Keep the shared panel in the header, outside virtual rows and in its existing tab order.
-    byId('item-actions').append(popover());
-    popover().showPopover();
-    popover().focus({preventScroll: true});
-    positionMetadata();
-    requestAnimationFrame(positionMetadata);
-    loadMetadata(path);
-}
-
-window.addEventListener('resize', positionMetadata);
-byId('metadata-close').addEventListener('click', () => closeMetadata(true));
-document.addEventListener('keydown', event => {
-    if (event.key !== 'Escape' || !metadataOpen()) return;
-    event.preventDefault();
-    event.stopImmediatePropagation();
-    closeMetadata(true);
-}, true);
-document.addEventListener('pointerdown', event => {
-    if (!metadataOpen() || popover().contains(event.target) || context.button.contains(event.target)) return;
-    // Reading controls stay available while inspecting consecutive images.
-    if (event.target.closest('.viewer-nav, .viewer-strip')) return;
-    closeMetadata();
-});
-
-async function loadMetadata(path) {
-    const details = byId('metadata-details');
-    const status = byId('metadata-status');
-    request?.abort();
-    const controller = request = new AbortController();
-    if (status.contains(document.activeElement)) popover().focus({preventScroll: true});
-    details.replaceChildren();
-    byId('metadata-title').textContent = filename(path) || 'Folder info';
-    status.textContent = 'Loading…';
-    try {
-        const data = await getMetadata(path, controller.signal);
-        if (controller.signal.aborted) return;
-        const summary = renderMetadata(metadataInfo(data));
-        if (data.kind === MetadataKind.VIDEO) {
-            getVideoInfo(path, controller.signal).then(video => {
-                if (!controller.signal.aborted) renderSummary(summary, metadataInfo({...data, duration:video.duration}).summary);
-            }).catch(() => {});
+    setPath(path) {
+        if (path !== this.path) {
+            this.path = path;
+            this.loadedPath = undefined;
+            this.request?.abort();
+            this.updatePath();
+            this.details.classList.add('loading');
         }
-    } catch {
-        if (controller.signal.aborted) return;
-        const retry = element('button', '', 'Retry');
-        retry.type = 'button';
-        retry.addEventListener('click', () => loadMetadata(path));
-        status.textContent = 'Unable to load info. ';
-        status.append(retry);
+        this.sync();
     }
-}
 
-function renderSummary(container, facts) {
-    container.replaceChildren();
-    container.hidden = facts.length === 0;
-    for (const {label, value} of facts) {
-        const group = element('div');
-        group.append(element('dt', 'visually-hidden', label), element('dd', '', value));
-        container.append(group);
+    updatePath() {
+        this.fullPath = this.root === undefined ? this.path || ''
+            : this.path ? this.root.replace(/\/$/, '') + '/' + this.path : this.root;
+        this.pathText.textContent = this.fullPath;
+        this.copy.disabled = this.root === undefined;
+        this.resetCopy();
     }
-}
 
-/** Presentation consumes prepared values; it does not interpret API metadata. */
-function renderMetadata(info) {
-    byId('metadata-title').textContent = info.name;
-    const path = element('section', 'metadata-path');
-    const heading = element('div', 'metadata-path-heading', info.pathLabel);
-    const copy = copyPathControl(info.path);
-    heading.append(copy.button);
-    path.append(heading, element('div', 'metadata-path-text', info.path), copy.feedback);
-    const summary = element('dl', 'metadata-summary');
-    renderSummary(summary, info.summary);
-    const attributes = element('dl', 'metadata-attributes');
-    for (const row of info.rows) attributes.append(element('dt', '', row.label), renderAttribute(row));
-    attributes.hidden = attributes.childElementCount === 0;
-    byId('metadata-details').replaceChildren(path, summary, attributes);
-    byId('metadata-status').textContent = info.status;
-    return summary;
+    setVisible(visible) {
+        this.visible = visible;
+        this.sync();
+    }
+
+    show(path) {
+        this.setPath(path);
+        this.openSidebar();
+        this.section.open = true;
+        this.sync();
+    }
+
+    sync() {
+        if (!this.visible || !this.section.open) {
+            this.request?.abort();
+            return;
+        }
+        if (this.loadedPath === this.path || this.request && !this.request.signal.aborted && this.requestPath === this.path) return;
+        this.load();
+    }
+
+    refresh() {
+        this.loadedPath = undefined;
+        this.request?.abort();
+        this.sync();
+    }
+
+    async load() {
+        const path = this.requestPath = this.path;
+        const controller = this.request = new AbortController();
+        this.details.classList.add('loading');
+        try {
+            let data = await getMetadata(path, controller.signal);
+            if (data.kind === MetadataKind.VIDEO) {
+                const video = await getVideoInfo(path, controller.signal).catch(() => ({}));
+                data = {...data, ...video};
+            }
+            if (controller.signal.aborted) return;
+            const info = metadataInfo(data);
+            const rows = info.facts;
+            this.facts.replaceChildren(...rows.flatMap(row => [element('dt', '', row.label), renderAttribute(row)]));
+            this.facts.hidden = rows.length === 0;
+            this.message.textContent = info.status;
+            this.status.hidden = !info.status;
+            this.retry.hidden = true;
+            this.loadedPath = path;
+            this.details.classList.remove('loading');
+        } catch {
+            if (controller.signal.aborted) return;
+            this.facts.replaceChildren();
+            this.facts.hidden = true;
+            this.message.textContent = 'Unable to load info.';
+            this.status.hidden = false;
+            this.retry.hidden = false;
+            this.details.classList.remove('loading');
+        } finally {
+            if (this.request === controller) this.request = null;
+        }
+    }
 }
 
 function renderAttribute({value, datetime, age, href}) {
@@ -157,7 +120,7 @@ function renderAttribute({value, datetime, age, href}) {
         const date = element('time', '', value);
         date.dateTime = datetime;
         content.append(date);
-        if (age) content.append(element('span', 'metadata-age', `(${age})`));
+        if (age) date.title = age;
     } else if (href) {
         const link = element('a', '', value);
         link.href = href;
@@ -186,33 +149,26 @@ async function copyPath(path) {
     }
 }
 
-/** Copy the full path displayed in Info, including archive member identity. */
-function copyPathControl(path) {
-    const copy = element('button', 'copy-path');
-    copy.type = 'button';
-    const feedback = element('span', 'copy-feedback');
-    feedback.setAttribute('role', 'status');
+/** A permanent copy control reads the current path, independent of metadata requests. */
+function copyPathControl(copy, feedback, getPath) {
     let feedbackTimer;
     const reset = () => {
+        clearTimeout(feedbackTimer);
         feedback.textContent = '';
         setIconButton(copy, 'copy', 'Copy full path');
     };
     reset();
     copy.addEventListener('click', async () => {
-        clearTimeout(feedbackTimer);
+        const path = getPath();
         reset();
         try {
             await copyPath(path);
-            if (!copy.isConnected) return;
-            clearTimeout(feedbackTimer);
+            if (path !== getPath()) return;
             setIconButton(copy, 'check', 'Copied');
             feedbackTimer = setTimeout(reset, 1500);
         } catch {
-            if (copy.isConnected) {
-                feedback.textContent = 'Copy failed. Try again.';
-                setIconButton(copy, 'copy', feedback.textContent);
-            }
+            if (path === getPath()) feedback.textContent = 'Copy failed. Try again.';
         }
     });
-    return {button:copy, feedback};
+    return reset;
 }

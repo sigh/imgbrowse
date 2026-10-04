@@ -22,10 +22,10 @@ export async function run(browser, {first, second, last, absoluteRoot}) {
     assert.ok(await evaluate('firstOriginal.isConnected'), 'The previous page stays in the native column as the next enters');
     assert.equal(await evaluate('history.length'),historyLength,'Scrolling replaces the current history entry');
     assert.equal(await evaluate("new URLSearchParams(location.search).get('view')"), ReadingLayout.SCROLL);
-    await evaluate("document.querySelector('#item-actions .item-info').click()");
-    await waitFor("document.getElementById('metadata-title').textContent === 'page10.jpg'");
     await browser.openInfo();
-    await evaluate("Object.defineProperty(navigator,'clipboard',{configurable:true,value:{writeText:async text=>{window.copiedPath=text}}}); document.querySelector('#metadata-details .copy-path').click()");
+    await waitFor("document.querySelector('.metadata-path-text')?.textContent.endsWith('/page10.jpg')");
+    await browser.openInfo();
+    await evaluate("Object.defineProperty(navigator,'clipboard',{configurable:true,value:{writeText:async text=>{window.copiedPath=text}}}); document.querySelector('#metadata-panel .copy-path').click()");
     await waitFor('window.copiedPath');
     assert.equal(await evaluate('window.copiedPath'),absoluteRoot+'/'+second);
     await nativeKey('Escape',27);

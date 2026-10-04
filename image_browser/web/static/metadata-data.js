@@ -37,37 +37,33 @@ function dateRow(label, datetime, now) {
 
 /** Project API metadata into display values; no fetching, DOM or mutable UI state. */
 export function metadataInfo(data, now = Date.now()) {
-    const summary = [], rows = [];
-    const add = (target, label, value) => {
-        if (value !== undefined && value !== null && value !== '') target.push({label, value:String(value)});
+    const facts = [];
+    const add = (label, value) => {
+        if (value !== undefined && value !== null && value !== '') facts.push({label, value:String(value)});
     };
-    if (data.width !== undefined && data.height !== undefined) add(summary, 'Dimensions', `${data.width} × ${data.height}`);
-    add(summary, 'Duration', durationLabel(data.duration));
-    add(summary, 'Format', data.format || ([MetadataKind.VIDEO, MetadataKind.FILE].includes(data.kind) ? fileExtension(data.name) : undefined));
-    if (data.size !== undefined) add(summary, 'Size', bytes(data.size));
-    if (data.media !== undefined) add(summary, 'Contents', `${data.media} direct media`);
-    if (data.folders !== undefined) add(summary, 'Subfolders', `${data.folders} subfolders`);
+    if (data.width !== undefined && data.height !== undefined) add('Dimensions', `${data.width} × ${data.height}`);
+    add('Duration', durationLabel(data.duration));
+    add('Format', data.format || ([MetadataKind.VIDEO, MetadataKind.FILE].includes(data.kind) ? fileExtension(data.name) : undefined));
+    if (data.size !== undefined) add('Size', bytes(data.size));
+    if (data.media !== undefined) add('Contents', `${data.media} direct media`);
+    if (data.folders !== undefined) add('Subfolders', `${data.folders} subfolders`);
     const modifiedLabel = data.kind === MetadataKind.DIRECTORY && data.archive_member ? 'Archive date' : 'Modified';
     const modified = dateRow(modifiedLabel, data.modified, now);
-    if (modified) rows.push(modified);
-    if (data.archive_size !== undefined) add(rows, 'Archive size', bytes(data.archive_size));
+    if (modified) facts.push(modified);
+    if (data.archive_size !== undefined) add('Archive size', bytes(data.archive_size));
     const exif = data.exif || {};
     const taken = dateRow('Taken', exif.Taken, now);
-    if (taken) rows.push(taken);
-    add(rows, 'Camera', [exif['Camera make'], exif['Camera model']].filter(Boolean).join(' '));
+    if (taken) facts.push(taken);
+    add('Camera', [exif['Camera make'], exif['Camera model']].filter(Boolean).join(' '));
     if (data.location) {
         const {latitude, longitude} = data.location;
         const coordinate = (value, directions) => `${Math.abs(value).toFixed(5)}° ${directions[value < 0 ? 1 : 0]}`;
-        rows.push({label:'Location', value:`${coordinate(latitude, 'NS')}, ${coordinate(longitude, 'EW')}`,
+        facts.push({label:'Location', value:`${coordinate(latitude, 'NS')}, ${coordinate(longitude, 'EW')}`,
             href:`https://www.openstreetmap.org/?mlat=${latitude}&mlon=${longitude}#map=16/${latitude}/${longitude}`});
     }
-    for (const label of ['Artist', 'Copyright']) add(rows, label, exif[label]);
+    for (const label of ['Artist', 'Copyright']) add(label, exif[label]);
     return {
-        name:data.name,
-        path:data.filesystem_path + (data.archive_member ? '/' + data.archive_member : ''),
-        pathLabel:data.archive_member ? 'Member path' : data.kind === MetadataKind.ARCHIVE ? 'Archive' : 'Path',
-        summary,
-        rows,
+        facts,
         status:data.kind === MetadataKind.FILE
             ? data.archive_member && isVideo(data.name) ? 'Videos inside archives cannot be viewed.' : 'This file type cannot be viewed.'
             : data.metadata_error ? 'Image details unavailable.' : '',

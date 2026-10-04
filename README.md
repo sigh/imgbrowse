@@ -21,7 +21,7 @@ at any depth, including archive members. Hidden names and symlinks are omitted.
 
 ## Browse and read
 
-The **Name ▾** or **File modified ▾** button in the shared header chooses the
+The **Name** or **File modified** button in the shared header chooses the
 sort criterion. Its adjacent **↑ / ↓** button reverses direction immediately.
 One setting orders folders and media across Browse, Overview, and all reading
 presentations. Browse orders folders and direct media as separate groups;
@@ -45,7 +45,8 @@ Shift+left/right pans horizontally when the image canvas has focus.
 Back/Forward restores browsing context; Refresh picks up disk changes.
 Reading settings are remembered for the tab session.
 Use −/+ to adjust zoom. Click an image for 100%; click again to restore default sizing.
-Info shows metadata and lets you copy the full path.
+Expand **Info** at the bottom of the folder sidebar to see metadata and copy the
+full path. It follows the current folder or image and loads metadata when expanded.
 
 Supports JPG, JPEG, PNG, GIF, WebP and BMP, including images inside ZIP/CBZ files.
 Loose MP4, M4V, WebM, OGV and MOV videos use native browser playback, subject to

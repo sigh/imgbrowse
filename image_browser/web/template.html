@@ -31,20 +31,31 @@
             <button id="viewer-zoom-out" aria-label="Zoom out" title="Zoom out (−)">−</button>
             <button id="viewer-zoom-in" aria-label="Zoom in" title="Zoom in (+)">+</button>
         </div>
-        <div class="header-actions">
-            <div class="sort-controls choice-group" role="group" aria-label="Sorting">
-                <button id="sort-toggle" popovertarget="sort-popover" aria-controls="sort-popover" aria-expanded="false" aria-label="Sort by Name" title="Sort by Name">
-                    <span class="sort-caption">Name</span><span class="sort-caret" data-icon="down" aria-hidden="true"></span>
-                </button>
-                <button id="sort-direction-toggle" aria-label="Switch to name descending" title="Name ascending; switch to name descending"><span aria-hidden="true">↑</span></button>
-            </div>
-            <div id="item-actions" class="item-actions"></div>
+        <div class="sort-controls choice-group" role="group" aria-label="Sorting">
+            <button id="sort-toggle" popovertarget="sort-popover" aria-controls="sort-popover" aria-expanded="false" aria-label="Sort by Name" title="Sort by Name"><span class="sort-caption">Name</span></button>
+            <button id="sort-direction-toggle" aria-label="Switch to name descending" title="Name ascending; switch to name descending"><span aria-hidden="true">↑</span></button>
         </div>
     </header>
     <div class="workspace">
-        <nav id="folder-tree" class="folder-tree" aria-label="Folders" hidden>
-            <ul role="tree" aria-label="Folder navigation"></ul>
-        </nav>
+        <aside id="folder-tree" class="folder-tree" aria-label="Folders and info" hidden>
+            <nav id="folder-navigation" aria-label="Folders">
+                <ul role="tree" aria-label="Folder navigation"></ul>
+            </nav>
+            <details id="item-info" open>
+                <summary id="metadata-toggle">Info</summary>
+                <section id="metadata-panel" aria-labelledby="metadata-toggle">
+                    <div class="metadata-path">
+                        <button id="metadata-copy" class="copy-path" type="button" aria-label="Copy full path" title="Copy full path" disabled></button>
+                        <div id="metadata-path" class="metadata-path-text"></div>
+                        <span id="metadata-copy-feedback" class="copy-feedback" role="status"></span>
+                    </div>
+                    <div id="metadata-details">
+                        <div id="metadata-status" role="status"><span id="metadata-message"></span><button id="metadata-retry" type="button" hidden>Retry</button></div>
+                        <dl id="metadata-facts" class="metadata-attributes"></dl>
+                    </div>
+                </section>
+            </details>
+        </aside>
         <div id="workspace-content">
             <div class="toolbar">
                 <div class="browse-controls choice-group" role="group" aria-label="Folder layout">
@@ -83,14 +94,6 @@
             <label><input class="visually-hidden" type="radio" name="sort" value="natural" checked><span class="criterion-label">Name</span></label>
             <label><input class="visually-hidden" type="radio" name="sort" value="modified"><span class="criterion-label">File modified</span></label>
         </fieldset>
-    </section>
-    <section id="metadata-popover" popover="manual" tabindex="0" role="region" aria-labelledby="metadata-title">
-        <header class="metadata-header">
-            <h2 id="metadata-title">Info</h2>
-            <button id="metadata-close" class="metadata-close" data-icon="close" aria-label="Close Info" title="Close Info"></button>
-        </header>
-        <p id="metadata-status" role="status"></p>
-        <div id="metadata-details"></div>
     </section>
 </body>
 </html>

@@ -6,7 +6,7 @@ import {byId, element, bindNavigation} from './static/dom.js';
 import {FolderGrid} from './static/folder-grid.js';
 import {FolderTree} from './static/folder-tree.js';
 import {ImageViewer} from './static/image-viewer.js';
-import {closeMetadata} from './static/metadata.js';
+import {MetadataPanel} from './static/metadata.js';
 import {PreviewLoader} from './static/preview-loader.js';
 import {SortControls} from './static/sort-controls.js';
 import {currentFolder, filename, imageSize, readingLayout, readState, stateUrl, ScreenMode, ReadingLayout, FolderLayout, sortSettings, sortKey} from './static/state.js';
@@ -30,12 +30,13 @@ class GalleryApp {
             size: imageSize(sessionStorage.getItem('readingSize')),
         };
         this.previews = new PreviewLoader(byId('grid-viewport'), byId('viewer'));
-        this.header = new ItemHeader(byId('item-location'), byId('item-actions'), (path, label) => this.folderLink(path, label));
+        this.header = new ItemHeader(byId('item-location'), (path, label) => this.folderLink(path, label));
         this.grid = new FolderGrid(this.previews, {
             folderLink: (path, label) => this.folderLink(path, label),
             mediaLink: (image, collection, label, mode) => this.mediaLink(image, collection, label, mode),
             folderLoaded: name => this.folderLoaded(name),
             refresh: () => this.refresh(),
+            showInfo: path => this.info.show(path),
         });
         this.viewer = new ImageViewer(this.previews, {
             selectImage: (image, entry) => this.navigate({image}, true, entry),
@@ -43,24 +44,28 @@ class GalleryApp {
             changeLayout: layout => this.changeLayout(layout),
             close: () => this.setMode(ScreenMode.BROWSE),
             refresh: () => this.refresh(),
-            renderHeader: options => this.header.update({...options, ...sortSettings(this.state)}),
+            renderHeader: options => this.updateItem(options),
         });
         this.tree = new FolderTree({
             destination: path => stateUrl(this.treeDestination(path)),
             select: (path, opener) => this.navigate(this.treeDestination(path), false, 'top', opener),
-            closeTransient: closeMetadata,
+            visibilityChanged: open => this.info.setVisible(open),
         });
+        this.info = new MetadataPanel(byId('item-info'), () => this.tree.setOpen(true, false));
         history.scrollRestoration = 'manual';
         this.sortControls = new SortControls(byId('sort-popover'), changes => this.navigate(changes));
         this.bindControls();
         this.render(false, true);
         this.tree.setOpen(!this.tree.narrow.matches && sessionStorage.getItem('foldersOpen') === '1', false);
-        getInfo().then(info => this.folderLoaded(info.root_name)).catch(() => {});
+        getInfo().then(info => {
+            this.info.setRoot(info.root_path);
+            this.folderLoaded(info.root_name);
+        }).catch(() => {});
     }
 
     bindControls() {
         for (const button of document.querySelectorAll('[data-icon]')) {
-            button.append(icon(button.dataset.icon));
+            button.replaceChildren(icon(button.dataset.icon));
         }
         for (const button of document.querySelectorAll('[data-layout]')) {
             button.addEventListener('click', () => this.navigate({compact: button.dataset.layout === FolderLayout.LIST}, true));
@@ -81,6 +86,19 @@ class GalleryApp {
             this.filterTimer = setTimeout(() => this.navigate({filter}, true), FILTER_DELAY);
         });
         window.addEventListener('popstate', () => this.render(false, true));
+        document.addEventListener('keydown', event => this.onKey(event));
+    }
+
+    onKey(event) {
+        this.header.breadcrumbs.onKey(event);
+        if (event.defaultPrevented || document.querySelector(':popover-open')) return;
+        if (event.key === 'Escape' && !document.fullscreenElement && !this.tree.pane.hidden
+            && (this.tree.narrow.matches || this.tree.pane.contains(event.target))) {
+            event.preventDefault();
+            this.tree.setOpen(false);
+            return;
+        }
+        this.viewer.onKey(event);
     }
 
     async refresh() {
@@ -93,6 +111,7 @@ class GalleryApp {
             this.grid.cache.clear();
             this.tree.refresh();
             this.render(true, true);
+            this.info.refresh();
         } catch (error) {
             (this.state.mode !== ScreenMode.BROWSE ? this.viewer.status : this.grid.status).textContent = error.message;
         } finally {
@@ -224,11 +243,15 @@ class GalleryApp {
         this.tree.update(this.state, name);
     }
 
+    updateItem(options) {
+        this.header.update({...options, ...sortSettings(this.state)});
+        this.info.update(options);
+    }
+
     renderBreadcrumbs() {
         if (this.state.mode !== ScreenMode.BROWSE) return;
-        this.header.update({
+        this.updateItem({
             folder: this.state.folder, rootName: this.rootName, compact: this.state.compact,
-            ...sortSettings(this.state),
         });
     }
 

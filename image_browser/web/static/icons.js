@@ -2,7 +2,6 @@
 import {setButtonLabel} from './dom.js';
 
 const paths = {
-    close: '<path d="m6 6 12 12M18 6 6 18"/>',
     sidebar: '<rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18M5 8h2M5 12h2M5 16h2"/>',
     down: '<path d="m5 9 7 7 7-7"/>',
     play: '<path d="m8 5 11 7-11 7Z" fill="currentColor" stroke="none"/>',
@@ -15,7 +14,6 @@ const paths = {
     grid: '<path d="M3 3h7v7H3ZM14 3h7v7h-7ZM3 14h7v7H3ZM14 14h7v7h-7Z"/>',
     video: '<rect x="3" y="3" width="18" height="18" rx="2"/><path d="m10 8 6 4-6 4Z"/>',
     copy: '<rect x="8" y="8" width="12" height="13" rx="2"/><path d="M16 8V3H3v13h5"/>',
-    info: '<circle cx="12" cy="12" r="9"/><path d="M12 11v6m0-10v1"/>',
     check: '<path d="m5 12 4 4L19 6"/>',
     folder: '<path d="M3 7V5h6l2 2h10v12H3Z"/>',
     file: '<path d="M5 2h9l5 5v15H5ZM14 2v6h5M8 12h8M8 16h8"/>',

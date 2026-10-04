@@ -24,16 +24,17 @@ export async function run(browser, fixtures) {
     assert.ok(await evaluate("document.querySelector('.other-files-heading').getBoundingClientRect().top > document.getElementById('grid-status').getBoundingClientRect().bottom"), 'Empty-media feedback precedes the disclosure');
     await screenshot('other-files-only');
 
-    await evaluate("document.querySelector('.other-file[data-path=\"Other files/sunrise.heic\"] button').click()");
-    await waitFor("document.getElementById('metadata-title').textContent === 'sunrise.heic' && document.querySelector('.copy-path')");
-    assert.equal(await evaluate("document.getElementById('metadata-status').textContent"), 'This file type cannot be viewed.');
+    await evaluate("window.inspectedFile=document.querySelector('.other-file[data-path=\"Other files/sunrise.heic\"] button'); inspectedFile.focus(); inspectedFile.click()");
+    assert.ok(await evaluate('document.activeElement === inspectedFile'), 'Inspection does not force focus into Info');
+    await waitFor("document.querySelector('.metadata-path-text')?.textContent.endsWith('/sunrise.heic') && !document.getElementById('metadata-details').classList.contains('loading')");
+    assert.equal(await evaluate("document.getElementById('metadata-message').textContent"), 'This file type cannot be viewed.');
     assert.ok(await evaluate("document.getElementById('item-path').textContent.includes('Other files') && !document.getElementById('item-path').textContent.includes('sunrise')"), 'File inspection preserves browsing context');
     await evaluate("window.copiedPath=null; Object.defineProperty(navigator, 'clipboard', {configurable:true, value:{writeText:async path=>{window.copiedPath=path;}}});document.querySelector('.copy-path').click()");
     await waitFor('copiedPath !== null');
     assert.equal(await evaluate('copiedPath'), join(fixtures.absoluteRoot, 'Other files/sunrise.heic'));
     await screenshot('other-file-info');
-    await nativeKey('Escape', 27);
-    assert.equal(await evaluate("document.activeElement.closest('.card')?.dataset.path"), 'Other files/sunrise.heic');
+    await click('folders-toggle');
+    assert.equal(await evaluate('document.activeElement.id'), 'folders-toggle');
     await filter('sunrise');
     await waitFor("document.querySelectorAll('.other-file').length === 1 && document.querySelector('.other-files-toggle').textContent.includes('1 matching')");
     await toggle();
@@ -47,6 +48,12 @@ export async function run(browser, fixtures) {
     await waitFor("document.querySelector('.other-file').getBoundingClientRect().width < 320");
     assert.ok(await evaluate("document.documentElement.scrollWidth === innerWidth && document.getElementById('grid-viewport').scrollWidth === document.getElementById('grid-viewport').clientWidth"));
     await screenshot('other-files-mobile');
+    const mobileUrl = await evaluate('location.href');
+    await evaluate("document.querySelector('.other-file button').click()");
+    await waitFor("!document.getElementById('folder-tree').hidden && document.getElementById('item-info').open && document.querySelector('.copy-path')");
+    assert.equal(await evaluate('location.href'), mobileUrl, 'Mobile inspection opens Info without navigating');
+    await screenshot('other-file-info-mobile');
+    await nativeKey('Escape', 27);
     assert.equal(requests.filter(url => {
         const request = new URL(url);
         return ['/thumbnail', '/image', '/api/video'].includes(request.pathname) && request.searchParams.get('path')?.startsWith('Other files/');
@@ -60,9 +67,9 @@ export async function run(browser, fixtures) {
     await waitFor("document.querySelectorAll('.other-file').length === 2");
     assert.ok(await evaluate("document.querySelectorAll('.card:not(.other-file)').length > 0"), 'Supported archive contents stay above the separate list');
     await evaluate("document.querySelector('.other-file[data-path=\"Packed.cbz/clip.mp4\"] button').click()");
-    await waitFor("document.getElementById('metadata-status').textContent === 'Videos inside archives cannot be viewed.'");
+    await waitFor("document.getElementById('metadata-message').textContent === 'Videos inside archives cannot be viewed.'");
     assert.ok(await evaluate("document.querySelector('.metadata-path-text').textContent.endsWith('/Packed.cbz/clip.mp4')"));
-    await nativeKey('Escape', 27);
+    await click('folders-toggle');
     await click('overview-folder');
     await waitFor("document.getElementById('summary').textContent === '3 items'");
     assert.equal(await evaluate("document.querySelector('.other-files-heading')"), null, 'Overview remains a media collection');

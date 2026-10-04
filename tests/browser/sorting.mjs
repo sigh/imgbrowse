@@ -187,14 +187,14 @@ export async function run(browser, {first, second, last}) {
     const geometry = () => evaluate(`new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(() => {
         const rect = selector => document.querySelector(selector).getBoundingClientRect().toJSON();
         const path=rect('#item-path'), popup=rect('#sort-popover'), header=rect('.app-header');
-        const buttons=['.header-start','.reading-navigation','.viewer-tools','#sort-toggle','#sort-direction-toggle','.item-info'].map(rect);
+        const buttons=['.header-start','.reading-navigation','.viewer-tools','#sort-toggle','#sort-direction-toggle'].map(rect);
         const identities=[...document.querySelectorAll('#item-path .selected-folder, #item-path .item-name')].map(node=>node.getBoundingClientRect());
         resolve({height:header.height, buttons, label:document.querySelector('.sort-caption').textContent,
             fits:document.documentElement.scrollWidth<=innerWidth && buttons.every(box=>box.left>=0 && box.right<=innerWidth)
                 && identities.every(box=>box.left>=path.left-.5 && box.right<=path.right+.5)
                 && path.right<=buttons[3].left && popup.left>=0 && popup.right<=innerWidth && popup.top>=header.bottom && popup.bottom<=innerHeight});
     })))`);
-    for (const width of [320, 390, 659, 660, 680, 1024]) {
+    for (const width of [320, 390, 619, 620, 680, 1024]) {
         await call('Emulation.setDeviceMetricsOverride', {width,height:844,deviceScaleFactor:1,mobile:false});
         let before;
         for (const mode of ['browse-folder', 'overview-folder', 'read-single']) {
@@ -204,8 +204,8 @@ export async function run(browser, {first, second, last}) {
             const current = await geometry();
             assert.ok(current.fits, `Header and picker fit at ${width}px in ${mode}`);
             assert.equal(current.label, 'File modified');
-            assert.deepEqual(current.buttons.slice(3, 5).map(box=>[box.width,box.height]), [[112,32],[32,32]]);
-            assert.equal(current.height, width < 660 ? 85 : 45);
+            assert.deepEqual(current.buttons.slice(3, 5).map(box=>[box.width,box.height]), [[96,32],[32,32]]);
+            assert.equal(current.height, width < 620 ? 85 : 45);
             if (before) assert.deepEqual(current.buttons, before.buttons, `Controls retain their positions at ${width}px`);
             before = current;
         }

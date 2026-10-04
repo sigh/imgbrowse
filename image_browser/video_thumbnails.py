@@ -54,11 +54,25 @@ def video_metadata(file):
     executable = shutil.which('ffprobe')
     if executable is None:
         return {}
-    output = run_video_tool([executable, '-v', 'error', '-show_entries',
-                             'format=duration', '-of', 'json', str(file)],
-                            monotonic() + EXTRACTION_TIMEOUT)
+    output = run_video_tool([executable, '-v', 'error', '-select_streams', 'v:0',
+                             '-show_entries', 'stream=width,height:format=duration',
+                             '-of', 'json', str(file)], monotonic() + EXTRACTION_TIMEOUT)
     try:
-        duration = float(json.loads(output)['format']['duration'])
-        return {'duration': duration} if math.isfinite(duration) and duration >= 0 else {}
-    except (ValueError, KeyError, TypeError):
+        data = json.loads(output)
+    except (ValueError, TypeError):
         return {}
+    info = {}
+    try:
+        duration = float(data['format']['duration'])
+        if math.isfinite(duration) and duration >= 0:
+            info['duration'] = duration
+    except (ValueError, KeyError, TypeError):
+        pass
+    try:
+        stream = data['streams'][0]
+        width, height = int(stream['width']), int(stream['height'])
+        if width > 0 and height > 0:
+            info.update(width=width, height=height)
+    except (ValueError, KeyError, TypeError, IndexError):
+        pass
+    return info

@@ -8,10 +8,11 @@ const TYPEAHEAD_INTERVAL = 700;
 
 /** One folder navigator shared by browsing and reading. Listings never imply expansion. */
 export class FolderTree {
-    constructor({destination, select, closeTransient}) {
-        Object.assign(this, {destination, select, closeTransient});
+    constructor({destination, select, visibilityChanged}) {
+        Object.assign(this, {destination, select, visibilityChanged});
         this.pane = byId('folder-tree');
-        this.list = this.pane.querySelector('ul');
+        this.viewport = byId('folder-navigation');
+        this.list = this.viewport.querySelector('ul');
         this.toggle = byId('folders-toggle');
         this.narrow = matchMedia('(max-width: 700px)');
         this.rowHeight = parseFloat(getComputedStyle(this.pane).getPropertyValue('--control-height'));
@@ -31,25 +32,18 @@ export class FolderTree {
             if (!this.pane.hidden) this.rebuild();
         });
         this.toggle.addEventListener('click', () => this.setOpen(this.pane.hidden));
-        this.pane.addEventListener('click', event => this.onClick(event));
-        this.pane.addEventListener('keydown', event => this.onKey(event));
-        this.pane.addEventListener('focusin', event => {
+        this.viewport.addEventListener('click', event => this.onClick(event));
+        this.viewport.addEventListener('keydown', event => this.onKey(event));
+        this.viewport.addEventListener('focusin', event => {
             const row = event.target.closest('.tree-row');
             if (row) { this.focused = row.dataset.path; this.renderRows(); }
         });
-        this.pane.addEventListener('scroll', () => this.scheduleRows());
-        new ResizeObserver(() => this.scheduleRows()).observe(this.pane);
+        this.viewport.addEventListener('scroll', () => this.scheduleRows());
+        new ResizeObserver(() => this.scheduleRows()).observe(this.viewport);
         document.addEventListener('click', event => {
             if (this.narrow.matches && !this.pane.hidden && !this.pane.contains(event.target)
                 && !this.toggle.contains(event.target)) this.setOpen(false, false);
         });
-        document.addEventListener('keydown', event => {
-            if (event.key === 'Escape' && !document.fullscreenElement && !this.pane.hidden
-                && (this.narrow.matches || this.pane.contains(event.target))) {
-                event.preventDefault(); event.stopImmediatePropagation();
-                this.setOpen(false);
-            }
-        }, true);
     }
 
     get current() { return currentFolder(this.state); }
@@ -67,18 +61,19 @@ export class FolderTree {
     async setOpen(open, focus = true) {
         if (open === !this.pane.hidden) return;
         if (!open) {
-            this.position = {top: this.pane.scrollTop, left: this.pane.scrollLeft};
+            this.position = {top: this.viewport.scrollTop, left: this.viewport.scrollLeft};
             this.stopRequests();
-        } else if (this.narrow.matches) this.closeTransient();
+        }
         this.pane.hidden = !open;
+        this.visibilityChanged(open);
         this.toggle.setAttribute('aria-expanded', String(open));
         if (!this.narrow.matches) sessionStorage.setItem('foldersOpen', open ? '1' : '0');
         if (!open) { if (focus) this.toggle.focus({preventScroll: true}); return; }
         const first = !this.initialized;
         this.initialized = true;
         this.rebuild();
-        this.pane.scrollTop = this.position.top;
-        this.pane.scrollLeft = this.position.left;
+        this.viewport.scrollTop = this.position.top;
+        this.viewport.scrollLeft = this.position.left;
         if (first) {
             const path = await this.revealInitialPath();
             if (focus && !this.pane.hidden && document.activeElement === this.toggle) this.focusRow(path, true);
@@ -182,7 +177,7 @@ export class FolderTree {
 
     rebuild() {
         if (this.pane.hidden) return;
-        const hadFocus = this.pane.contains(document.activeElement);
+        const hadFocus = this.viewport.contains(document.activeElement);
         this.rows = [];
         const visit = (path, name, parent = null, sibling = 0, count = 1) => {
             const row = {path, name, parent, depth: parent ? parent.depth + 1 : 0, sibling, count};
@@ -204,8 +199,8 @@ export class FolderTree {
 
     renderRows() {
         if (this.pane.hidden) return;
-        const start = Math.max(0, Math.floor(this.pane.scrollTop / this.rowHeight) - OVERSCAN);
-        const end = Math.min(this.rows.length, Math.ceil((this.pane.scrollTop + this.pane.clientHeight) / this.rowHeight) + OVERSCAN);
+        const start = Math.max(0, Math.floor(this.viewport.scrollTop / this.rowHeight) - OVERSCAN);
+        const end = Math.min(this.rows.length, Math.ceil((this.viewport.scrollTop + this.viewport.clientHeight) / this.rowHeight) + OVERSCAN);
         const indexes = new Set(Array.from({length: end - start}, (_, index) => start + index));
         const focusedIndex = this.rows.findIndex(row => !row.status && row.path === this.focused);
         if (focusedIndex >= 0) indexes.add(focusedIndex);
@@ -288,7 +283,6 @@ export class FolderTree {
 
     onKey(event) {
         if (event.key === 'Tab' || event.ctrlKey || event.metaKey || event.altKey) return;
-        event.stopPropagation();
         const rows = this.rows.filter(row => !row.status);
         const index = rows.findIndex(row => row.path === this.focused);
         const row = rows[index];

@@ -105,13 +105,13 @@ export async function run(browser, fixtures) {
     await open(viewerUrl('Packed.cbz/Chapter 3/page1.jpg', ImageSize.DEFAULT, 'Packed.cbz'));
     await readyImage('Packed.cbz/Chapter 3/page1.jpg');
     await browser.openInfo();
-    await evaluate("Object.defineProperty(navigator, 'clipboard', {configurable:true, value:{writeText:async text => { window.copiedPath=text; }}}); document.querySelector('#metadata-details .copy-path').click()");
+    await evaluate("Object.defineProperty(navigator, 'clipboard', {configurable:true, value:{writeText:async text => { window.copiedPath=text; }}}); document.querySelector('#metadata-panel .copy-path').click()");
     await waitFor('window.copiedPath');
     assert.equal(await evaluate('window.copiedPath'), absoluteRoot + '/Packed.cbz/Chapter 3/page1.jpg');
     await browser.openInfo();
-    await waitFor("document.getElementById('metadata-details').textContent.includes('Packed.cbz/Chapter 3/page1.jpg')");
+    await waitFor("document.getElementById('metadata-panel').textContent.includes('Packed.cbz/Chapter 3/page1.jpg')");
     await nativeKey('Escape', 27);
-    await waitFor("!document.getElementById('metadata-popover').matches(':popover-open')");
+    await waitFor("!(!document.getElementById('folder-tree').hidden && document.getElementById('item-info').open)");
 
     await evaluate("document.querySelector('#item-path a[aria-current]').click()");
     await waitFor("document.getElementById('viewer').hidden && new URLSearchParams(location.search).get('folder') === 'Packed.cbz/Chapter 3'");

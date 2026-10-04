@@ -1,5 +1,4 @@
 import {isVideo, fileExtension} from './media-kind.js';
-import {toggleMetadata} from './metadata.js';
 import {getFolder, walkImages, sequence} from './api.js';
 import {byId, element, plainClick, setButtonLabel, TaskScope} from './dom.js';
 import {icon} from './icons.js';
@@ -19,7 +18,7 @@ function positionRow(node, row) {
 
 /** Owns folder loading, incremental discovery, and the lifetime of visible rows. */
 export class FolderGrid {
-    constructor(previews, {folderLink, mediaLink, folderLoaded, refresh}) {
+    constructor(previews, {folderLink, mediaLink, folderLoaded, refresh, showInfo}) {
         this.previews = previews;
         this.folderLink = folderLink;
         this.mediaLink = (image, collection, label, mode) => {
@@ -40,6 +39,7 @@ export class FolderGrid {
         };
         this.folderLoaded = folderLoaded;
         this.refresh = refresh;
+        this.showInfo = showInfo;
         this.viewport = byId('grid-viewport');
         this.container = byId('grid');
         this.status = byId('grid-status');
@@ -191,8 +191,11 @@ export class FolderGrid {
         if (item.type === ItemType.FILE) {
             link = element('button', '', label);
             link.type = 'button';
-            link.setAttribute('aria-controls', 'metadata-popover');
-            link.addEventListener('click', () => toggleMetadata(item.path, link));
+            link.setAttribute('aria-controls', 'item-info');
+            link.addEventListener('click', event => {
+                event.stopPropagation();
+                this.showInfo(item.path);
+            });
             action = 'File info for';
         } else if (item.type === ItemType.FOLDER) {
             link = this.folderLink(item.path, label);

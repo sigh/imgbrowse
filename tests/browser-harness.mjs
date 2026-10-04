@@ -101,11 +101,11 @@ export async function connectBrowser(port, base, screenshots = '') {
     async function setZoom(percent) {
         await evaluate(`import('/gallery.js').then(({app}) => app.changeSize(String(${percent}/100)))`);
     }
-    async function openInfo() {
-        if (!await evaluate("document.getElementById('metadata-popover').matches(':popover-open')")) {
-            await evaluate("document.querySelector('.item-info').click()");
-        }
-        await waitFor("document.querySelector('#metadata-details .copy-path')");
+    async function openInfo(waitLoaded = true) {
+        if (await evaluate("document.getElementById('folder-tree').hidden")) await click('folders-toggle');
+        if (!await evaluate("document.getElementById('item-info').open")) await click('metadata-toggle');
+        await evaluate("document.getElementById('metadata-toggle').focus()");
+        if (waitLoaded) await waitFor("document.querySelector('#metadata-panel .copy-path') && !document.getElementById('metadata-details').classList.contains('loading') && !document.getElementById('folder-tree').hidden");
     }
 
     const headerPositions = () => evaluate(`(() => {
@@ -115,7 +115,7 @@ export async function connectBrowser(port, base, screenshots = '') {
             modes: [...header.querySelectorAll('[data-mode], [data-reading-layout]')].map(button => button.getBoundingClientRect().toJSON()),
             height: header.offsetHeight,
             location: header.querySelector('.item-location').getBoundingClientRect().toJSON(),
-            info: header.querySelector('.item-info').getBoundingClientRect().toJSON(),
+            sorting: header.querySelector('.sort-controls').getBoundingClientRect().toJSON(),
         };
     })()`);
 

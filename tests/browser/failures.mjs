@@ -9,7 +9,7 @@ export async function run(browser, {first, second, absoluteRoot}) {
     for (const viewing of [false, true]) {
         if (viewing) { await open(viewerUrl(first)); await readyImage(first); }
         await browser.openInfo();
-        const prefix = '#metadata-details';
+        const prefix = '#metadata-panel';
         const geometry = await headerPositions();
         await evaluate(`window.originalExecCommand=document.execCommand; document.execCommand=()=>false;
             Object.defineProperty(navigator,'clipboard',{configurable:true,value:{writeText:async()=>{throw new Error('denied');}}});
@@ -28,21 +28,40 @@ export async function run(browser, {first, second, absoluteRoot}) {
     await nativeKey('Escape', 27);
     await call('Fetch.enable', {patterns:[{urlPattern:'*/api/metadata?*'}]});
     network.metadata = true;
-    await evaluate("document.querySelector('#item-actions .item-info').click()");
+    await browser.openInfo(false);
+    await evaluate("import('/gallery.js').then(({app})=>app.info.refresh())");
     for (let attempt=0; !held.length && attempt<160; attempt++) await browser.pause(50);
     assert.ok(held.length);
     for (const requestId of held.splice(0)) await call('Fetch.fulfillRequest', {requestId,responseCode:503,
         responseHeaders:[{name:'Content-Type',value:'application/json'}],body:Buffer.from(JSON.stringify({error:'Temporary failure'})).toString('base64')});
-    await waitFor("document.querySelector('#metadata-status button')");
-    assert.equal(await evaluate("document.getElementById('metadata-status').firstChild.textContent"), 'Unable to load info. ');
+    await waitFor("!document.getElementById('metadata-retry').hidden");
+    assert.equal(await evaluate("document.getElementById('metadata-message').textContent"), 'Unable to load info.');
     await screenshot('metadata-failure');
     network.metadata = false;
     await nativeKey('Tab', 9);
     await nativeKey('Tab', 9);
     assert.ok(await evaluate("document.activeElement.matches('#metadata-status button')"));
     await nativeKey('Enter', 13);
-    await waitFor("document.getElementById('metadata-details').textContent.includes('1000 × 1800')");
-    assert.ok(await evaluate("!document.querySelector('#metadata-status button') && document.activeElement.id==='metadata-popover' && document.getElementById('metadata-popover').matches(':popover-open')"));
+    await waitFor("document.getElementById('metadata-panel').textContent.includes('1000 × 1800')");
+    assert.ok(await evaluate("document.getElementById('metadata-retry').hidden && document.activeElement.id!=='metadata-panel' && (!document.getElementById('folder-tree').hidden && document.getElementById('item-info').open)"));
+    // Collapsing Info cancels its pending request; navigation stays lazy until reopened.
+    network.metadata = true;
+    await click('metadata-toggle');
+    await browser.openInfo(false);
+    await evaluate("import('/gallery.js').then(({app})=>app.info.refresh())");
+    for (let attempt=0; !held.length && attempt<160; attempt++) await browser.pause(50);
+    assert.ok(held.length);
+    await evaluate("import('/gallery.js').then(({app})=>{window.pendingInfo=app.info.request;})");
+    await click('metadata-toggle');
+    await waitFor('pendingInfo.signal.aborted');
+    network.metadata = false;
+    for (const requestId of held.splice(0)) await call('Fetch.continueRequest', {requestId}).catch(()=>{});
+    const metadataCount = browser.requests.filter(url => new URL(url).pathname === '/api/metadata').length;
+    await click('viewer-next');
+    await readyImage(second);
+    assert.equal(browser.requests.filter(url => new URL(url).pathname === '/api/metadata').length, metadataCount);
+    await browser.openInfo();
+    await waitFor(`document.querySelector('.metadata-path-text').textContent.endsWith(${JSON.stringify(second)})`);
     await nativeKey('Escape', 27);
     await call('Fetch.disable');
 
@@ -81,14 +100,13 @@ export async function run(browser, {first, second, absoluteRoot}) {
     // Archive information identifies logical member paths; copied paths stay complete.
     await open(viewerUrl('Packed.cbz/page2.jpg', undefined, 'Packed.cbz'));
     await readyImage('Packed.cbz/page2.jpg');
-    await evaluate("document.querySelector('#item-actions .item-info').click()");
+    await browser.openInfo(false);
     await waitFor("document.querySelector('.metadata-path')");
-    assert.equal(await evaluate("document.querySelector('.metadata-path-heading').textContent"), 'Member path');
     assert.equal(await evaluate("document.querySelector('.metadata-path-text').textContent"), absoluteRoot + '/Packed.cbz/page2.jpg');
     await nativeKey('Escape', 27);
     await open('/?folder=Packed.cbz');
-    await evaluate("document.querySelector('#item-actions .item-info').click()");
-    await waitFor("document.querySelector('.metadata-path-heading')?.textContent === 'Archive'");
+    await browser.openInfo(false);
+    await waitFor("document.querySelector('.metadata-path-text')?.textContent.endsWith('/Packed.cbz')");
     await nativeKey('Escape', 27);
     await open('/?folder=Empty&viewer=1');
     await waitFor("document.getElementById('viewer-status').textContent === 'No images or videos in this collection.'");

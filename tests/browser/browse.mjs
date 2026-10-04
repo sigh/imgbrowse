@@ -58,34 +58,36 @@ export async function run(browser, fixtures) {
     for (const request of requests.filter(url => new URL(url).pathname === '/thumbnail')) {
         assert.ok(visibleCards.includes(new URL(request).searchParams.get('path')), 'Only visible card paths may request thumbnails: ' + request);
     }
+    assert.equal(await evaluate("document.getElementById('item-info').open"), true, 'Info is expanded by default');
+    await click('folders-toggle');
     await browser.openInfo();
-    await evaluate("Object.defineProperty(navigator, 'clipboard', {configurable:true, value:{writeText:async text => { window.copiedPath=text; }}}); document.querySelector('#metadata-details .copy-path').click()");
+    await evaluate("Object.defineProperty(navigator, 'clipboard', {configurable:true, value:{writeText:async text => { window.copiedPath=text; }}}); document.querySelector('#metadata-panel .copy-path').click()");
     await waitFor("window.copiedPath");
     const absoluteRoot = await evaluate('window.copiedPath');
     assert.ok(absoluteRoot.startsWith('/'));
-    await evaluate("{ const info=document.querySelector('#item-actions .item-info'); info.focus(); }");
-    await waitFor("document.getElementById('metadata-details').textContent.includes('direct media')");
-    assert.equal(await evaluate("getComputedStyle(document.querySelector('#item-actions .item-info')).backgroundColor"), actionColors.selected, 'Expanded Info shares the selected-layout treatment');
+    await evaluate("{ const info=document.querySelector('#metadata-toggle'); info.focus(); }");
+    await waitFor("document.getElementById('metadata-panel').textContent.includes('direct media')");
+    assert.notEqual(await evaluate("getComputedStyle(document.querySelector('#metadata-toggle')).backgroundColor"), actionColors.selected, 'Expanded Info has no selected-mode treatment');
 
-    assert.equal(await evaluate("document.getElementById('metadata-popover').matches(':popover-open')"), true);
-    assert.ok(await evaluate("document.querySelector('#metadata-popover #metadata-close') && document.querySelector('#metadata-details .copy-path') && !document.querySelector('.app-header > .item-location .copy-path')"), 'Copy belongs in Info alongside the full path');
+    assert.equal(await evaluate("(!document.getElementById('folder-tree').hidden && document.getElementById('item-info').open)"), true);
+    assert.ok(await evaluate("document.querySelector('#item-info > summary') && document.querySelector('#metadata-panel .copy-path') && !document.querySelector('.app-header > .item-location .copy-path')"), 'Copy belongs in Info alongside the full path');
     assert.equal(await evaluate("[...document.querySelectorAll('#metadata-details dt')].some(row => row.textContent === 'Type')"), false);
     assert.equal(await evaluate("import('/static/metadata-data.js').then(({formatMetadataDate}) => formatMetadataDate('2005-01-10T17:08:17'))"), '2005-01-10 17:08');
-    const folderActions = await evaluate("document.getElementById('item-actions').getBoundingClientRect().toJSON()");
+    const folderActions = await evaluate("document.querySelector('.sort-controls').getBoundingClientRect().toJSON()");
 
-    assert.equal(await evaluate("document.getElementById('metadata-details').textContent.includes('including archives') || document.getElementById('metadata-details').textContent.includes('Scope')"), false);
+    assert.equal(await evaluate("document.getElementById('metadata-panel').textContent.includes('including archives') || document.getElementById('metadata-panel').textContent.includes('Scope')"), false);
     assert.ok(folderActions.right <= await evaluate('innerWidth'));
     await screenshot('folder-info');
-    assert.equal(await evaluate("document.getElementById('metadata-popover').getBoundingClientRect().top"), await evaluate("document.querySelector('.app-header').getBoundingClientRect().bottom + 8"));
+    assert.ok(await evaluate("(() => {const panel=document.getElementById('item-info').getBoundingClientRect(), sidebar=document.getElementById('folder-tree').getBoundingClientRect(); return panel.bottom===sidebar.bottom && panel.top>=document.getElementById('folder-navigation').getBoundingClientRect().bottom;})()"), 'Info occupies the bottom of the sidebar below the tree');
     await nativeKey('Escape', 27);
-    await waitFor("!document.getElementById('metadata-popover').matches(':popover-open')");
-    assert.equal(await evaluate("document.activeElement === document.querySelector('#item-actions .item-info')"), true);
-    await evaluate("document.querySelector('#item-actions .item-info').click()");
-    await waitFor("document.getElementById('metadata-popover').matches(':popover-open')");
-    await call('Input.dispatchMouseEvent', {type:'mousePressed', x:10, y:450, button:'left', clickCount:1});
-    await call('Input.dispatchMouseEvent', {type:'mouseReleased', x:10, y:450, button:'left', clickCount:1});
-    await waitFor("!document.getElementById('metadata-popover').matches(':popover-open')");
-
+    await waitFor("!(!document.getElementById('folder-tree').hidden && document.getElementById('item-info').open)");
+    assert.equal(await evaluate('document.activeElement.id'), 'folders-toggle');
+    await browser.openInfo();
+    await call('Input.dispatchMouseEvent', {type:'mousePressed', x:800, y:20, button:'left', clickCount:1});
+    await call('Input.dispatchMouseEvent', {type:'mouseReleased', x:800, y:20, button:'left', clickCount:1});
+    assert.ok(await evaluate("!document.getElementById('folder-tree').hidden && document.getElementById('item-info').open"), 'Desktop Info stays open while browsing outside the sidebar');
+    await click('metadata-toggle');
+    await click('folders-toggle');
 
     // Filtering is immediate and makes no directory request. Both presentations preserve an item.
     const folderRequests = () => requests.filter(url => url.includes('/api/folder')).length;
