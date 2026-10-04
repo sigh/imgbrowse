@@ -16,7 +16,7 @@ await evaluate(`(async()=>{
   await grid.loadPage();
  }
 })()`);
-const grid = await evaluate("({count:testApp.grid.directory.images.length,first:testApp.grid.directory.images[0].path,nodes:document.querySelectorAll('.card').length})");
+const grid = await evaluate("({count:testApp.grid.directory.window.paths.length,first:testApp.grid.directory.window.paths[0],nodes:document.querySelectorAll('.card').length})");
 assert.ok(grid.count <= 2000 && grid.first !== 'Large/page0.jpg',JSON.stringify(grid));
 assert.ok(grid.nodes < 100);
 await evaluate(`(async()=>{
@@ -25,12 +25,12 @@ await evaluate(`(async()=>{
  grid.viewport.scrollTop=0;
  await grid.loadPage(true);
 })()`);
-await wait(`testApp.grid.directory.images[0].path !== ${JSON.stringify(grid.first)}`);
-assert.ok(await evaluate('testApp.grid.directory.images.length <= 2000'));
+await wait(`testApp.grid.directory.window.paths[0] !== ${JSON.stringify(grid.first)}`);
+assert.ok(await evaluate('testApp.grid.directory.window.paths.length <= 2000'));
 
 await evaluate("testApp.mediaLink('Large/page0.jpg', 'Large').click()");
 await wait("document.getElementById('viewer-image').dataset.path==='Large/page0.jpg'");
-await wait("testApp.viewer.prefetchPath==='Large/page1.jpg'");
+await wait("testApp.viewer.navigation.prefetchPath==='Large/page1.jpg'");
 await wait("import('/static/media-cache.js').then(module=>module.originals.values.has('Large/page1.jpg'))");
 await evaluate("testApp.viewer.requestMove(false)");
 await wait("document.getElementById('viewer-image').dataset.path==='Large/page1.jpg'");
@@ -60,7 +60,7 @@ await wait("document.getElementById('viewer-image').dataset.path === 'Large/page
 await evaluate(`testApp.setMode(${JSON.stringify(ScreenMode.OVERVIEW)})`);
 await wait("testApp.state.mode === 'overview' && document.querySelector('.card[data-path=\"Large/page5.jpg\"]')");
 assert.equal(await evaluate('testApp.state.image'), 'Large/page5.jpg');
-assert.ok(await evaluate('testApp.grid.directory.images.length <= 2000'));
+assert.ok(await evaluate('testApp.grid.directory.window.paths.length <= 2000'));
 await evaluate(`testApp.setMode(${JSON.stringify(ScreenMode.VIEW)})`);
 await wait("document.getElementById('viewer-image').dataset.path === 'Large/page5.jpg' && !document.getElementById('viewer-image').hidden");
 await evaluate(`testApp.setMode(${JSON.stringify(ScreenMode.BROWSE)})`);

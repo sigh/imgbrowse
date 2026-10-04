@@ -3,12 +3,10 @@ import {walkImages} from './api.js';
 import {CollectionWindow} from './collection-window.js';
 import {element, TaskScope} from './dom.js';
 import {icon} from './icons.js';
-import {filename, parentPath, relativePath, sortKey, sortSettings} from './state.js';
+import {filename, parentPath, relativePath, sortKey, sortSettings, ViewerEntry} from './state.js';
 
 const PAGE_SIZE = 32;
 const MAX_PATHS = 2048;
-const GAP = 6;
-const DEFAULT_SIZE = 64;
 
 /** Stable native scroller with a bounded path window and virtual button elements. */
 export class ThumbnailStrip {
@@ -17,6 +15,12 @@ export class ThumbnailStrip {
         this.window = new CollectionWindow(walkImages, {pageSize:PAGE_SIZE, maxPaths:MAX_PATHS});
         this.frame = element('div', 'strip-frame');
         container.before(this.frame); this.frame.append(container);
+        const style = getComputedStyle(container);
+        this.gap = parseFloat(style.columnGap);
+        this.paddingStart = parseFloat(style.paddingLeft);
+        this.paddingEnd = parseFloat(style.paddingRight);
+        this.defaultSize = parseFloat(style.getPropertyValue('--thumbnail-default-height'));
+        this.defaultWidth = parseFloat(style.getPropertyValue('--thumbnail-default-width'));
         this.createResizer();
         this.failures = [true, false].map(reverse => {
             const button = element('button', 'strip-error ' + (reverse ? 'before' : 'after'));
@@ -70,7 +74,7 @@ export class ThumbnailStrip {
     get edges() { return this.window.edges; }
 
     createResizer() {
-        this.size = DEFAULT_SIZE;
+        this.size = this.defaultSize;
         const handle = element('div', 'strip-resizer');
         this.handle = handle;
         handle.tabIndex = 0;
@@ -96,11 +100,11 @@ export class ThumbnailStrip {
         handle.addEventListener('keydown', event => {
             const steps = {ArrowUp: 16, ArrowDown: -16};
             if (!(event.key in steps)) return;
-            event.preventDefault(); event.stopPropagation();
+            event.preventDefault();
             this.setSize(this.size + steps[event.key]); finish();
         });
         const saved = Number(sessionStorage.getItem('thumbnailSize'));
-        this.setSize(saved || DEFAULT_SIZE);
+        this.setSize(saved || this.defaultSize);
     }
 
     maxSize() {
@@ -111,18 +115,18 @@ export class ThumbnailStrip {
 
     offsets() {
         const offsets = [0];
-        for (const path of this.paths || []) offsets.push(offsets.at(-1) + this.tileWidth(path) + GAP);
+        for (const path of this.paths || []) offsets.push(offsets.at(-1) + this.tileWidth(path) + this.gap);
         return offsets;
     }
 
     setSize(size) {
         const max = this.maxSize();
         const oldOffsets = this.offsets();
-        const left = Math.max(0, this.container.scrollLeft - 12);
+        const left = Math.max(0, this.container.scrollLeft - this.paddingStart);
         const anchor = Math.max(0, oldOffsets.findIndex(offset => offset > left) - 1);
         const fraction = (left - oldOffsets[anchor]) / ((oldOffsets[anchor + 1] - oldOffsets[anchor]) || 1);
         this.size = Math.round(Math.max(48, Math.min(max, size)));
-        this.width = Math.round(this.size * (DEFAULT_SIZE - GAP) / DEFAULT_SIZE);
+        this.width = Math.round(this.size * this.defaultWidth / this.defaultSize);
         this.frame.style.setProperty('--thumbnail-height', this.size + 'px');
         this.frame.style.setProperty('--thumbnail-width', this.width + 'px');
         this.handle.setAttribute('aria-valuemin', '48');
@@ -134,7 +138,7 @@ export class ThumbnailStrip {
         else {
             const offsets = this.offsets();
             const width = (offsets[anchor + 1] - offsets[anchor]) || 1;
-            this.scrollTo(offsets[anchor] + fraction * width + 12);
+            this.scrollTo(offsets[anchor] + fraction * width + this.paddingStart);
             this.render();
         }
     }
@@ -181,7 +185,7 @@ export class ThumbnailStrip {
     centerImage() {
         const index = this.paths.indexOf(this.image);
         if (index < 0) return;
-        this.scrollTo(12 + this.offsets()[index] + this.tileWidth(this.image) / 2 - this.container.clientWidth / 2);
+        this.scrollTo(this.paddingStart + this.offsets()[index] + this.tileWidth(this.image) / 2 - this.container.clientWidth / 2);
         this.render();
     }
 
@@ -223,9 +227,9 @@ export class ThumbnailStrip {
             this.leading.setAttribute('aria-hidden', 'true'); this.trailing.setAttribute('aria-hidden', 'true');
             this.container.prepend(this.leading); this.container.append(this.trailing);
         }
-        this.leading.style.width = Math.max(0, offsets[first] - GAP) + 'px';
+        this.leading.style.width = Math.max(0, offsets[first] - this.gap) + 'px';
         this.leading.hidden = first === 0;
-        this.trailing.style.width = Math.max(0, offsets.at(-1) - offsets[last] - GAP) + 'px';
+        this.trailing.style.width = Math.max(0, offsets.at(-1) - offsets[last] - this.gap) + 'px';
         this.trailing.hidden = last === this.paths.length;
         let cursor = this.leading.nextSibling;
         for (const index of [...indices].sort((a, b) => a - b)) {
@@ -235,7 +239,7 @@ export class ThumbnailStrip {
                 const button = element('button');
                 button.dataset.path = path; button.title = path;
                 button.setAttribute('aria-label', `View ${isVideo(path) ? 'video' : 'image'} ${filename(path)}`);
-                button.addEventListener('click', () => this.selectImage(path, 'top'));
+                button.addEventListener('click', () => this.selectImage(path, ViewerEntry.TOP));
                 const tile = element('div', 'strip-tile');
                 const label = element('span', 'strip-folder');
                 tile.append(label, button);
@@ -249,7 +253,7 @@ export class ThumbnailStrip {
             item.tile.style.setProperty('--thumbnail-width', this.tileWidth(path) + 'px');
             const pinned = index < first || index >= last;
             item.tile.classList.toggle('pinned', pinned);
-            item.tile.style.setProperty('--thumbnail-offset', offsets[index] + 12 + 'px');
+            item.tile.style.setProperty('--thumbnail-offset', offsets[index] + this.paddingStart + 'px');
             item.button.tabIndex = path === this.image ? 0 : -1;
             item.button.classList.toggle('selected', path === this.image);
             if (path === this.image) item.button.setAttribute('aria-current', 'true');
@@ -263,10 +267,10 @@ export class ThumbnailStrip {
             if (boundary) {
                 let end = index + 1;
                 while (end < this.paths.length && parentPath(this.paths[end]) === folder) end++;
-                const groupWidth = offsets[end] - offsets[index] - GAP;
+                const groupWidth = offsets[end] - offsets[index] - this.gap;
                 // The last heading can also use the empty space after its images.
                 const remainingWidth = end === this.paths.length
-                    ? this.container.clientWidth - 24 - offsets[index] + this.container.scrollLeft : 0;
+                    ? this.container.clientWidth - this.paddingStart - this.paddingEnd - offsets[index] + this.container.scrollLeft : 0;
                 item.label.style.width = Math.max(groupWidth, remainingWidth) + 'px';
             }
             if (pinned) {
@@ -300,7 +304,7 @@ export class ThumbnailStrip {
             if (!change) return;
             const left = this.container.scrollLeft;
             const shifted = edge.reverse ? change.added : change.removed;
-            const width = shifted.reduce((sum, path) => sum + this.tileWidth(path) + GAP, 0);
+            const width = shifted.reduce((sum, path) => sum + this.tileWidth(path) + this.gap, 0);
             this.render();
             this.scrollTo(Math.max(0, left + (edge.reverse ? width : -width)));
             if (this.followImage) this.centerImage();

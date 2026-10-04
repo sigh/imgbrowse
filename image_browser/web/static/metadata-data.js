@@ -1,6 +1,4 @@
-import {durationLabel, fileExtension, isVideo} from './media-kind.js';
-
-export const MetadataKind = Object.freeze({IMAGE:'image', VIDEO:'video', FILE:'file', DIRECTORY:'directory', ARCHIVE:'archive'});
+import {durationLabel, fileExtension, isVideo, MetadataKind} from './media-kind.js';
 
 function bytes(value) {
     if (value < 1024) return `${value} bytes`;
@@ -66,6 +64,8 @@ export function metadataInfo(data, now = Date.now()) {
         facts,
         status:data.kind === MetadataKind.FILE
             ? data.archive_member && isVideo(data.name) ? 'Videos inside archives cannot be viewed.' : 'This file type cannot be viewed.'
+            : data.video_pending ? 'Loading video details…'
+            : data.video_error ? 'Video details unavailable.'
             : data.metadata_error ? 'Image details unavailable.' : '',
     };
 }

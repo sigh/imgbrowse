@@ -14,4 +14,6 @@ export class ItemHeader {
         this.breadcrumbs.update(folderPath(options), this.linkKey !== key);
         this.linkKey = key;
     }
+
+    onEscape(event) { this.breadcrumbs.onEscape(event); }
 }

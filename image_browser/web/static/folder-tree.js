@@ -281,6 +281,13 @@ export class FolderTree {
         if (reveal) node?.scrollIntoView({block: 'nearest', inline: 'nearest'});
     }
 
+    onEscape(event) {
+        if (event.key !== 'Escape' || document.fullscreenElement || this.pane.hidden) return;
+        if (!this.narrow.matches && !this.pane.contains(event.target)) return;
+        event.preventDefault();
+        this.setOpen(false);
+    }
+
     onKey(event) {
         if (event.key === 'Tab' || event.ctrlKey || event.metaKey || event.altKey) return;
         const rows = this.rows.filter(row => !row.status);

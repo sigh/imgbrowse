@@ -3,6 +3,18 @@ import {ImageSize} from '../../image_browser/web/static/state.js';
 
 export async function run(browser, fixtures) {
     const {call, evaluate, waitFor, open, click, waitImage, key, wheel, screenshot, readyImage, pause, viewerUrl, presentation, headerPositions} = browser;
+    await call('Network.setBlockedURLs', {urls:['*/api/video?*']});
+    try {
+        await browser.start(viewerUrl('Mixed/2.webm', ImageSize.DEFAULT, 'Mixed'));
+        await browser.openInfo();
+        await waitFor("document.getElementById('metadata-message').textContent === 'Video details unavailable.'");
+        assert.ok(await evaluate("document.getElementById('metadata-facts').textContent.includes('Size') && !document.getElementById('metadata-retry').hidden"), 'Video-info failure retains basic facts and offers Retry');
+    } finally {
+        await call('Network.setBlockedURLs', {urls:[]});
+    }
+    await click('metadata-retry');
+    await waitFor("document.getElementById('metadata-retry').hidden && document.getElementById('metadata-message').textContent === '' && !document.getElementById('metadata-details').classList.contains('loading')");
+    assert.equal(await evaluate("document.getElementById('metadata-retry').hidden"), true, 'Retry recovers video information after a network failure');
     await browser.start();
     await open(viewerUrl('Mixed/1.jpg', ImageSize.DEFAULT, 'Mixed'));
     await readyImage('Mixed/1.jpg');

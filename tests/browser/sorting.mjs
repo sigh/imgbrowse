@@ -13,7 +13,7 @@ export async function run(browser, {first, second, last}) {
             await closeSort();
             if (await evaluate(state('readState().order')) !== value) await click('sort-direction-toggle');
         }
-        await waitFor(app('!app.grid.loadingFolder && !app.viewer.loadingImage && !app.viewer.moveScope'));
+        await waitFor(app('!app.grid.loadingFolder && !app.viewer.loadingImage && !app.viewer.navigation.moving'));
     }
     const closeSort = () => evaluate("{ const popover=document.getElementById('sort-popover'); if (popover.matches(':popover-open')) popover.hidePopover(); }");
     async function pointerClick(x, y) {
@@ -94,7 +94,7 @@ export async function run(browser, {first, second, last}) {
             await change('sort', criterion);
             await change('order', direction);
             await readyImage(first);
-            await waitFor(app(`app.viewer.nearbyImages.join('|') === ${JSON.stringify(expected.join('|'))}`));
+            await waitFor(app(`app.viewer.navigation.paths.join('|') === ${JSON.stringify(expected.join('|'))}`));
             if (layout === 'strip') await waitFor(app(`app.viewer.filmstrip.paths.join('|') === ${JSON.stringify(expected.join('|'))}`));
             assert.equal(await evaluate(state('readState().size')), '0.5');
             assert.ok(Math.abs((await evaluate(app('app.viewer.viewport.point()'))).y - point.y) < 3, `${layout} retains the reading point when sorting`);
@@ -199,7 +199,7 @@ export async function run(browser, {first, second, last}) {
         let before;
         for (const mode of ['browse-folder', 'overview-folder', 'read-single']) {
             await click(mode);
-            await waitFor(app('!app.grid.loadingFolder && !app.viewer.loadingImage && !app.viewer.moveScope'));
+            await waitFor(app('!app.grid.loadingFolder && !app.viewer.loadingImage && !app.viewer.navigation.moving'));
             if (!await evaluate("document.getElementById('sort-popover').matches(':popover-open')")) await click('sort-toggle');
             const current = await geometry();
             assert.ok(current.fits, `Header and picker fit at ${width}px in ${mode}`);

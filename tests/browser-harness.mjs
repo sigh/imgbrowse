@@ -55,7 +55,12 @@ export async function connectBrowser(port, base, screenshots = '') {
         await call('Page.navigate', {url});
         await waitFor("!window.__leavingPage && document.readyState === 'complete'");
     }
-    const click = id => evaluate(`{ const button=document.getElementById(${JSON.stringify(id)}); button.focus(); button.click(); }`);
+    async function click(id) {
+        const rect = await evaluate(`document.getElementById(${JSON.stringify(id)}).getBoundingClientRect().toJSON()`);
+        for (const type of ['mousePressed', 'mouseReleased']) {
+            await call('Input.dispatchMouseEvent', {type, button:'left', clickCount:1, x:rect.x+rect.width/2, y:rect.y+rect.height/2});
+        }
+    }
     async function newTab(selector, button = 'middle', modifiers = 0) {
         const before = new Set((await call('Target.getTargets')).targetInfos.map(target => target.targetId));
         const current = await evaluate('location.href');
@@ -77,10 +82,11 @@ export async function connectBrowser(port, base, screenshots = '') {
     }
     const imageIs = path => `import('/static/state.js').then(({readState}) => readState().image === ${JSON.stringify(path)})`;
     const waitImage = path => waitFor(imageIs(path));
-    const key = (key, repeat = false) => evaluate(`document.dispatchEvent(new KeyboardEvent('keydown', ${JSON.stringify({key, repeat})}))`);
-    async function nativeKey(key, code, modifiers = 0) {
+    const keyCodes = {ArrowLeft:37, ArrowUp:38, ArrowRight:39, ArrowDown:40, Tab:9, Escape:27};
+    const key = (key, repeat = false) => nativeKey(key, keyCodes[key] ?? key.toUpperCase().charCodeAt(0), 0, repeat);
+    async function nativeKey(key, code, modifiers = 0, repeat = false) {
         for (const type of ['keyDown', 'keyUp']) {
-            await call('Input.dispatchKeyEvent', {type, key, code: key, windowsVirtualKeyCode: code, modifiers});
+            await call('Input.dispatchKeyEvent', {type, key, code: key, windowsVirtualKeyCode: code, modifiers, autoRepeat:type === 'keyDown' && repeat});
             if (type === 'keyDown' && key === 'Enter') await call('Input.dispatchKeyEvent', {type:'char', text:'\r', modifiers});
         }
     }
@@ -104,7 +110,6 @@ export async function connectBrowser(port, base, screenshots = '') {
     async function openInfo(waitLoaded = true) {
         if (await evaluate("document.getElementById('folder-tree').hidden")) await click('folders-toggle');
         if (!await evaluate("document.getElementById('item-info').open")) await click('metadata-toggle');
-        await evaluate("document.getElementById('metadata-toggle').focus()");
         if (waitLoaded) await waitFor("document.querySelector('#metadata-panel .copy-path') && !document.getElementById('metadata-details').classList.contains('loading') && !document.getElementById('folder-tree').hidden");
     }
 

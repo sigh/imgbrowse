@@ -50,6 +50,7 @@ class MetadataTests(unittest.TestCase):
     def test_image_details_and_location(self):
         status, data = self.request('photo.jpg')
         self.assertEqual(status, 200)
+        self.assertEqual(data['root_path'], str(self.root))
         self.assertEqual(data['filesystem_path'], str(self.root / 'photo.jpg'))
         self.assertEqual((data['width'], data['height'], data['format']), (40, 60, 'JPEG'))
         self.assertEqual(data['size'], len(self.image))

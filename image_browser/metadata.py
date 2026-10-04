@@ -51,6 +51,7 @@ def metadata(gallery, relative, image_work, archive_work):
     with gallery.directory_work:
         entry = gallery._locate(relative)
     result = {
+        'root_path': str(gallery.root),
         'name': relative.rsplit('/', 1)[-1] if relative else gallery.root.name,
         'filesystem_path': str(entry.file),
         'archive_member': entry.inner if entry.archive else None,

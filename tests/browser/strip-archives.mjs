@@ -5,6 +5,28 @@ export async function run(browser, fixtures) {
     const {call, evaluate, waitFor, open, click, key, nativeKey, wheel, screenshot, readyImage, pause, viewerUrl, presentation} = browser;
     const {absoluteRoot, first} = fixtures;
     await browser.start();
+    const geometry = await evaluate(`(async () => {
+        const {ThumbnailStrip} = await import('/static/thumbnail-strip.js');
+        const host = document.createElement('div');
+        host.style.cssText='position:fixed;left:0;top:0;width:300px';
+        const container = document.createElement('div');
+        container.className='viewer-strip';
+        container.style.cssText='gap:10px;padding-inline:14px;--thumbnail-default-height:80px;--thumbnail-default-width:72px';
+        host.append(container);document.body.append(host);
+        const strip = new ThumbnailStrip(container, {}, () => {});
+        try {
+            strip.setSize(80);
+            strip.window.paths=['one.jpg','two.jpg'];
+            const first=document.createElement('button'),second=document.createElement('button');
+            container.append(first,second);
+            const a=first.getBoundingClientRect(),b=second.getBoundingClientRect();
+            return {offset:strip.offsets()[1],actualOffset:b.left-a.left,
+                padding:strip.paddingStart,actualPadding:a.left-container.getBoundingClientRect().left,
+                width:a.width,height:a.height};
+        } finally { strip.resizeObserver.disconnect();host.remove(); }
+    })()`);
+    assert.deepEqual(geometry, {offset:82,actualOffset:82,padding:14,actualPadding:14,width:72,height:80},
+        'Thumbnail positioning follows CSS geometry rather than duplicated constants');
     // Continued wheel input advances fitted pages without requiring a pause after every image.
     await open(viewerUrl('root2.jpg', ImageSize.DEFAULT, '') + '&view=single');
     await readyImage('root2.jpg');

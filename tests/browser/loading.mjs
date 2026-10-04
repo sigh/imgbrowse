@@ -4,6 +4,24 @@ export async function run(browser, fixtures) {
     const {call, evaluate, waitFor, open, click, waitImage, key, wheel, readyImage, pause, viewerUrl, network, held} = browser;
     const {absoluteRoot, first, second, last} = fixtures;
     await browser.start();
+    // Leaving Overview cancels its discovery without discarding the retained listing.
+    await call('Fetch.enable', {patterns:[{urlPattern:'*/api/walk'}]});
+    network.walk = true;
+    await open('/?folder=Album&view=grid');
+    await waitFor("import('/gallery.js').then(({app}) => app.grid.loadingPage)");
+    for (let attempt=0; !held.length && attempt<160; attempt++) await pause(50);
+    assert.ok(held.length, 'Overview discovery is held in flight');
+    await evaluate("import('/gallery.js').then(({app}) => { window.gridWork=app.grid.scope; window.retainedWindow=app.grid.directory.window; })");
+    await click('read-strip');
+    assert.ok(await evaluate('gridWork.signal.aborted'), 'Entering the reader cancels pending grid discovery');
+    network.walk = false;
+    for (const requestId of held.splice(0)) await call('Fetch.continueRequest', {requestId}).catch(()=>{});
+    await readyImage(first);
+    assert.equal(await evaluate('retainedWindow.paths.length'), 0, 'Late grid discovery cannot change the inactive window');
+    await click('overview-folder');
+    await waitFor(`document.querySelector('#overview .card[data-path="${first}"]')`);
+    assert.ok(await evaluate("import('/gallery.js').then(({app}) => !app.grid.scope.signal.aborted)"), 'Returning to Overview resumes discovery with a new request lifetime');
+    await call('Fetch.disable');
     // Pending media has an empty, stable canvas; identity and actions refer to the requested file.
     await open(viewerUrl(first));
     await readyImage(first);
@@ -30,7 +48,7 @@ export async function run(browser, fixtures) {
     network.metadata = false;
     for (const requestId of held.splice(0)) await call('Fetch.continueRequest', {requestId}).catch(()=>{});
     await waitFor("!document.getElementById('metadata-details').classList.contains('loading')");
-    assert.ok(await evaluate(`document.querySelector('.metadata-path-text').textContent.endsWith(${JSON.stringify(first)})`), 'Late metadata cannot replace the latest selection');
+    assert.ok(await evaluate("document.getElementById('metadata-facts').textContent.includes('Taken') && document.getElementById('metadata-facts').textContent.includes('Location')"), 'Late metadata cannot replace the latest selection’s EXIF facts');
     await call('Fetch.disable');
     await call('Fetch.enable', {patterns:[{urlPattern:'*/image?*'},{urlPattern:'*/api/walk'}]});
     network.images = true;

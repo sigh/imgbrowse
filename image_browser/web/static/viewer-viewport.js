@@ -1,4 +1,4 @@
-import {ImageSize, ReadingLayout} from './state.js';
+import {ImageSize, ReadingLayout, ViewerEntry} from './state.js';
 
 export function imageScale(size, layout, naturalWidth, naturalHeight, width, height) {
     if (size !== ImageSize.DEFAULT) return Number(size);
@@ -35,7 +35,7 @@ export class ViewerViewport {
         this.resize(point);
     }
 
-    show(image, size, entry = 'top') {
+    show(image, size, entry = ViewerEntry.TOP) {
         this.image.replaceWith(image);
         this.image = image;
         this.image.id = 'viewer-image';
@@ -48,7 +48,7 @@ export class ViewerViewport {
         this.box = null;
         this.resize(null);
         this.canvas.scrollLeft = 0;
-        this.canvas.scrollTop = entry === 'bottom' ? this.canvas.scrollHeight : 0;
+        this.canvas.scrollTop = entry === ViewerEntry.BOTTOM ? this.canvas.scrollHeight : 0;
     }
 
     clear() {

@@ -1,5 +1,5 @@
-import {getMetadata, getVideoInfo} from './api.js';
-import {metadataInfo, MetadataKind} from './metadata-data.js';
+import {getMetadata} from './api.js';
+import {metadataInfo} from './metadata-data.js';
 import {element} from './dom.js';
 import {setIconButton} from './icons.js';
 
@@ -22,6 +22,7 @@ export class MetadataPanel {
     }
 
     setRoot(root) {
+        if (root === this.root) return;
         this.root = root;
         this.updatePath();
     }
@@ -84,21 +85,10 @@ export class MetadataPanel {
         const controller = this.request = new AbortController();
         this.details.classList.add('loading');
         try {
-            let data = await getMetadata(path, controller.signal);
-            if (data.kind === MetadataKind.VIDEO) {
-                const video = await getVideoInfo(path, controller.signal).catch(() => ({}));
-                data = {...data, ...video};
-            }
+            const data = await getMetadata(path, controller.signal, data => this.render(data));
             if (controller.signal.aborted) return;
-            const info = metadataInfo(data);
-            const rows = info.facts;
-            this.facts.replaceChildren(...rows.flatMap(row => [element('dt', '', row.label), renderAttribute(row)]));
-            this.facts.hidden = rows.length === 0;
-            this.message.textContent = info.status;
-            this.status.hidden = !info.status;
-            this.retry.hidden = true;
+            this.render(data);
             this.loadedPath = path;
-            this.details.classList.remove('loading');
         } catch {
             if (controller.signal.aborted) return;
             this.facts.replaceChildren();
@@ -110,6 +100,17 @@ export class MetadataPanel {
         } finally {
             if (this.request === controller) this.request = null;
         }
+    }
+
+    render(data) {
+        this.setRoot(data.root_path);
+        const info = metadataInfo(data);
+        this.facts.replaceChildren(...info.facts.flatMap(row => [element('dt', '', row.label), renderAttribute(row)]));
+        this.facts.hidden = info.facts.length === 0;
+        this.message.textContent = info.status;
+        this.status.hidden = !info.status;
+        this.retry.hidden = !data.video_error;
+        this.details.classList.remove('loading');
     }
 }
 

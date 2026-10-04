@@ -94,6 +94,8 @@ export async function run(browser, fixtures) {
     assert.match(await evaluate("document.querySelector('#metadata-panel .copy-path').getAttribute('aria-label')"), /^(Copy full path|Copied)$/);
     assert.ok(await evaluate("!document.querySelector('#metadata-panel h2, .metadata-path-heading') && document.getElementById('metadata-panel').getAttribute('aria-labelledby') === 'metadata-toggle' && !document.getElementById('metadata-panel').hasAttribute('tabindex')"));
     await screenshot('image-metadata');
+    await click('metadata-toggle');
+    await click('metadata-toggle');
     await evaluate("window.sidebarInfo=document.querySelector('#metadata-toggle'); window.headerFolder=document.querySelector('#item-path a')");
     assert.equal(await evaluate("document.activeElement.id"), 'metadata-toggle');
     await nativeKey('ArrowRight', 39);
@@ -110,6 +112,7 @@ export async function run(browser, fixtures) {
     assert.deepEqual(await evaluate("document.querySelector('.sort-controls').getBoundingClientRect().toJSON()"), folderActions, 'Changing the current item must not move its controls');
     assert.equal(await evaluate("(!document.getElementById('folder-tree').hidden && document.getElementById('item-info').open)"), true);
     await evaluate("window.copiedPath=null; Object.defineProperty(navigator, 'clipboard', {configurable:true, value:{writeText:async text => { window.copiedPath=text; }}})");
+    await waitFor("!document.getElementById('metadata-details').classList.contains('loading')");
     const copyBounds = await evaluate("document.querySelector('#metadata-panel .copy-path').getBoundingClientRect().toJSON()");
     for (const type of ['mousePressed', 'mouseReleased']) await call('Input.dispatchMouseEvent', {type, x:copyBounds.x+copyBounds.width/2, y:copyBounds.y+copyBounds.height/2, button:'left', clickCount:1});
     await waitFor('window.copiedPath');

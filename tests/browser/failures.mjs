@@ -3,6 +3,16 @@ import {ReadingLayout} from '../../image_browser/web/static/state.js';
 
 export async function run(browser, {first, second, absoluteRoot}) {
     const {evaluate, waitFor, open, click, readyImage, viewerUrl, headerPositions, call, network, held, nativeKey, screenshot} = browser;
+    await call('Network.setBlockedURLs', {urls:['*/api/info']});
+    try {
+        await browser.start(viewerUrl(first));
+        await readyImage(first);
+        await browser.openInfo();
+        assert.equal(await evaluate("document.getElementById('metadata-path').textContent"), absoluteRoot + '/' + first);
+        assert.equal(await evaluate("document.getElementById('metadata-copy').disabled"), false, 'Metadata recovers the full path when startup info fails');
+    } finally {
+        await call('Network.setBlockedURLs', {urls:[]});
+    }
     await browser.start();
 
     // Copy failures are visible beside their action without changing header geometry.
@@ -25,6 +35,7 @@ export async function run(browser, {first, second, absoluteRoot}) {
     }
 
     // A failed Info request retries in place and keeps keyboard focus in the panel.
+    await click('metadata-copy');
     await nativeKey('Escape', 27);
     await call('Fetch.enable', {patterns:[{urlPattern:'*/api/metadata?*'}]});
     network.metadata = true;
@@ -38,7 +49,7 @@ export async function run(browser, {first, second, absoluteRoot}) {
     assert.equal(await evaluate("document.getElementById('metadata-message').textContent"), 'Unable to load info.');
     await screenshot('metadata-failure');
     network.metadata = false;
-    await nativeKey('Tab', 9);
+    await click('metadata-copy');
     await nativeKey('Tab', 9);
     assert.ok(await evaluate("document.activeElement.matches('#metadata-status button')"));
     await nativeKey('Enter', 13);
@@ -68,10 +79,10 @@ export async function run(browser, {first, second, absoluteRoot}) {
     // Retry repeats failed backwards discovery, rather than reloading the current image.
     await open(viewerUrl(second) + '&view=' + ReadingLayout.SINGLE);
     await readyImage(second);
-    await waitFor("import('/gallery.js').then(({app})=>app.viewer.nearbyImages.includes('Album/Chapter 1/page2.jpg'))");
+    await waitFor("import('/gallery.js').then(({app})=>app.viewer.navigation.paths.includes('Album/Chapter 1/page2.jpg'))");
     await call('Fetch.enable', {patterns:[{urlPattern:'*/api/walk*'}]});
     network.walk = true;
-    await evaluate("Promise.all([import('/gallery.js'),import('/static/api.js')]).then(([{app},{sequence}])=>{app.viewer.nearbyImages=[]; sequence.clear();})");
+    await evaluate("Promise.all([import('/gallery.js'),import('/static/api.js')]).then(([{app},{sequence}])=>{app.viewer.navigation.paths=[]; sequence.clear();})");
     await click('viewer-prev');
     await waitFor("document.getElementById('viewer-status').textContent === 'Finding the previous item…'");
     for (const requestId of held.splice(0)) await call('Fetch.failRequest',{requestId,errorReason:'Failed'});

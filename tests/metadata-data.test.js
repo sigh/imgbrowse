@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {execFileSync} from 'node:child_process';
-import {metadataInfo, MetadataKind, formatMetadataDate, formatRelativeAge} from '../image_browser/web/static/metadata-data.js';
+import {metadataInfo, formatMetadataDate, formatRelativeAge} from '../image_browser/web/static/metadata-data.js';
+import {MetadataKind} from '../image_browser/web/static/media-kind.js';
 
 const now = Date.parse('2026-10-04T12:00:00Z');
 const image = {kind:MetadataKind.IMAGE, name:'photo.jpg', filesystem_path:'/media/photo.jpg', archive_member:null,

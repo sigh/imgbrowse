@@ -1,6 +1,6 @@
 import {getThumbnail, cachedThumbnail, getVideoInfo} from './api.js';
 import {element} from './dom.js';
-import {isVideo, durationLabel} from './media-kind.js';
+import {isVideo, durationLabel, MetadataKind, PreviewErrorCode} from './media-kind.js';
 import {icon} from './icons.js';
 
 const PREVIEW_CONCURRENCY = 8;
@@ -52,7 +52,7 @@ export class PreviewLoader {
         try { result = await getThumbnail(path, signal); }
         catch (error) {
             signal.throwIfAborted();
-            if (error.code !== 'video_preview_unavailable') throw error;
+            if (error.code !== PreviewErrorCode.VIDEO_UNAVAILABLE) throw error;
             const placeholder = icon('video');
             placeholder.classList.add('video-placeholder');
             target.replaceChildren(placeholder);
@@ -64,7 +64,7 @@ export class PreviewLoader {
         image.alt = '';
         image.src = scope.objectUrl(result.blob);
         target.replaceChildren(image);
-        if (result.mediaKind === 'video') {
+        if (result.mediaKind === MetadataKind.VIDEO) {
             const badge = icon('video');
             badge.classList.add('video-badge');
             target.classList.add('video-preview');

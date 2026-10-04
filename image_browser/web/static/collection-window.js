@@ -3,6 +3,7 @@ export class CollectionWindow {
     constructor(request, {root, image, pageSize, maxPaths, ordering = {}}) {
         Object.assign(this, {request, root, pageSize, maxPaths, ordering});
         this.paths = image ? [image] : [];
+        this.windowed = false;
         this.edges = [true, false].map(reverse => ({reverse, cursor:null, done:false, loading:false, failed:false, warning:false}));
     }
 
@@ -24,6 +25,7 @@ export class CollectionWindow {
             const excess = Math.max(0, this.paths.length - this.maxPaths);
             const removed = this.paths.splice(edge.reverse ? this.maxPaths : 0, excess);
             if (removed.length) {
+                this.windowed = true;
                 const opposite = this.edges[edge.reverse ? 1 : 0];
                 opposite.done = false;
                 opposite.cursor = null;
@@ -33,7 +35,10 @@ export class CollectionWindow {
             edge.warning ||= result.warnings.length > 0;
             return {added, removed};
         } catch (error) {
-            if (error.name !== 'AbortError' && !signal.aborted) edge.failed = true;
+            if (error.name !== 'AbortError' && !signal.aborted) {
+                edge.failed = true;
+                edge.error = error.message;
+            }
             return null;
         } finally {
             // A reopened view can reuse paths with a new request lifetime.

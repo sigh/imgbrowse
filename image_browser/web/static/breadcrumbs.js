@@ -24,12 +24,13 @@ export class Breadcrumbs {
         this.menus = [new GapMenu(container.parentElement, `${container.id}-gap-0`)];
         container.tabIndex = -1;
         container.parentElement.addEventListener('keydown', event => {
-            if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End'].includes(event.key)) event.stopPropagation();
+            if (event.ctrlKey || event.metaKey || event.altKey) return;
+            if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End'].includes(event.key)) event.preventDefault();
         });
         new ResizeObserver(() => this.fit()).observe(container);
     }
 
-    onKey(event) {
+    onEscape(event) {
         if (event.key !== 'Escape') return;
         const open = this.menus.find(menu => menu.isOpen);
         if (!open) return;
@@ -119,7 +120,7 @@ class GapMenu {
         setButtonLabel(this.button, 'Hidden folders');
         this.button.setAttribute('aria-controls', id);
         this.button.setAttribute('aria-expanded', 'false');
-        this.panel = element('nav', 'breadcrumb-menu');
+        this.panel = element('nav', 'breadcrumb-menu popover-panel');
         this.panel.id = id;
         this.panel.setAttribute('popover', 'auto');
         this.panel.setAttribute('aria-label', this.button.title);

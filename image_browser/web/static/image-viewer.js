@@ -9,9 +9,9 @@ import {WheelGesture, WheelMode} from './wheel-gesture.js';
 
 import {ThumbnailStrip} from './thumbnail-strip.js';
 import {VideoPlayer} from './video-player.js';
+import {CollectionNavigator, NavigationOutcome} from './collection-navigator.js';
 import {isVideo, canRetryMedia} from './media-kind.js';
 
-const NEARBY_COUNT = 16;
 const LOADING_DELAY = 700;
 const PARTIAL_COLLECTION_MESSAGE = 'Some folders could not be read.';
 const KEYBOARD_PAN_STEP = 80;
@@ -20,7 +20,7 @@ const ARROW_DIRECTIONS = Object.freeze({
     ArrowUp: {x:0, y:-1}, ArrowDown: {x:0, y:1},
 });
 
-/** Owns image loading and collection navigation; geometry and gestures are separate. */
+/** Coordinates media presentation and input; navigation and geometry are separate. */
 export class ImageViewer {
     constructor(previews, {selectImage, changeSize, changeLayout, close, renderHeader, refresh}) {
         Object.assign(this, {selectImage, changeSize, changeLayout, close, renderHeader, refresh});
@@ -37,21 +37,24 @@ export class ImageViewer {
         this.nextButton = byId('viewer-next');
         this.rootName = 'Collection';
         this.key = null;
-        this.boundaryDirection = null;
-        this.nearbyImages = [];
+        this.navigation = new CollectionNavigator({
+            walk:walkImages, loadOriginal, select:selectImage,
+            changed:outcomeChanged => this.navigationChanged(outcomeChanged), loadingDelay:LOADING_DELAY,
+        });
         this.filmstrip = new ThumbnailStrip(this.strip, previews, selectImage);
         this.loadingImage = false;
-        this.singleImage = false;
         this.bindControls();
     }
 
     get scrolling() { return this.state?.layout === ReadingLayout.SCROLL; }
     get viewport() { return this.scrolling ? this.continuous : this.singleViewport; }
 
+    showError(message) { this.status.textContent = message; }
+
     bindControls() {
         byId('viewer-zoom-in').addEventListener('click', () => this.zoom(1));
         byId('viewer-zoom-out').addEventListener('click', () => this.zoom(-1));
-        byId('viewer-retry').addEventListener('click', () => this.retryMove ? this.retryMove() : this.refresh());
+        byId('viewer-retry').addEventListener('click', () => { if (!this.navigation.retry()) this.refresh(); });
         this.previousButton.addEventListener('click', () => this.requestMove(true));
         this.nextButton.addEventListener('click', () => this.requestMove(false));
         this.wheelListener = event => this.onWheel(event);
@@ -100,7 +103,7 @@ export class ImageViewer {
     }
 
     updateControls() {
-        if (this.scrolling) this.singleImage = this.continuous.singleImage;
+        const singleImage = this.scrolling ? this.continuous.singleImage : this.navigation.singleImage;
         const warning = this.state.mode === ScreenMode.VIEW && this.scrolling && this.continuous.warning
             ? PARTIAL_COLLECTION_MESSAGE : '';
         if (this.warning.textContent !== warning) this.warning.textContent = warning;
@@ -109,7 +112,7 @@ export class ImageViewer {
         sizeControl.classList.toggle('unavailable', unavailable);
         sizeControl.inert = unavailable;
         const hasImage = Boolean(this.state.image);
-        this.previousButton.disabled = !hasImage || this.singleImage || Boolean(this.moveScope);
+        this.previousButton.disabled = !hasImage || singleImage || this.navigation.moving;
         this.nextButton.disabled = this.previousButton.disabled;
         // Sizing is available only once the requested image is displayed.
         const sizing = this.viewport.ready;
@@ -121,35 +124,55 @@ export class ImageViewer {
             image.style.cursor = !target ? 'default' : target.scale > image.width/image.naturalWidth ? 'zoom-in' : 'zoom-out';
         }
         for (const [button, reverse] of [[this.previousButton, true], [this.nextButton, false]]) {
-            const wrap = this.boundaryDirection === reverse;
+            const wrap = this.navigation.boundary === reverse;
             const name = wrap ? (reverse ? 'last' : 'first') : (reverse ? 'previous' : 'next');
             const label = wrap ? (reverse ? 'Go to last item' : 'Go to first item')
                 : (reverse ? 'Previous item' : 'Next item');
             setIconButton(button, name, label, `${label} (${reverse ? '←' : '→'})`);
             button.classList.toggle('wrap', wrap);
         }
-        this.container.setAttribute('aria-busy', String(this.loadingImage || this.scrolling && this.continuous.loading || Boolean(this.moveScope)));
+        this.container.setAttribute('aria-busy', String(this.loadingImage || this.scrolling && this.continuous.loading || this.navigation.moving));
     }
 
-    clearBoundary() {
-        this.retryMove = null;
-        this.boundaryDirection = null;
-        this.status.textContent = '';
-        byId('viewer-retry').hidden = true;
+    navigationChanged(outcomeChanged) {
+        if (!outcomeChanged) { this.updateControls(); return; }
+        const outcome = this.navigation.outcome;
+        if (outcome) {
+            const {kind, reverse, warning} = outcome;
+            const direction = reverse ? 'previous' : 'next';
+            switch (kind) {
+                case NavigationOutcome.FINDING:
+                    this.status.textContent = `Finding the ${direction} item…`;
+                    break;
+                case NavigationOutcome.ONLY:
+                    this.status.textContent = 'This is the only item in the collection.';
+                    break;
+                case NavigationOutcome.ERROR:
+                    this.status.textContent = `Unable to find the ${direction} item.`;
+                    break;
+                case NavigationOutcome.EMPTY:
+                    this.status.textContent = warning ? 'No accessible media found. ' + PARTIAL_COLLECTION_MESSAGE
+                        : 'No images or videos in this collection.';
+                    break;
+                case NavigationOutcome.BOUNDARY:
+                    this.status.textContent = (reverse ? 'Beginning' : 'End') + ' of collection.'
+                        + (warning ? ' ' + PARTIAL_COLLECTION_MESSAGE : '');
+                    break;
+            }
+        } else this.status.textContent = '';
+        byId('viewer-retry').hidden = !this.navigation.retryMove;
+        this.updateControls();
     }
 
     stopReading() {
-        this.prefetchScope?.dispose();
-        this.prefetchScope = null;
-        this.prefetchPath = null;
+        this.navigation.stopPrefetch();
         this.singleViewport.clear();
         this.continuous.stop();
-        this.filmstrip.stop();
     }
 
-    show(state, force = false, entry = ViewerEntry.TOP) {
+    /** Preserve source coordinates before the app changes screen geometry. */
+    prepareTransition(state) {
         const wasOverview = (this.state?.mode === ScreenMode.OVERVIEW);
-        const folderChanged = this.state?.folder !== state.folder;
         const layoutChanged = this.state?.layout !== state.layout;
         const orderingChanged = sortKey(this.state) !== sortKey(state);
         const sameImage = this.state?.collection === state.collection && this.state?.image === state.image;
@@ -158,6 +181,15 @@ export class ImageViewer {
         else if (!wasOverview && state.mode === ScreenMode.OVERVIEW) this.overviewPoint = this.viewport.point();
         const point = wasOverview && state.mode === ScreenMode.VIEW ? this.overviewPoint : anchor;
         if (state.mode !== ScreenMode.OVERVIEW) this.overviewPoint = null;
+        return point;
+    }
+
+    show(state, force = false, entry = ViewerEntry.TOP, point = null) {
+        const wasOverview = this.state?.mode === ScreenMode.OVERVIEW;
+        const wasOpen = Boolean(this.state && this.state.mode !== ScreenMode.BROWSE);
+        const folderChanged = this.state?.folder !== state.folder;
+        const layoutChanged = this.state?.layout !== state.layout;
+        const orderingChanged = sortKey(this.state) !== sortKey(state);
         const wheelEnabled = state.mode === ScreenMode.VIEW && state.layout !== ReadingLayout.SCROLL;
         const wheelWasEnabled = this.state?.mode === ScreenMode.VIEW && this.state?.layout !== ReadingLayout.SCROLL;
         if (wheelEnabled !== wheelWasEnabled) {
@@ -166,9 +198,6 @@ export class ImageViewer {
             else stage.removeEventListener('wheel', this.wheelListener);
         }
         this.state = state;
-        // Capture the reading point before hiding the canvas, then size new media in the active screen.
-        byId('overview').hidden = state.mode !== ScreenMode.OVERVIEW;
-        byId('viewer-stage').hidden = state.mode === ScreenMode.OVERVIEW;
         const key = JSON.stringify([state.mode, state.collection, state.image, this.scrolling, sortKey(state)]);
         if (!force && key === this.key) {
             if (this.viewport.size !== state.size) this.viewport.setSize(state.size);
@@ -176,24 +205,23 @@ export class ImageViewer {
             if (state.mode !== ScreenMode.BROWSE && folderChanged) this.updateCollectionLabel();
             if (state.mode !== ScreenMode.BROWSE && (folderChanged || layoutChanged)) {
                 this.renderStrip();
-                if (anchor) this.viewport.resize(anchor);
+                if (point) this.viewport.resize(point);
             }
             return;
         }
         this.key = key;
         this.scope?.dispose();
-        this.moveScope?.dispose();
-        this.moveScope = null;
+        this.navigation.configure(state, force);
         this.scope = new TaskScope();
         this.loadingImage = false;
-        this.singleImage = false;
-        this.clearBoundary();
-        const wasOpen = !this.container.hidden;
-        this.container.hidden = state.mode === ScreenMode.BROWSE;
-        if (state.mode !== ScreenMode.VIEW) this.stopReading();
+        this.status.textContent = '';
+        byId('viewer-retry').hidden = true;
+        if (state.mode !== ScreenMode.VIEW) {
+            this.stopReading();
+            this.renderStrip();
+        }
         if (state.mode === ScreenMode.BROWSE) {
-            this.nearbyImages = [];
-            this.nearbyCollection = null;
+            this.navigation.setPaths([], null);
             this.updateControls();
             return;
         }
@@ -204,10 +232,6 @@ export class ImageViewer {
             this.updateControls();
             this.updateCollectionLabel();
             return;
-        }
-        if (force || orderingChanged || this.nearbyCollection !== state.collection) {
-            this.nearbyImages = [];
-            this.prefetchScope?.dispose(); this.prefetchPath = null;
         }
         this.canvas.querySelector('.image-surface').hidden = this.scrolling;
         if (!this.scrolling || this.continuous.collection !== state.collection || !state.image) this.continuous.stop();
@@ -221,17 +245,16 @@ export class ImageViewer {
                     this.singleViewport.image.removeAttribute('id');
                 }
                 this.continuous.show(state, force || orderingChanged, entry, point);
-                this.nearbyImages = this.continuous.paths;
-                this.nearbyCollection = state.collection;
+                this.navigation.setPaths(this.continuous.paths, state.collection);
             } else {
                 this.singleViewport.image.id = 'viewer-image';
                 this.loadImage(state.image, this.scope, entry, point);
-                this.loadNeighbors(state.image, state.collection, this.scope);
+                this.navigation.discover(state.image, state.collection, this.scope.signal);
             }
         } else {
             this.singleViewport.clear();
             this.updateControls();
-            this.moveImage();
+            this.navigation.move();
         }
         this.updateControls();
     }
@@ -263,7 +286,7 @@ export class ImageViewer {
             scope.signal.throwIfAborted();
             this.viewport.show(image, this.state.size, entry);
             if (point) this.viewport.resize(point);
-            if (this.boundaryDirection === null && !this.moveScope) this.status.textContent = '';
+            if (this.navigation.boundary === null && !this.navigation.moving) this.status.textContent = '';
         } catch (error) {
             if (error.name !== 'AbortError' && !scope.signal.aborted) {
                 this.status.textContent = 'Unable to open ' + path + '. Retry or move to another image.';
@@ -274,105 +297,18 @@ export class ImageViewer {
             if (scope === this.scope) {
                 this.loadingImage = false;
                 this.updateControls();
-                this.prefetchNext();
+                this.navigation.prefetch(this.state.mode === ScreenMode.VIEW && !this.scrolling);
             }
         }
-    }
-
-    loadNeighbors(image, collection, scope) {
-        const index = this.nearbyCollection === collection ? this.nearbyImages.indexOf(image) : -1;
-        if (index > 1 && index < this.nearbyImages.length - 2) return;
-        const results = new Map();
-        for (const reverse of [true, false]) {
-            walkImages({...sortSettings(this.state), root: collection, anchor: image, reverse, limit: NEARBY_COUNT}, scope.signal)
-                .then(result => {
-                    scope.signal.throwIfAborted();
-                    results.set(reverse, result);
-                    const before = results.get(true), after = results.get(false);
-                    this.nearbyImages = [...(before ? [...before.images].reverse() : []), image, ...(after?.images || [])];
-                    this.nearbyCollection = collection;
-                    this.singleImage = Boolean(before && after && this.nearbyImages.length === 1
-                        && !before.cursor && !after.cursor && !before.warnings.length && !after.warnings.length);
-                    this.updateControls();
-                    this.prefetchNext();
-                }).catch(() => {});
-        }
-    }
-
-    prefetchNext() {
-        if (this.loadingImage || this.state.mode !== ScreenMode.VIEW || this.scrolling) return;
-        const index = this.nearbyImages.indexOf(this.state.image);
-        const next = index < 0 ? null : this.nearbyImages[index + (this.readingReverse ? -1 : 1)];
-        if (!next || isVideo(next) || this.prefetchPath === next) return;
-        this.prefetchScope?.dispose();
-        this.prefetchScope = new TaskScope();
-        this.prefetchPath = next;
-        Promise.resolve(loadOriginal(next, this.prefetchScope.signal, true)).catch(() => {
-            if (this.prefetchPath === next) this.prefetchPath = null;
-        });
     }
 
     renderStrip(force = false) {
         this.filmstrip.show(this.state, this.state.mode === ScreenMode.VIEW && this.state.layout === ReadingLayout.STRIP, force);
     }
 
-    requestMove(reverse, fresh = true, entry = 'top') {
-        if (this.state.mode === ScreenMode.BROWSE || this.moveScope || this.singleImage) return;
-        this.readingReverse = reverse;
-        const wrap = this.boundaryDirection === reverse;
-        if (wrap && !fresh) return;
-        this.clearBoundary();
-        this.moveImage(reverse, wrap, entry);
-    }
-
-    async moveImage(reverse = false, wrap = false, entry = 'top') {
-        const index = this.nearbyCollection === this.state.collection ? this.nearbyImages.indexOf(this.state.image) : -1;
-        const neighbor = !wrap && index >= 0 ? this.nearbyImages[index + (reverse ? -1 : 1)] : null;
-        if (neighbor) {
-            this.selectImage(neighbor, entry);
-            return;
-        }
-        const scope = this.moveScope = new TaskScope();
-        this.updateControls();
-        scope.delay(() => { this.status.textContent = reverse ? 'Finding the previous item…' : 'Finding the next item…'; }, LOADING_DELAY);
-        let cursor = null;
-        let warning = this.scrolling && this.continuous.warning;
-        try {
-            do {
-                const result = await walkImages({...sortSettings(this.state), root: this.state.collection,
-                    anchor: wrap ? null : this.state.image, reverse, cursor, limit: 1}, scope.signal);
-                scope.signal.throwIfAborted();
-                warning ||= result.warnings.length > 0;
-                if (result.images.length) {
-                    if (wrap && result.images[0] === this.state.image) {
-                        this.singleImage = true;
-                        this.status.textContent = 'This is the only item in the collection.';
-                    } else this.selectImage(result.images[0], entry);
-                    return;
-                }
-                cursor = result.cursor;
-            } while (cursor !== null);
-            if (!this.state.image) {
-                this.status.textContent = warning ? 'No accessible media found. ' + PARTIAL_COLLECTION_MESSAGE
-                    : 'No images or videos in this collection.';
-            } else {
-                this.boundaryDirection = reverse;
-                this.status.textContent = (reverse ? 'Beginning' : 'End') + ' of collection.'
-                    + (warning ? ' ' + PARTIAL_COLLECTION_MESSAGE : '');
-            }
-        } catch (error) {
-            if (error.name !== 'AbortError') {
-                this.status.textContent = 'Unable to find the ' + (reverse ? 'previous' : 'next') + ' item.';
-                this.retryMove = () => { this.clearBoundary(); this.moveImage(reverse, wrap, entry); };
-                byId('viewer-retry').hidden = false;
-            }
-        } finally {
-            scope.dispose();
-            if (this.moveScope === scope) {
-                this.moveScope = null;
-                this.updateControls();
-            }
-        }
+    requestMove(reverse, fresh = true, entry = ViewerEntry.TOP) {
+        if (this.state.mode === ScreenMode.BROWSE || this.scrolling && this.continuous.singleImage) return;
+        this.navigation.request(reverse, fresh, entry, this.scrolling && this.continuous.warning);
     }
 
     onKey(event) {
@@ -417,6 +353,6 @@ export class ImageViewer {
         const {native, turn, fresh} = this.wheel.update(delta, performance.now(), mode);
         if (native) return;
         event.preventDefault();
-        if (turn) this.requestMove(reverse, fresh, reverse ? 'bottom' : 'top');
+        if (turn) this.requestMove(reverse, fresh, reverse ? ViewerEntry.BOTTOM : ViewerEntry.TOP);
     }
 }

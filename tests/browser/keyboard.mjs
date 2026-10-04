@@ -74,6 +74,8 @@ export async function run(browser, {first, second}) {
 
     await browser.openInfo();
     await waitFor("document.getElementById('metadata-panel').textContent.includes('1000 × 1800')");
+    await click('metadata-toggle');
+    await click('metadata-toggle');
     assert.equal(await evaluate('document.activeElement.id'), 'metadata-toggle');
     assert.ok(await evaluate("document.getElementById('folder-tree').contains(document.getElementById('item-info'))"));
     await nativeKey('ArrowRight', 39);

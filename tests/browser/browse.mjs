@@ -27,6 +27,26 @@ export async function run(browser, fixtures) {
     assert.deepEqual(cancellationCheck, {attempts: 1, result: 'AbortError', scopeAborted: false});
     assert.ok(await evaluate("document.querySelectorAll('.card').length < 50"));
     await waitFor("document.querySelector('.picture img')?.naturalWidth > 0");
+    const resizedPictureHeight = await evaluate(`import('/gallery.js').then(({app}) => {
+        const viewport = app.grid.viewport;
+        const originalStyle = viewport.getAttribute('style');
+        try {
+            for (const [name, value] of Object.entries({
+                '--card-image-height':'90px', '--grid-min-row-height':'0px',
+                '--grid-row-padding':'9px', '--card-caption-padding':'11px',
+                '--card-border-width':'3px', '--card-caption-gap':'13px',
+                '--grid-min-column-width':'400px',
+            })) viewport.style.setProperty(name, value);
+            app.grid.relayout();
+            return document.querySelector('.folder-card .picture').getBoundingClientRect().height;
+        } finally {
+            if (originalStyle === null) viewport.removeAttribute('style');
+            else viewport.setAttribute('style', originalStyle);
+            app.grid.relayout();
+        }
+    })`);
+    assert.ok(Math.abs(resizedPictureHeight - 90) < 1,
+        'Virtual rows preserve the CSS preview height when borders, padding, and controls determine their size: ' + resizedPictureHeight);
     assert.ok(await evaluate("(() => {const image=document.querySelector('.picture img').getBoundingClientRect(), frame=document.querySelector('.picture img').parentElement.getBoundingClientRect(); return image.left>=frame.left-.5 && image.right<=frame.right+.5 && image.top>=frame.top-.5 && image.bottom<=frame.bottom+.5;})()"), 'Preview images stay within their card area');
     assert.equal(await evaluate("document.getElementById('layout-previews').getBoundingClientRect().right"), await evaluate("document.getElementById('layout-list').getBoundingClientRect().left"), 'Layout choices remain a contiguous button group');
     await screenshot('grid');
@@ -61,6 +81,10 @@ export async function run(browser, fixtures) {
     assert.equal(await evaluate("document.getElementById('item-info').open"), true, 'Info is expanded by default');
     await click('folders-toggle');
     await browser.openInfo();
+    assert.deepEqual(await evaluate("(() => { const style=getComputedStyle(document.getElementById('metadata-copy')); return {width:style.width,height:style.height}; })()"),
+        {width:'24px', height:'20px'}, 'Shared controls do not override the compact Copy geometry');
+    assert.equal(await evaluate("getComputedStyle(document.querySelector('.folder-card .card-name')).textDecorationLine"),
+        'none', 'Folder captions only underline on hover');
     await evaluate("Object.defineProperty(navigator, 'clipboard', {configurable:true, value:{writeText:async text => { window.copiedPath=text; }}}); document.querySelector('#metadata-panel .copy-path').click()");
     await waitFor("window.copiedPath");
     const absoluteRoot = await evaluate('window.copiedPath');

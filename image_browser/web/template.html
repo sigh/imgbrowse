@@ -50,7 +50,7 @@
                         <span id="metadata-copy-feedback" class="copy-feedback" role="status"></span>
                     </div>
                     <div id="metadata-details">
-                        <div id="metadata-status" role="status"><span id="metadata-message"></span><button id="metadata-retry" type="button" hidden>Retry</button></div>
+                        <div id="metadata-status" role="status"><span id="metadata-message"></span><button id="metadata-retry" class="retry-action" type="button" hidden>Retry</button></div>
                         <dl id="metadata-facts" class="metadata-attributes"></dl>
                     </div>
                 </section>
@@ -81,14 +81,14 @@
                     <div class="viewer-feedback">
                         <span id="viewer-status" role="status"></span>
                         <span id="viewer-warning" role="status"></span>
-                        <button id="viewer-retry" hidden>Retry</button>
+                        <button id="viewer-retry" class="retry-action" hidden>Retry</button>
                     </div>
                 </div>
                 <div id="viewer-strip" class="viewer-strip" role="group" aria-label="Collection thumbnails" hidden></div>
             </section>
         </div>
     </div>
-    <section id="sort-popover" popover="auto" aria-labelledby="sort-title">
+    <section id="sort-popover" class="popover-panel" popover="auto" aria-labelledby="sort-title">
         <fieldset>
             <legend id="sort-title">Sort by</legend>
             <label><input class="visually-hidden" type="radio" name="sort" value="natural" checked><span class="criterion-label">Name</span></label>

@@ -1,6 +1,7 @@
 import {ResourceCache} from './resource-cache.js';
 import {Sequence} from './sequence.js';
 import {sortSettings} from './state.js';
+import {MetadataKind} from './media-kind.js';
 
 /** HTTP details live here; views work with folder listings and traversal pages. */
 async function request(url, signal, data) {
@@ -45,8 +46,19 @@ export const imageUrl = (path, thumbnail = false) =>
     (thumbnail ? '/thumbnail?' : '/image?') + new URLSearchParams({path, v: mediaVersion});
 
 export const getInfo = () => request('/api/info');
-export const getLocation = path => request('/api/location?' + new URLSearchParams({path}));
-export const getMetadata = (path, signal) => request('/api/metadata?' + new URLSearchParams({path}), signal);
+/** Complete item facts; optional video failure preserves basic metadata and can be retried. */
+export async function getMetadata(path, signal, onBasic = () => {}) {
+    const data = await request('/api/metadata?' + new URLSearchParams({path}), signal);
+    if (data.kind !== MetadataKind.VIDEO) return data;
+    signal?.throwIfAborted();
+    onBasic({...data, video_pending: true});
+    try {
+        return {...data, ...await getVideoInfo(path, signal)};
+    } catch {
+        signal?.throwIfAborted();
+        return {...data, video_error: true};
+    }
+}
 
 export async function getFolder(path, signal, ordering = {}) {
     const settings = sortSettings(ordering);
