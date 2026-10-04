@@ -155,9 +155,16 @@ class GalleryHandler(BaseHTTPRequestHandler):
                                     self.gallery_server.archive_work))
         elif url.path == '/api/folder':
             ordering = Ordering.from_params({name: values[0] for name, values in query.items()})
-            self.send_json({'path': path, 'root_name': gallery.root.name,
-                            **gallery.listing(path, ordering=ordering),
-                            'natural_folders': gallery.snapshot(path)['listing']['folders']})
+            if 'limit' in query or 'names' in query:
+                listing = gallery.folder_page(path, ordering=ordering,
+                    limit=int(query.get('limit', [PAGE_SIZE])[0]),
+                    names=json.loads(query['names'][0]) if 'names' in query else None,
+                    revision=query.get('revision', [None])[0])
+            else:
+                snapshot = gallery.snapshot(path, ordering=ordering)
+                listing = {**snapshot['listing'], 'natural_folders': snapshot['natural_folders'],
+                           'revision': snapshot['revision']}
+            self.send_json({'path': path, 'root_name': gallery.root.name, **listing})
         elif url.path == '/thumbnail':
             self._serve_thumbnail(path)
         elif url.path == '/image':

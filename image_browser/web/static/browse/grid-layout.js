@@ -113,8 +113,9 @@ export class GridLayout {
             current.items.push(item);
             this.itemCount++;
             this.byPath.set('item:' + item.path, current);
-            const {labelInset, minLabelHeight} = this.itemGeometry(item, compact, this.number);
-            const labelHeight = Math.max(minLabelHeight, this.labelHeight(filename(item.path), cardWidth - labelInset, this.cardFont));
+            const {labelInset, minLabelHeight, labelExtraHeight} = this.itemGeometry(item, compact, this.number, this.recursive);
+            const labelHeight = Math.max(minLabelHeight,
+                this.labelHeight(filename(item.path), cardWidth - labelInset, this.cardFont) + labelExtraHeight);
             const contentHeight = compact
                 ? labelHeight + 2 * this.listPadding + this.listBorder
                 : this.imageHeight + this.captionPadding * 2 + 2 * this.cardBorder + this.rowPadding * 2

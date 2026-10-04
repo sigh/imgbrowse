@@ -778,6 +778,8 @@ input[type=search] {
     --folder-heading-min-height: 42px;
     --folder-heading-padding-block: 8px;
     --card-label-font-size: 13.44px;
+    --item-date-font-size: 11px;
+    --item-date-line-height: 16px;
     --folder-label-font-size: 14.4px;
     --label-line-height: 20px;
     --list-gap: 10px;
@@ -917,12 +919,34 @@ input[type=search] {
     overflow-wrap: anywhere;
 }
 
+.item-label {
+    flex: 1;
+    min-width: 0;
+}
+
+.item-label :is(.card-name, .list-name) {
+    display: block;
+    width: 100%;
+}
+
+.item-modified {
+    display: block;
+    height: var(--item-date-line-height);
+    font-size: var(--item-date-font-size);
+    line-height: var(--item-date-line-height);
+    color: var(--color-muted);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
 .card-name:hover, .list-name:hover {
     text-decoration: underline;
 }
 
 .card-name .icon {
     margin-right: var(--space-sm);
+    vertical-align: top;
 }
 
 @media (max-width: 700px) {

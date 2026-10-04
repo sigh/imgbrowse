@@ -91,6 +91,27 @@ const continuousMedia = await evaluate("import('/static/data/media-cache.js').th
 assert.ok(continuousMedia.bytes <= 96*1024*1024 && continuousMedia.entries <= 4);
 await evaluate(`testApp.setMode(${JSON.stringify(ScreenMode.BROWSE)})`);
 await wait("testApp.state.mode === 'browse' && document.querySelectorAll('.reader-item').length === 0");
+await wait("document.querySelector('#grid .item-modified[datetime]')");
+const browseDates = await evaluate("({entries:testApp.grid.directory.entries.size,items:testApp.grid.directory.listing.images.length})");
+assert.equal(browseDates.items, 2400);
+assert.ok(browseDates.entries > 0 && browseDates.entries <= 120,
+    'Browse loads bounded complete entry pages around the returned image: ' + JSON.stringify(browseDates));
+
+// Sparse Browse pages support deep scroll and filters without loading the intervening records.
+await browser.open('/?folder=Large');
+await wait("document.querySelector('.card[data-path=\"Large/page0.jpg\"] .item-modified[datetime]')");
+await evaluate("import('/gallery.js').then(({app})=>window.testApp=app)");
+assert.equal(await evaluate('testApp.grid.directory.entries.size'), 60);
+await evaluate("testApp.grid.viewport.scrollTop = testApp.grid.gridOffset + testApp.grid.layout.byPath.get('item:Large/page1200.jpg').top");
+await wait("document.querySelector('.card[data-path=\"Large/page1200.jpg\"] .item-modified[datetime]')");
+assert.ok(await evaluate('testApp.grid.directory.entries.size <= 120'));
+await evaluate("{const input=document.getElementById('filter');input.value='page2399';input.dispatchEvent(new Event('input'));}");
+await wait("document.querySelector('.card[data-path=\"Large/page2399.jpg\"] .item-modified[datetime]')");
+assert.equal(await evaluate("document.querySelectorAll('#grid .card').length"), 1);
+assert.ok(await evaluate('testApp.grid.directory.entries.size <= 121'));
+assert.ok(await evaluate("[...document.querySelectorAll('#grid .card')].every(card => card.querySelector('.item-modified[datetime]'))"),
+    'A Browse card is created with its date, without a second DOM update');
+assert.ok(!browser.requests.some(url => new URL(url).pathname === '/api/modified'));
 assert.equal(browser.exceptions.length,0,JSON.stringify(browser.exceptions));
-console.log('Performance browser checks passed:' ,JSON.stringify({grid,strip,media,column,continuousMedia}));
+console.log('Performance browser checks passed:' ,JSON.stringify({grid,strip,media,column,continuousMedia,browseDates}));
 browser.close();

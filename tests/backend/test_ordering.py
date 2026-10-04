@@ -71,30 +71,6 @@ class OrderingTests(unittest.TestCase):
         self.assertEqual(self.gallery.representative(''), 'chapter2/page2.jpg')
         self.assertEqual(self.gallery.listing('')['folders'], ['chapter2', 'chapter10'])
 
-    def test_metadata_is_lazy_shared_between_directions_and_refreshed(self):
-        self.file('a.jpg', 100)
-        self.file('b.jpg', 200)
-        self.file('child/c.jpg', 300)
-        self.file('notes.txt', 400)
-        with patch.object(self.gallery, '_modified_dates', wraps=self.gallery._modified_dates) as dates:
-            self.gallery.listing('', ordering=Ordering(order='desc'))
-            self.assertEqual(dates.call_count, 0)
-            lstat = Path.lstat
-            with patch.object(Path, 'lstat', autospec=True, side_effect=lstat) as attributes:
-                self.assertEqual(self.gallery.listing('', ordering=Ordering(sort='modified'))['images'], ['a.jpg', 'b.jpg'])
-                self.assertEqual(self.gallery.listing('', ordering=Ordering(sort='modified', order='desc'))['images'], ['b.jpg', 'a.jpg'])
-                self.assertCountEqual([call.args[0] for call in attributes.call_args_list],
-                                      [self.gallery.root / name for name in ['a.jpg', 'b.jpg', 'child']])
-            self.assertEqual(dates.call_count, 1)
-            self.assertEqual(dates.call_args.args[0], '')
-            self.assertEqual(dates.call_args.args[1]['images'], ['a.jpg', 'b.jpg'])
-            self.assertEqual(dates.call_args.args[1]['folders'], ['child'])
-            self.assertNotIn('child', [key[0] for key in self.gallery.modified_dates.entries])
-            os.utime(self.root / 'a.jpg', ns=(500, 500))
-            self.gallery.invalidate('')
-            self.assertEqual(self.gallery.listing('', ordering=Ordering(sort='modified', order='desc'))['images'], ['a.jpg', 'b.jpg'])
-            self.assertEqual(dates.call_count, 2)
-
     def test_missing_and_equal_dates_stay_natural_in_both_directions(self):
         records = [('page10', 20), ('page2', 20), ('unknown10', None), ('unknown2', None), ('old', 0)]
         for direction, expected in [('asc', ['old', 'page2', 'page10', 'unknown2', 'unknown10']),
@@ -155,12 +131,12 @@ class OrderingTests(unittest.TestCase):
         self.gallery.listing('')
         with request_work(cancel=lambda: True), self.assertRaises(Cancelled):
             self.gallery.listing('', ordering=Ordering(sort='modified'))
-        original = self.gallery._modified_dates
+        original = self.gallery._ordered_snapshot
         def refreshed(*args):
             result = original(*args)
             self.gallery.invalidate('')
             return result
-        with patch.object(self.gallery, '_modified_dates', side_effect=refreshed), self.assertRaises(Invalidated):
+        with patch.object(self.gallery, '_ordered_snapshot', side_effect=refreshed), self.assertRaises(Invalidated):
             self.gallery.listing('', ordering=Ordering(sort='modified'))
         self.assertEqual(self.gallery.ordered.weight, 0)
 

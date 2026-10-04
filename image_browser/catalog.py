@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import os
 import stat
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
+from threading import Lock
 from time import monotonic
 from uuid import uuid4
 
@@ -19,6 +21,50 @@ from .work import Busy, Cancelled, Invalidated, WorkGate, check_cancelled
 WALK_BUDGET = 24
 PAGE_SIZE = 60
 MAX_CURSOR_DEPTH = 512
+UNREAD = object()
+ENTRY_TYPES = {'folders': 'folder', 'images': 'image', 'other_files': 'file'}
+
+
+@dataclass
+class CatalogEntry:
+    """An enumerated child, retaining its source and lazily read attributes."""
+
+    name: str
+    type: str
+    source: object
+    archived: bool = False
+    attributes: object = UNREAD
+    lock: object = field(default_factory=Lock, repr=False)
+
+    def modified(self, work):
+        check_cancelled()
+        if self.archived:
+            return archive_modified(self.source)
+        # A folder page and a sort request can ask for the same child concurrently.
+        while not self.lock.acquire(timeout=.05):
+            check_cancelled()
+        try:
+            check_cancelled()
+            if self.attributes is UNREAD:
+                try:
+                    with work:
+                        self.attributes = self.source.stat(follow_symlinks=False)
+                except (Busy, Cancelled):
+                    raise
+                except OSError:
+                    check_cancelled()
+                    self.attributes = None
+            attributes = self.attributes
+            return attributes.st_mtime_ns if attributes and not stat.S_ISLNK(attributes.st_mode) else None
+        finally:
+            self.lock.release()
+
+    def serialize(self, work):
+        value = self.modified(work)
+        modified = None if value is None else (
+            datetime.strptime(str(value), '%Y%m%d%H%M%S').isoformat() if self.archived else
+            datetime.fromtimestamp(value / 1_000_000_000, timezone.utc).isoformat())
+        return {'name': self.name, 'type': self.type, 'modified': modified}
 
 
 @dataclass(frozen=True)
@@ -55,7 +101,6 @@ class Gallery:
         self.directory_work = WorkGate()
         self.listings = SharedCache(32 * 1024 * 1024)
         self.ordered = SharedCache(32 * 1024 * 1024)
-        self.modified_dates = SharedCache(16 * 1024 * 1024)
         self.previews = SharedCache(4 * 1024 * 1024)
         self.sources = SharedCache(4 * 1024 * 1024, ttl=5)
         self.generation = 0
@@ -103,7 +148,6 @@ class Gallery:
         related = lambda path: within(path) or not path or relative.startswith(path + '/')
         self.listings.invalidate(related)
         self.ordered.invalidate(lambda key: related(key[0]))
-        self.modified_dates.invalidate(lambda key: related(key[0]))
         self.sources.invalidate(within)
         self.previews.invalidate(related)
         self.archives.invalidate()
@@ -158,74 +202,85 @@ class Gallery:
         generation = self.generation
         valid = valid or (lambda: generation == self.generation)
         def load():
-            listing = self._listing(relative, entry=entry)
+            entries = self._listing(relative, entry=entry)
+            listing = {kind: sorted((name for name, item in entries.items() if item.type == type), key=natural_key)
+                       for kind, type in ENTRY_TYPES.items()}
             keys = {kind: [DEFAULT_ORDERING.key(name) for name in names] for kind, names in listing.items()}
-            return {'listing': listing, 'keys': keys, 'dates': {}, 'revision': uuid4().hex}
+            return {'listing': listing, 'natural_folders': listing['folders'], 'entries': entries,
+                    'keys': keys, 'dates': {}, 'revision': uuid4().hex}
         snapshot = self.listings.get(relative, load,
-                                 lambda item: sum(256 + len(name) * 4 for names in item['listing'].values() for name in names) + 256,
+                                 # Reserve space for DirEntry, lazy stat, lock, and name/index references.
+                                 lambda item: sum(1024 + len(name) * 8 for name in item['entries']) + 256,
                                  valid=valid)
         if not valid():
             raise Invalidated('Refreshed during request')
         if ordering == DEFAULT_ORDERING:
             return snapshot
         key = (relative, ordering, snapshot['revision'])
-        result = self.ordered.get(key, lambda: self._ordered_snapshot(relative, snapshot, ordering, entry, valid),
-                                lambda item: sum(320 + len(name) * 4 for names in item['listing'].values() for name in names) + 256,
+        result = self.ordered.get(key, lambda: self._ordered_snapshot(snapshot, ordering),
+                                # Ordered views also retain the source entries if the base is evicted.
+                                lambda item: sum(1408 + len(name) * 8 for name in item['entries']) + 256,
                                 valid=valid)
         if not valid():
             raise Invalidated('Refreshed during request')
         return result
 
-    def _ordered_snapshot(self, relative, snapshot, ordering, entry, valid):
+    def _ordered_snapshot(self, snapshot, ordering):
         listing = dict(snapshot['listing'])
         keys, dates = dict(snapshot['keys']), {}
         if ordering.sort == 'modified':
-            dates = self.modified_dates.get((relative, snapshot['revision']),
-                lambda: self._modified_dates(relative, listing, entry),
-                lambda groups: sum(128 + len(name) * 4 for values in groups.values() for name in values) + 128,
-                valid=valid)
+            for kind in ('images', 'folders'):
+                dates[kind] = {name: snapshot['entries'][name].modified(self.directory_work) for name in listing[kind]}
         for kind in ('images', 'folders'):
             values = dates.get(kind, {})
             records = sorted(((name, ordering.key(name, values.get(name))) for name in listing[kind]),
                              key=lambda record: record[1])
             listing[kind] = [name for name, _ in records]
             keys[kind] = [key for _, key in records]
-        return {'listing': listing, 'keys': keys, 'dates': dates, 'revision': snapshot['revision']}
+        return {**snapshot, 'listing': listing, 'keys': keys, 'dates': dates}
 
-    def _modified_dates(self, relative, listing, entry):
-        with self.directory_work:
-            entry = entry or self._locate(relative)
-        dates = {}
-        for kind in ('images', 'folders'):
-            values = dates[kind] = {}
-            for name in listing[kind]:
-                check_cancelled()
-                if entry.archive is not None:
-                    inner = str(PurePosixPath(entry.inner) / name)
-                    infos = entry.archive.folder_info if kind == 'folders' else entry.archive.files
-                    values[name] = archive_modified(infos.get(inner))
-                else:
-                    try:
-                        with self.directory_work:
-                            attributes = (entry.file / name).lstat()
-                        values[name] = None if stat.S_ISLNK(attributes.st_mode) else attributes.st_mtime_ns
-                    except (Busy, Cancelled):
-                        raise
-                    except OSError:
-                        check_cancelled()
-                        values[name] = None
-        return dates
+    def folder_page(self, relative, *, ordering=DEFAULT_ORDERING, names=None, limit=PAGE_SIZE, revision=None):
+        """Complete child records, plus the lightweight index on the first page.
+
+        Later pages select names from that index so filtering and deep scroll
+        restoration do not read attributes for intervening, invisible entries.
+        """
+        if type(limit) is not int or not 1 <= limit <= PAGE_SIZE:
+            raise ValueError('Expected a page size between 1 and 60')
+        if names is not None and (not isinstance(names, list) or len(names) > PAGE_SIZE or any(
+                not isinstance(name, str) or '/' in name or name in ('.', '..', '') for name in names)):
+            raise ValueError('Expected at most 60 direct child names')
+        generation = self.generation
+        snapshot = self.snapshot(relative, ordering=ordering if names is None else DEFAULT_ORDERING)
+        if revision is not None and revision != snapshot['revision']:
+            raise ValueError('Folder listing changed; refresh this folder')
+        result = {'revision': snapshot['revision']}
+        if names is None:
+            result.update(snapshot['listing'])
+            result['natural_folders'] = snapshot['natural_folders']
+            names = (snapshot['listing']['folders'] + snapshot['listing']['images'])[:limit]
+        if any(name not in snapshot['entries'] for name in names):
+            raise ValueError('Child is not in this folder listing')
+        result['entries'] = [snapshot['entries'][name].serialize(self.directory_work) for name in names]
+        check_cancelled()
+        if generation != self.generation:
+            raise Invalidated('Refreshed during request')
+        return result
 
     def _listing(self, relative: str, *, entry=None) -> dict:
         """Read one directory; never inspect its descendants."""
         with self.directory_work:
             entry = entry or self._locate(relative)
             if entry.archive is not None:
-                return entry.archive.listing(entry.inner, natural_key)
+                listing = entry.archive.listing(entry.inner, natural_key)
+                return {name: CatalogEntry(name, ENTRY_TYPES[kind],
+                            (entry.archive.folder_info if kind == 'folders' else entry.archive.files)
+                            .get(str(PurePosixPath(entry.inner) / name)), archived=True)
+                        for kind, names in listing.items() for name in names}
             return self._scan_directory(entry.file)
 
     def _scan_directory(self, directory):
-        folders, images, other_files = [], [], []
+        result = {}
         with os.scandir(directory) as entries:
             for index, entry in enumerate(entries):
                 if index % 128 == 0:
@@ -233,17 +288,13 @@ class Gallery:
                 if not visible_name(entry.name, self.excluded) or entry.is_symlink():
                     continue
                 if entry.is_dir(follow_symlinks=False):
-                    folders.append(entry.name)
+                    result[entry.name] = CatalogEntry(entry.name, 'folder', entry)
                     continue
                 suffix = Path(entry.name).suffix.lower()
                 if entry.is_file(follow_symlinks=False):
-                    target = folders if suffix in ARCHIVE_EXTENSIONS else images if suffix in MEDIA_EXTENSIONS else other_files
-                    target.append(entry.name)
-        return {
-            'folders': sorted(folders, key=natural_key),
-            'images': sorted(images, key=natural_key),
-            'other_files': sorted(other_files, key=natural_key),
-        }
+                    type = 'folder' if suffix in ARCHIVE_EXTENSIONS else 'image' if suffix in MEDIA_EXTENSIONS else 'file'
+                    result[entry.name] = CatalogEntry(entry.name, type, entry)
+        return result
 
     def representative(self, relative, *, entry=None, valid=None):
         """Return the first branch's media path, never traversal instructions."""

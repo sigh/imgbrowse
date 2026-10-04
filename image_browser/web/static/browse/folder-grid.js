@@ -1,5 +1,6 @@
 import {isVideo, fileExtension} from '../shared/media-kind.js';
 import {getFolder, walkImages, sequence} from '../data/api.js';
+import {formatMetadataDate} from '../data/metadata-data.js';
 import {byId, element, plainClick, setButtonLabel, TaskScope} from '../shared/dom.js';
 import {icon} from '../shared/icons.js';
 import {GridLayout} from './grid-layout.js';
@@ -18,7 +19,7 @@ function itemParts(item) {
 }
 
 /** Width occupied by the same parts rendered in cards and list rows. */
-function itemGeometry(item, compact, number) {
+function itemGeometry(item, compact, number, recursive) {
     const {folder, other, video} = itemParts(item);
     const padding = 2 * number('--card-caption-padding');
     const actions = number('--folder-actions-units') * number('--control-height');
@@ -26,7 +27,8 @@ function itemGeometry(item, compact, number) {
         + (folder ? actions + number('--list-gap') : other || video ? number('--list-detail-width') + number('--list-gap') : 0)
         : padding + 2 * number('--card-border-width')
         + (folder ? actions + number('--card-caption-gap') + number('--control-icon-size') + number('--space-sm') : 0);
-    return {labelInset, minLabelHeight:folder ? number('--control-height') : compact ? number('--control-icon-size') : 0};
+    return {labelInset, labelExtraHeight:recursive ? 0 : number('--item-date-line-height'),
+        minLabelHeight:folder ? number('--control-height') : compact ? number('--control-icon-size') : 0};
 }
 
 function positionRow(node, row) {
@@ -93,7 +95,7 @@ export class FolderGrid {
         } else this.scheduleRender();
     }
 
-    get loadingPage() { return Boolean(this.directory?.window.edges.some(edge => edge.loading)); }
+    get loadingPage() { return this.data.entriesLoading(this.directory) || Boolean(this.directory?.window.edges.some(edge => edge.loading)); }
 
     stop() {
         this.scope?.dispose();
@@ -297,6 +299,16 @@ export class FolderGrid {
         node.classList.toggle('selected-media', this.state.selected === item.path);
         if (compact) this.renderListItem(node, item, scope);
         else this.renderPreview(node, item, scope);
+        if (!this.state.recursive) {
+            const name = node.querySelector('.list-name, .card-name');
+            const label = element('div', 'item-label');
+            const time = element('time', 'item-modified', formatMetadataDate(item.modified) || '—');
+            time.title = item.modified ? 'Modified: ' + time.textContent : 'Modified time unavailable';
+            time.setAttribute('aria-label', time.title);
+            if (item.modified) time.dateTime = item.modified;
+            name.before(label);
+            label.append(name, time);
+        }
         return node;
     }
 
@@ -329,7 +341,8 @@ export class FolderGrid {
         node.classList.toggle('heading-row', !row.items && !row.disclosure);
         positionRow(node, row);
         const scope = new TaskScope();
-        if (row.items) row.items.forEach(item => node.append(this.createCard(item, scope, row.compact)));
+        if (row.items) row.items.forEach(item => node.append(this.createCard(
+            this.state.recursive ? item : this.directory.entries.get(filename(item.path)), scope, row.compact)));
         else if (row.disclosure) {
             node.classList.add('other-files-heading');
             const control = element('button', 'other-files-toggle', row.label);
@@ -359,6 +372,7 @@ export class FolderGrid {
         const start = Math.max(0, top - OVERSCAN);
         const end = top + this.viewport.clientHeight + OVERSCAN;
         const [first, last] = this.layout.visibleRange(start, end);
+        const pending = [];
         for (const index of this.rowNodes.keys()) {
             const row = this.layout.rows[index];
             if (index < first || index >= last || !row || this.rowNodes.get(index).signature !== this.rowSignature(row)) this.removeRow(index);
@@ -368,19 +382,25 @@ export class FolderGrid {
             }
         }
         for (let index = first; index < last; index++) {
-            if (!this.rowNodes.has(index)) this.createRow(index);
+            if (this.rowNodes.has(index)) continue;
+            const row = this.layout.rows[index];
+            const missing = this.state.recursive ? [] : (row.items || [])
+                .filter(item => !this.directory.entries.has(filename(item.path)));
+            if (missing.length) pending.push(...missing);
+            else this.createRow(index);
         }
         if (this.focusPath && this.state.active) {
             const item = [...this.container.querySelectorAll('.card')].find(node => node.dataset.path === this.focusPath);
             const target = item?.querySelector(this.focusSelector || '.list-name, .card-caption a, .image-name, button');
             (target || item?.querySelector('a, button'))?.focus({preventScroll: true});
-            if (item || !this.loadingFolder) {
+            if (item || (!this.loadingFolder && !pending.length)) {
                 if (!item) this.viewport.focus({preventScroll: true});
                 this.focusPath = null;
                 this.focusSelector = null;
             }
         }
         this.previews.schedule();
+        if (!this.state.recursive && pending.length) this.loadPage(false, pending);
         if (this.state.recursive && this.directory?.window.canLoad(this.directory.window.edges[0]) && this.viewport.scrollTop < DISCOVERY_MARGIN
             && !this.loadingPage && !this.loadingFolder && this.state.active) { this.loadPage(true); return; }
         const needsMore = end >= this.layout.height - DISCOVERY_MARGIN;
@@ -454,18 +474,33 @@ export class FolderGrid {
                 + (listing.other_files.length ? ` · ${listing.other_files.length} other ${listing.other_files.length === 1 ? 'file' : 'files'}` : '')
                 + (this.state.filter ? ` · ${this.items.length} matches` : '');
         }
-        this.moreButton.hidden = !window.edges.some(edge => edge.failed);
+        this.moreButton.hidden = !directory.error && !window.edges.some(edge => edge.failed);
         // Empty Browse feedback precedes the disclosure; Overview's end marker follows its grid.
         if (this.state.recursive) this.container.after(this.status);
         else this.container.before(this.status);
     }
 
-    async loadPage(reverse = false) {
-        if (!this.state.active || !this.state.recursive || this.loadingFolder || this.loadingPage || !this.directory) return;
+    async loadPage(reverse = false, items = []) {
+        if (!this.state.active || this.loadingFolder || this.loadingPage || !this.directory) return;
         const directory = this.directory;
+        const scope = this.scope;
+        if (!this.state.recursive) {
+            if (!items.length || directory.error) return;
+            try {
+                await this.data.loadEntries(directory, items, scope.signal);
+                scope.signal.throwIfAborted();
+                this.scheduleRender();
+            } catch (error) {
+                if (!scope.signal.aborted) {
+                    directory.error = error.message;
+                    this.status.textContent = error.message;
+                    this.moreButton.hidden = false;
+                }
+            }
+            return;
+        }
         const edge = directory.window.edges[reverse ? 0 : 1];
         if (!directory.window.canLoad(edge)) return;
-        const scope = this.scope;
         const result = await this.data.load(directory, reverse, scope.signal);
         if (scope.signal.aborted) return;
         if (!result) {

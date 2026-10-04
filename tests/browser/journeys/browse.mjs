@@ -1,11 +1,16 @@
 import assert from 'node:assert/strict';
 import {join} from 'node:path';
+import {statSync} from 'node:fs';
 
 export async function run(browser, fixtures) {
     const {call, evaluate, waitFor, open, click, nativeKey, screenshot, pause, position, requests} = browser;
     await browser.start();
     await open('/');
     await waitFor("document.querySelectorAll('.card').length > 5");
+    await waitFor("document.querySelector('.folder-card[data-path=Album] .item-modified[datetime]')");
+    const albumModified = statSync(join(fixtures.fixtureRoot, 'Album')).mtime.toISOString();
+    assert.equal(await evaluate("import('/static/data/metadata-data.js').then(({formatMetadataDate}) => document.querySelector('.folder-card[data-path=Album] .item-modified').textContent === formatMetadataDate(" + JSON.stringify(albumModified) + "))"),
+        true, 'Browse displays the filesystem modified time using the shared formatter');
     // An unrelated cancellation must settle once, rather than freezing the folder
     // view with an endless chain of immediately retried promises.
     const cancellationCheck = await evaluate(`(async () => {
@@ -113,14 +118,17 @@ export async function run(browser, fixtures) {
     await click('metadata-toggle');
     await click('folders-toggle');
 
-    // Filtering is immediate and makes no directory request. Both presentations preserve an item.
-    const folderRequests = () => requests.filter(url => url.includes('/api/folder')).length;
+    // Filtering reuses the name index; only missing complete entries need a page.
+    const folderRequests = () => requests.filter(url => url.includes('/api/folder')
+        && !new URL(url).searchParams.has('names')).length;
     const countBeforeFilter = folderRequests();
     await evaluate("{ const input=document.getElementById('filter'); input.value='root12'; input.dispatchEvent(new Event('input')); }");
     await waitFor("document.getElementById('summary').textContent.includes('11 matches')");
+    await waitFor("document.querySelector('.card[data-path=\"root120.jpg\"] .item-modified[datetime]')");
     assert.equal(folderRequests(), countBeforeFilter);
     await call('Page.reload');
     await waitFor("document.getElementById('summary')?.textContent.includes('11 matches')");
+    await waitFor("document.querySelector('.card[data-path=\"root120.jpg\"] .item-modified[datetime]')");
     assert.equal(folderRequests(), countBeforeFilter + 1);
     assert.ok(await evaluate("document.getElementById('summary').textContent.includes('11 matches')"));
     await evaluate("{ const input=document.getElementById('filter'); input.value=''; input.dispatchEvent(new Event('input')); }");
@@ -131,6 +139,8 @@ export async function run(browser, fixtures) {
     const beforeLayout = await evaluate('history.length');
     await click('layout-list');
     await waitFor("document.querySelector('.list-item')");
+    await waitFor("document.querySelector('.list-item .item-modified[datetime]')");
+    assert.ok(await evaluate("document.querySelector('.list-item .item-modified').getAttribute('aria-label').startsWith('Modified: ')"));
     assert.equal(await evaluate('history.length'), beforeLayout);
     assert.equal(await evaluate('history.state.position.path'), anchor);
     assert.ok(await evaluate("[...document.querySelectorAll('.list-name')].some(node=>node.textContent=== " + JSON.stringify(anchor) + ")"));

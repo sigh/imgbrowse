@@ -60,13 +60,16 @@ export async function getMetadata(path, signal, onBasic = () => {}) {
     }
 }
 
-export async function getFolder(path, signal, ordering = {}) {
+/** A name index for tree/traversal; Browse also requests bounded complete entry pages. */
+export async function getFolder(path, signal, ordering = {}, page = {}) {
     const settings = sortSettings(ordering);
-    const listing = await folders.get(JSON.stringify([path, settings]),
-        shared => request('/api/folder?' + new URLSearchParams({path, ...settings}), shared), signal,
+    const params = {...settings, ...page};
+    if (page.names) params.names = JSON.stringify(page.names);
+    const listing = await folders.get(JSON.stringify([path, params]),
+        shared => request('/api/folder?' + new URLSearchParams({path, ...params}), shared), signal,
         value => JSON.stringify(value).length * 2);
     signal?.throwIfAborted();
-    publishFolders(path, listing.natural_folders || listing.folders);
+    if (listing.folders) publishFolders(path, listing.natural_folders || listing.folders);
     return listing;
 }
 

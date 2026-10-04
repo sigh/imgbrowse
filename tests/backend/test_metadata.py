@@ -20,6 +20,22 @@ from image_browser.server import GalleryServer
 
 
 class MetadataTests(unittest.TestCase):
+    def test_folder_pages_never_decode_images_and_reject_traversal(self):
+        modified = self.request('photo.jpg')[1]['modified']
+        for names, expected_status in [(['photo.jpg'], 200), (['../photo.jpg'], 400)]:
+            connection = HTTPConnection('127.0.0.1', self.server.server_port, timeout=5)
+            try:
+                with patch('image_browser.metadata.Image.open', side_effect=AssertionError('No decoding')):
+                    connection.request('GET', '/api/folder?' + urlencode({'path':'', 'names':json.dumps(names)}))
+                    response = connection.getresponse()
+                    data = json.loads(response.read())
+                    self.assertEqual(response.status, expected_status)
+                    if expected_status == 200:
+                        self.assertEqual(data['entries'], [{'name':'photo.jpg', 'type':'image', 'modified':modified}])
+                        self.assertNotIn('images', data)
+            finally:
+                connection.close()
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
