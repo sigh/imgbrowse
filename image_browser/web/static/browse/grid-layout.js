@@ -1,4 +1,4 @@
-import {entryKey, filename, parentPath} from '../shared/state.js';
+import {entryKey, filename, ItemType, parentPath} from '../shared/state.js';
 
 /** Row metadata for a virtual grid. Appending a page only changes its last row. */
 export class GridLayout {
@@ -94,6 +94,8 @@ export class GridLayout {
         const columns = compact ? 1 : this.columns;
         const cardWidth = (this.contentWidth - (columns - 1) * this.gap) / columns;
         for (const item of items) {
+            const folders = !compact && item.type === ItemType.FOLDER;
+            if (current && current.folders !== folders) current = null;
             const folder = parentPath(item.path);
             if (this.recursive && folder !== previousFolder) {
                 current = null;
@@ -106,20 +108,20 @@ export class GridLayout {
                 previousFolder = folder;
             }
             if (!current || current.items.length === columns) {
-                current = {top: this.height, height: compact ? this.listMinHeight : this.minHeight, items: [], startIndex: this.itemCount, compact, columns};
+                current = {top: this.height, height: compact ? this.listMinHeight : this.minHeight, items: [], startIndex: this.itemCount, compact, columns, folders};
                 this.rows.push(current);
                 this.height += current.height;
             }
             current.items.push(item);
             this.itemCount++;
             this.byPath.set('item:' + entryKey(item), current);
-            const {labelInset, minLabelHeight, labelExtraHeight} = this.itemGeometry(item, compact, this.number, this.recursive);
+            const {labelInset, minLabelHeight, labelExtraHeight, topInset = 0} = this.itemGeometry(item, compact, this.number, this.recursive);
             const labelHeight = Math.max(minLabelHeight,
                 this.labelHeight(filename(item.path), cardWidth - labelInset, this.cardFont) + labelExtraHeight);
             const contentHeight = compact
                 ? labelHeight + 2 * this.listPadding + this.listBorder
                 : this.imageHeight + this.captionPadding * 2 + 2 * this.cardBorder + this.rowPadding * 2
-                + labelHeight;
+                + labelHeight + topInset;
             const newHeight = Math.max(current.height, contentHeight);
             this.height += newHeight - current.height;
             current.height = newHeight;

@@ -8,7 +8,7 @@ const browser = await connectBrowser(port, base, screenshots);
 const fixtures = {fixtureRoot, absoluteRoot: realpathSync(fixtureRoot),
     first: 'Album/Chapter 1/page2.jpg', second: 'Album/Chapter 1/page10.jpg',
     last: 'Album/Chapter 2/deep/page1.jpg'};
-const journeys = ['browse', 'navigation-return', 'reader', 'scroll', 'loading', 'strip-archives', 'responsive', 'video', 'keyboard', 'failures', 'tree', 'other-files', 'sorting', 'catalog-contracts'];
+const journeys = ['browse', 'navigation-return', 'reader', 'scroll', 'loading', 'strip-archives', 'responsive', 'video', 'keyboard', 'failures', 'tree', 'other-files', 'sorting', 'catalog-contracts', 'list-layout', 'strip-anchoring'];
 const selected = process.env.SMOKE_JOURNEY;
 assert.ok(!selected || journeys.includes(selected), 'Unknown SMOKE_JOURNEY: ' + selected);
 try {

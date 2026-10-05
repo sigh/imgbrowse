@@ -107,11 +107,14 @@ export async function run(browser, {first, second}) {
     await readyImage('root40.jpg');
     await waitFor("document.querySelectorAll('#viewer-strip button').length > 10");
     await evaluate("window.focusedThumbnail=document.querySelector('#viewer-strip [aria-current]'); focusedThumbnail.focus(); document.getElementById('viewer-strip').scrollLeft=0");
-    await waitFor("focusedThumbnail.closest('.strip-tile').classList.contains('pinned')");
+    await waitFor("focusedThumbnail.getBoundingClientRect().left >= document.getElementById('viewer-strip').getBoundingClientRect().right");
     assert.ok(await evaluate("focusedThumbnail.isConnected && document.activeElement === focusedThumbnail && document.querySelectorAll('#viewer-strip button').length < 40"), 'Virtualization retains keyboard focus with a bounded DOM');
     await evaluate("document.querySelector('.strip-resizer').focus()");
     await nativeKey('Tab', 9);
-    await waitFor("document.activeElement === focusedThumbnail && !focusedThumbnail.closest('.strip-tile').classList.contains('pinned')");
+    await waitFor(`(() => {
+        const thumbnail = focusedThumbnail.getBoundingClientRect(), strip = document.getElementById('viewer-strip').getBoundingClientRect();
+        return document.activeElement === focusedThumbnail && thumbnail.left >= strip.left && thumbnail.right <= strip.right;
+    })()`);
 
     await open('/?folder=Mixed&compact=1');
     await waitFor("document.querySelector('[data-path=\"Mixed/2.webm\"] .list-name')");

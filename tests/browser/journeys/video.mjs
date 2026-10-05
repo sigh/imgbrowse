@@ -35,7 +35,15 @@ export async function run(browser, fixtures) {
     if (videoPreviewAvailable) assert.ok(await evaluate("document.getElementById('viewer-video').poster.startsWith('blob:')"));
     if (await evaluate("document.querySelector('[data-reading-layout=strip]').getAttribute('aria-current') !== 'page'")) await presentation('strip');
     await waitFor(`document.querySelector('#viewer-strip button[data-path="Mixed/1.jpg"]')`);
-    assert.ok(await evaluate(`document.querySelector('#viewer-strip button[data-path="Mixed/2.webm"]').offsetWidth > document.querySelector('#viewer-strip button[data-path="Mixed/1.jpg"]').offsetWidth`));
+    assert.ok(await evaluate(`(() => {
+        const video = document.querySelector('#viewer-strip button[data-path="Mixed/2.webm"]').getBoundingClientRect();
+        const image = document.querySelector('#viewer-strip button[data-path="Mixed/1.jpg"]').getBoundingClientRect();
+        return video.width === image.width && video.height === image.height;
+    })()`), 'Image and video thumbnails use the same outer dimensions');
+    await waitFor(`document.querySelector('#viewer-strip button[data-path="Mixed/1.jpg"] img')?.naturalWidth > 0`);
+    if (videoPreviewAvailable) await waitFor(`document.querySelector('#viewer-strip button[data-path="Mixed/2.webm"] img')?.naturalWidth > 0`);
+    assert.ok(await evaluate(`Array.from(document.querySelectorAll('#viewer-strip img'), image =>
+        getComputedStyle(image).objectFit === 'contain').every(Boolean)`), 'Previews fit inside thumbnails without cropping');
     await call('Emulation.setDeviceMetricsOverride', {width:390,height:844,deviceScaleFactor:1,mobile:true});
     await pause(150);
     assert.ok(await evaluate("(()=>{const v=document.getElementById('viewer-video'), r=v.getBoundingClientRect(); return Math.abs(r.width/r.height-v.videoWidth/v.videoHeight)<.02 && r.right<=innerWidth})()"));

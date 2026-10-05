@@ -232,13 +232,13 @@ class GalleryApp {
 
     folderLoaded(name) {
         this.rootName = name;
-        document.title = (filename(this.state.folder) || name) + ' · Image Browser';
         this.viewer.setRootName(name);
         this.renderBreadcrumbs();
         this.tree.update(this.state, name);
     }
 
     updateItem(options) {
+        document.title = (filename(options.image || options.folder || '') || options.rootName) + ' · Image Browser';
         this.header.update({...options, ...sortSettings(this.state)});
         this.info.update(options);
     }

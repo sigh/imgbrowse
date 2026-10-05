@@ -7,26 +7,63 @@ export async function run(browser, fixtures) {
     await browser.start();
     const geometry = await evaluate(`(async () => {
         const {ThumbnailStrip} = await import('/static/viewer/thumbnail-strip.js');
+        const {TaskScope} = await import('/static/shared/dom.js');
         const host = document.createElement('div');
         host.style.cssText='position:fixed;left:0;top:0;width:300px';
         const container = document.createElement('div');
         container.className='viewer-strip';
         container.style.cssText='gap:10px;padding-inline:14px;--thumbnail-default-height:80px;--thumbnail-default-width:72px';
         host.append(container);document.body.append(host);
-        const strip = new ThumbnailStrip(container, {}, () => {});
+        const strip = new ThumbnailStrip(container, {thumbnail:async () => {}, schedule:() => {}}, () => {});
         try {
-            strip.setSize(80);
+            strip.visible = true; strip.scope = new TaskScope();
             strip.window.paths=['one.jpg','two.jpg'];
-            const first=document.createElement('button'),second=document.createElement('button');
-            container.append(first,second);
+            strip.edges.forEach(edge => { edge.done = true; });
+            strip.setSize(80);
+            const first=strip.nodes.get('one.jpg').button,second=strip.nodes.get('two.jpg').button;
             const a=first.getBoundingClientRect(),b=second.getBoundingClientRect();
-            return {offset:strip.offsets()[1],actualOffset:b.left-a.left,
+            return {offset:strip.layout.items[1].left,actualOffset:b.left-a.left,
                 padding:strip.paddingStart,actualPadding:a.left-container.getBoundingClientRect().left,
                 width:a.width,height:a.height};
-        } finally { strip.resizeObserver.disconnect();host.remove(); }
+        } finally { strip.resizeObserver.disconnect(); strip.stop(); host.remove(); }
     })()`);
     assert.deepEqual(geometry, {offset:82,actualOffset:82,padding:14,actualPadding:14,width:72,height:80},
         'Thumbnail positioning follows CSS geometry rather than duplicated constants');
+    const pagePositions = await evaluate(`(async () => {
+        const {ThumbnailStrip} = await import('/static/viewer/thumbnail-strip.js');
+        const {CollectionWindow} = await import('/static/data/collection-window.js');
+        const {TaskScope} = await import('/static/shared/dom.js');
+        const host = document.createElement('div');
+        host.style.cssText = 'position:fixed;left:0;top:0;width:300px';
+        const container = document.createElement('div');
+        container.className = 'viewer-strip';
+        container.style.cssText = '--strip-folder-width:82px;--strip-folder-gap:8px';
+        host.append(container); document.body.append(host);
+        const strip = new ThumbnailStrip(container, {thumbnail:async () => {}, schedule:() => {}}, () => {});
+        try {
+            strip.labelRoot = 'Album'; strip.visible = true; strip.scope = new TaskScope();
+            strip.image = 'Album/B/2.jpg'; strip.followImage = false;
+            strip.window = new CollectionWindow(async ({reverse}) => ({
+                images:reverse ? ['Album/A/1.jpg'] : ['Album/E/1.jpg', 'Album/E/2.jpg'],
+                cursor:null, warnings:[],
+            }), {root:'Album', pageSize:2, maxPaths:6});
+            strip.window.paths = ['Album/B/1.jpg', 'Album/B/2.jpg', 'Album/C/1.jpg', 'Album/C/2.jpg', 'Album/D/1.jpg'];
+            strip.reflow();
+            const left = path => strip.nodes.get(path).button.getBoundingClientRect().left;
+            const beforePrepend = left(strip.image);
+            await strip.discover(strip.edges[0]);
+            const prependShift = left(strip.image) - beforePrepend;
+            const anchor = 'Album/C/1.jpg', index = strip.paths.indexOf(anchor);
+            strip.scrollTo(strip.paddingStart + strip.layout.items[index].thumbnailLeft - 40);
+            strip.render();
+            const beforeTrim = left(anchor);
+            await strip.discover(strip.edges[1]);
+            return {prependShift, trimShift:left(anchor) - beforeTrim, count:strip.paths.length};
+        } finally { strip.resizeObserver.disconnect(); strip.stop(); host.remove(); }
+    })()`);
+    assert.ok(Math.abs(pagePositions.prependShift) < 1 && Math.abs(pagePositions.trimShift) < 1,
+        'Inline album titles preserve visible thumbnail positions when pages prepend and trim: ' + JSON.stringify(pagePositions));
+    assert.equal(pagePositions.count, 6, 'Album title geometry respects the bounded path window');
     // Continued wheel input advances fitted pages without requiring a pause after every image.
     await open(viewerUrl('root2.jpg', ImageSize.DEFAULT, '') + '&view=single');
     await readyImage('root2.jpg');

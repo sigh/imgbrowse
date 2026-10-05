@@ -3,7 +3,8 @@ import {walkImages} from '../data/api.js';
 import {CollectionWindow} from '../data/collection-window.js';
 import {element, TaskScope} from '../shared/dom.js';
 import {icon} from '../shared/icons.js';
-import {filename, parentPath, relativePath, sortKey, sortSettings, ViewerEntry} from '../shared/state.js';
+import {filename, sortKey, sortSettings, ViewerEntry} from '../shared/state.js';
+import {ThumbnailLayout} from './thumbnail-layout.js';
 
 const PAGE_SIZE = 32;
 const MAX_PATHS = 2048;
@@ -12,15 +13,20 @@ const MAX_PATHS = 2048;
 export class ThumbnailStrip {
     constructor(container, previews, selectImage) {
         Object.assign(this, {container, previews, selectImage});
+        this.nodes = new Map();
         this.window = new CollectionWindow(walkImages, {pageSize:PAGE_SIZE, maxPaths:MAX_PATHS});
         this.frame = element('div', 'strip-frame');
         container.before(this.frame); this.frame.append(container);
+        this.content = element('div', 'strip-content');
+        container.append(this.content);
         const style = getComputedStyle(container);
         this.gap = parseFloat(style.columnGap);
         this.paddingStart = parseFloat(style.paddingLeft);
         this.paddingEnd = parseFloat(style.paddingRight);
         this.defaultSize = parseFloat(style.getPropertyValue('--thumbnail-default-height'));
         this.defaultWidth = parseFloat(style.getPropertyValue('--thumbnail-default-width'));
+        this.folderWidth = parseFloat(style.getPropertyValue('--strip-folder-width'));
+        this.folderGap = parseFloat(style.getPropertyValue('--strip-folder-gap'));
         this.createResizer();
         this.failures = [true, false].map(reverse => {
             const button = element('button', 'strip-error ' + (reverse ? 'before' : 'after'));
@@ -33,9 +39,7 @@ export class ThumbnailStrip {
             });
             this.frame.append(button); return button;
         });
-        container.addEventListener('pointerdown', () => { this.followImage = false; });
         container.addEventListener('wheel', event => {
-            this.followImage = false;
             if (event.ctrlKey || event.metaKey || event.deltaX || !event.deltaY) return;
             event.preventDefault();
             container.scrollLeft += event.deltaY * (event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? container.clientWidth : 1);
@@ -51,7 +55,6 @@ export class ThumbnailStrip {
                 if (bounds.left < viewport.left || bounds.right > viewport.right) this.centerImage();
             }
         });
-        this.nodes = new Map();
         container.addEventListener('scroll', () => {
             if (Math.abs(container.scrollLeft - (this.followScroll || 0)) > 1) this.followImage = false;
             if (this.scheduled) return;
@@ -111,20 +114,25 @@ export class ThumbnailStrip {
         return Math.max(48, Math.min(240, Math.floor(window.innerHeight * .35)));
     }
 
-    tileWidth(path) { return isVideo(path) ? Math.round(this.size * 16 / 9) : this.width; }
+    captureAnchor(options) {
+        if (!this.visible || !this.scope) return null;
+        return this.layout?.anchor(this.container.scrollLeft, this.container.clientWidth, options);
+    }
 
-    offsets() {
-        const offsets = [0];
-        for (const path of this.paths || []) offsets.push(offsets.at(-1) + this.tileWidth(path) + this.gap);
-        return offsets;
+    reflow(anchor) {
+        this.layout = new ThumbnailLayout(this.paths, {
+            width:this.width, gap:this.gap, folderWidth:this.folderWidth, folderGap:this.folderGap,
+            labelRoot:this.labelRoot || '', leadingKnown:this.edges[0].done,
+            paddingStart:this.paddingStart, paddingEnd:this.paddingEnd,
+        });
+        this.content.style.width = this.layout.contentWidth + 'px';
+        const point = this.followImage ? {path:this.image, fraction:.5, x:this.container.clientWidth / 2} : anchor;
+        this.render(this.layout.scrollLeft(point, this.container.clientWidth) ?? this.container.scrollLeft);
     }
 
     setSize(size) {
         const max = this.maxSize();
-        const oldOffsets = this.offsets();
-        const left = Math.max(0, this.container.scrollLeft - this.paddingStart);
-        const anchor = Math.max(0, oldOffsets.findIndex(offset => offset > left) - 1);
-        const fraction = (left - oldOffsets[anchor]) / ((oldOffsets[anchor + 1] - oldOffsets[anchor]) || 1);
+        const anchor = !this.followImage ? this.captureAnchor() : null;
         this.size = Math.round(Math.max(48, Math.min(max, size)));
         this.width = Math.round(this.size * this.defaultWidth / this.defaultSize);
         this.frame.style.setProperty('--thumbnail-height', this.size + 'px');
@@ -133,20 +141,13 @@ export class ThumbnailStrip {
         this.handle.setAttribute('aria-valuemax', String(max));
         this.handle.setAttribute('aria-valuenow', String(this.size));
         if (!this.scope) return;
-        this.render();
-        if (this.followImage) this.centerImage();
-        else {
-            const offsets = this.offsets();
-            const width = (offsets[anchor + 1] - offsets[anchor]) || 1;
-            this.scrollTo(offsets[anchor] + fraction * width + this.paddingStart);
-            this.render();
-        }
+        this.reflow(anchor);
     }
 
     stop() {
         this.scope?.dispose(); this.scope = null;
         for (const {scope} of this.nodes.values()) scope.dispose();
-        this.nodes.clear(); this.container.replaceChildren();
+        this.nodes.clear(); this.content.replaceChildren(); this.layout = null;
         for (const edge of this.edges || []) edge.loading = false;
     }
 
@@ -160,19 +161,19 @@ export class ThumbnailStrip {
     show(state, visible, force = false) {
         const {collection, folder, image} = state;
         const hadFocus = this.container.contains(document.activeElement);
+        const reset = force || collection !== this.collection || sortKey(this.ordering) !== sortKey(state)
+            || (image && !this.paths.includes(image));
+        const followImage = this.followImage || !this.visible || image !== this.image || reset;
+        const anchor = visible && !followImage ? this.captureAnchor({preferred:folder !== this.labelRoot ? image : null}) : null;
         // Collection controls traversal; the URL folder controls displayed paths.
         this.labelRoot = folder;
-        if (force || collection !== this.collection || sortKey(this.ordering) !== sortKey(state)
-            || (image && !this.paths.includes(image))) this.reset(collection, image, sortSettings(state));
-        const opening = !this.visible;
+        if (reset) this.reset(collection, image, sortSettings(state));
         this.visible = visible; this.container.hidden = !visible; this.frame.hidden = !visible;
         if (!visible) { this.stop(); return; }
         if (!this.scope) this.scope = new TaskScope();
-        const previous = this.image;
         this.image = image;
-        if (previous !== image || opening || force) this.followImage = true;
-        this.render();
-        if (this.followImage) this.centerImage();
+        this.followImage = Boolean(followImage);
+        this.reflow(anchor);
         if (hadFocus) this.nodes.get(image)?.button.focus({preventScroll: true});
         this.discoverEdges();
     }
@@ -183,10 +184,8 @@ export class ThumbnailStrip {
     }
 
     centerImage() {
-        const index = this.paths.indexOf(this.image);
-        if (index < 0) return;
-        this.scrollTo(this.paddingStart + this.offsets()[index] + this.tileWidth(this.image) / 2 - this.container.clientWidth / 2);
-        this.render();
+        const left = this.layout?.scrollLeft({path:this.image, fraction:.5, x:this.container.clientWidth / 2}, this.container.clientWidth);
+        if (left != null) this.render(left);
     }
 
     updateEdges() {
@@ -200,40 +199,23 @@ export class ThumbnailStrip {
         });
     }
 
-    render() {
-        if (!this.visible || !this.scope) return;
+    render(left = this.container.scrollLeft) {
+        if (!this.visible || !this.scope || !this.layout) return;
         // Discovery can move the bounded path window past the current image.
-        this.container.tabIndex = this.paths.includes(this.image) ? -1 : 0;
-        const offsets = this.offsets();
-        let first = 0;
-        while (first < this.paths.length && offsets[first + 1] < this.container.scrollLeft) first++;
-        let last = first;
-        while (last < this.paths.length && offsets[last] < this.container.scrollLeft + this.container.clientWidth) last++;
-        first = Math.max(0, first - 3);
-        last = Math.min(this.paths.length, last + 3);
+        this.container.tabIndex = this.layout.byPath.has(this.image) ? -1 : 0;
         const focused = document.activeElement;
-        const indices = new Set(Array.from({length: last - first}, (_, index) => first + index));
+        const visible = new Map(this.layout.visible(left, this.container.clientWidth).map(item => [item.path, item]));
         // Keep the tab stop and focused tile mounted outside the virtual window.
         for (const path of [this.image, focused?.dataset.path]) {
-            const index = this.paths.indexOf(path);
-            if (index >= 0) indices.add(index);
+            const item = this.layout.byPath.get(path);
+            if (item) visible.set(path, item);
         }
-        const visible = new Set([...indices].map(index => this.paths[index]));
         for (const [path, item] of this.nodes) {
             if (!visible.has(path)) { item.scope.dispose(); item.tile.remove(); this.nodes.delete(path); }
         }
-        if (!this.leading?.isConnected) {
-            this.leading = element('span', 'strip-spacer'); this.trailing = element('span', 'strip-spacer');
-            this.leading.setAttribute('aria-hidden', 'true'); this.trailing.setAttribute('aria-hidden', 'true');
-            this.container.prepend(this.leading); this.container.append(this.trailing);
-        }
-        this.leading.style.width = Math.max(0, offsets[first] - this.gap) + 'px';
-        this.leading.hidden = first === 0;
-        this.trailing.style.width = Math.max(0, offsets.at(-1) - offsets[last] - this.gap) + 'px';
-        this.trailing.hidden = last === this.paths.length;
-        let cursor = this.leading.nextSibling;
-        for (const index of [...indices].sort((a, b) => a - b)) {
-            const path = this.paths[index];
+        let cursor = this.content.firstChild;
+        for (const geometry of [...visible.values()].sort((a, b) => a.index - b.index)) {
+            const {path} = geometry;
             let item = this.nodes.get(path);
             if (!item) {
                 const button = element('button');
@@ -250,40 +232,24 @@ export class ThumbnailStrip {
                     button.title = 'Thumbnail unavailable: ' + path;
                 });
             }
-            item.tile.style.setProperty('--thumbnail-width', this.tileWidth(path) + 'px');
-            const pinned = index < first || index >= last;
-            item.tile.classList.toggle('pinned', pinned);
-            item.tile.style.setProperty('--thumbnail-offset', offsets[index] + this.paddingStart + 'px');
+            item.tile.style.setProperty('--strip-tile-width', geometry.right - geometry.left + 'px');
+            item.tile.style.setProperty('--thumbnail-offset', geometry.left + 'px');
             item.button.tabIndex = path === this.image ? 0 : -1;
             item.button.classList.toggle('selected', path === this.image);
             if (path === this.image) item.button.setAttribute('aria-current', 'true');
             else item.button.removeAttribute('aria-current');
-            const folder = parentPath(path);
-            const boundary = index > 0 ? parentPath(this.paths[index - 1]) !== folder : this.edges[0].done;
-            item.tile.classList.toggle('folder-start', boundary);
-            const label = relativePath(this.labelRoot, folder);
-            item.label.textContent = boundary ? label : '';
+            item.tile.classList.toggle('folder-start', geometry.boundary);
+            const {label} = geometry;
+            item.label.textContent = label;
             item.label.title = label;
-            if (boundary) {
-                let end = index + 1;
-                while (end < this.paths.length && parentPath(this.paths[end]) === folder) end++;
-                const groupWidth = offsets[end] - offsets[index] - this.gap;
-                // The last heading can also use the empty space after its images.
-                const remainingWidth = end === this.paths.length
-                    ? this.container.clientWidth - this.paddingStart - this.paddingEnd - offsets[index] + this.container.scrollLeft : 0;
-                item.label.style.width = Math.max(groupWidth, remainingWidth) + 'px';
-            }
-            if (pinned) {
-                if (!item.tile.isConnected) this.container.append(item.tile);
-            } else {
-                while (cursor?.classList.contains('pinned')) cursor = cursor.nextSibling;
-                if (item.tile !== cursor) this.container.insertBefore(item.tile, cursor);
-                cursor = item.tile.nextSibling;
-            }
+            item.label.hidden = !label;
+            if (item.tile !== cursor) this.content.insertBefore(item.tile, cursor);
+            cursor = item.tile.nextSibling;
         }
         if (focused?.isConnected && visible.has(focused.dataset.path) && document.activeElement !== focused) {
             focused.focus({preventScroll: true});
         }
+        this.scrollTo(left);
         this.updateEdges();
         this.previews.schedule();
     }
@@ -302,13 +268,8 @@ export class ThumbnailStrip {
         try {
             const change = await this.window.load(edge, scope.signal, {anchor:this.image});
             if (!change) return;
-            const left = this.container.scrollLeft;
-            const shifted = edge.reverse ? change.added : change.removed;
-            const width = shifted.reduce((sum, path) => sum + this.tileWidth(path) + this.gap, 0);
-            this.render();
-            this.scrollTo(Math.max(0, left + (edge.reverse ? width : -width)));
-            if (this.followImage) this.centerImage();
-            else this.render();
+            const anchor = !this.followImage ? this.captureAnchor({retained:new Set(this.paths)}) : null;
+            this.reflow(anchor);
         } finally {
             if (scope === this.scope) {
                 this.container.setAttribute('aria-busy', String(this.edges.some(item => item.loading)));

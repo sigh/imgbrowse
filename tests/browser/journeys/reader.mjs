@@ -197,6 +197,13 @@ export async function run(browser, fixtures) {
     assert.equal(await evaluate("document.querySelector('[data-reading-layout=strip]').getAttribute('aria-current')"), 'page');
     await waitFor("document.querySelectorAll('#viewer-strip button').length === 3");
     assert.deepEqual(await evaluate("Array.from(document.querySelectorAll('#viewer-strip .folder-start .strip-folder'), node=>node.textContent)"), ['Chapter 1', 'Chapter 2/deep']);
+    assert.ok(await evaluate(`Array.from(document.querySelectorAll('#viewer-strip .strip-folder:not([hidden])'), label => {
+        const title = label.getBoundingClientRect(), thumbnail = label.nextElementSibling.getBoundingClientRect();
+        return title.right <= thumbnail.left && title.top >= thumbnail.top && title.bottom <= thumbnail.bottom;
+    }).every(Boolean)`), 'Album titles sit beside their thumbnails without reserving a heading row');
+    assert.ok(await evaluate(`document.getElementById('viewer-strip').getBoundingClientRect().height
+        <= document.querySelector('#viewer-strip button').getBoundingClientRect().height + 20`),
+    'The strip leaves the recovered title-row space for the main image');
     // Resize through the actual pointer handle, then the keyboard, without changing image.
     const resizePoint = await evaluate(`(() => { const r=document.querySelector('.strip-resizer').getBoundingClientRect(); return {x:r.x+r.width/2,y:r.y+r.height/2}; })()`);
     const thumbHeight = await evaluate("document.querySelector('#viewer-strip button').getBoundingClientRect().height");

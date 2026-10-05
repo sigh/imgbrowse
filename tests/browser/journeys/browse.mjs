@@ -8,6 +8,11 @@ export async function run(browser, fixtures) {
     await open('/');
     await waitFor("document.querySelectorAll('.card').length > 5");
     await waitFor("document.querySelector('.folder-card[data-path=Album] .item-modified[datetime]')");
+    assert.ok(await evaluate(`Array.from(document.querySelectorAll('.grid-row'), row => {
+        const cards = Array.from(row.querySelectorAll('.card'));
+        return !cards.some(card => card.classList.contains('folder-card'))
+            || cards.every(card => card.classList.contains('folder-card'));
+    }).every(Boolean)`), 'Folders and files occupy separate grid rows');
     const albumModified = statSync(join(fixtures.fixtureRoot, 'Album')).mtime.toISOString();
     assert.equal(await evaluate("import('/static/data/metadata-data.js').then(({formatMetadataDate}) => document.querySelector('.folder-card[data-path=Album] .item-modified').textContent === formatMetadataDate(" + JSON.stringify(albumModified) + "))"),
         true, 'Browse displays the filesystem modified time using the shared formatter');
@@ -52,7 +57,14 @@ export async function run(browser, fixtures) {
     })`);
     assert.ok(Math.abs(resizedPictureHeight - 90) < 1,
         'Virtual rows preserve the CSS preview height when borders, padding, and controls determine their size: ' + resizedPictureHeight);
-    assert.ok(await evaluate("(() => {const image=document.querySelector('.picture img').getBoundingClientRect(), frame=document.querySelector('.picture img').parentElement.getBoundingClientRect(); return image.left>=frame.left-.5 && image.right<=frame.right+.5 && image.top>=frame.top-.5 && image.bottom<=frame.bottom+.5;})()"), 'Preview images stay within their card area');
+    assert.ok(await evaluate(`Array.from(document.querySelectorAll('.card .picture'), picture => {
+        const frame = picture.getBoundingClientRect(), card = picture.closest('.card').getBoundingClientRect();
+        const image = picture.querySelector('img')?.getBoundingClientRect();
+        return frame.left >= card.left-.5 && frame.right <= card.right+.5
+            && frame.top >= card.top-.5 && frame.bottom <= card.bottom+.5
+            && (!image || image.left >= frame.left-.5 && image.right <= frame.right+.5
+                && image.top >= frame.top-.5 && image.bottom <= frame.bottom+.5);
+    }).every(Boolean)`), 'Preview frames and images stay within their cards');
     assert.equal(await evaluate("document.getElementById('layout-previews').getBoundingClientRect().right"), await evaluate("document.getElementById('layout-list').getBoundingClientRect().left"), 'Layout choices remain a contiguous button group');
     await screenshot('grid');
     const folderModeAction = await evaluate("document.getElementById('read-strip').getBoundingClientRect().toJSON()");

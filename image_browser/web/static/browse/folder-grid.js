@@ -24,11 +24,14 @@ function itemGeometry(item, compact, number, recursive) {
     const {folder, other, video} = itemParts(item);
     const padding = 2 * number('--card-caption-padding');
     const actions = number('--folder-actions-units') * number('--control-height');
+    const dateColumn = compact && !recursive ? number('--list-date-width') : 0;
     const labelInset = compact ? padding + number('--list-kind-width') + number('--list-gap')
+        + (dateColumn ? dateColumn + number('--list-gap') : 0)
         + (folder ? actions + number('--list-gap') : other || video ? number('--list-detail-width') + number('--list-gap') : 0)
         : padding + 2 * number('--card-border-width')
-        + (folder ? actions + number('--card-caption-gap') + number('--control-icon-size') + number('--space-sm') : 0);
-    return {labelInset, labelExtraHeight:recursive ? 0 : number('--item-date-line-height'),
+        + (folder ? actions + number('--card-caption-gap') : 0);
+    return {labelInset, labelExtraHeight:recursive || dateColumn ? 0 : number('--item-date-line-height'),
+        topInset:!compact && folder ? number('--folder-tab-height') : 0,
         minLabelHeight:folder ? number('--control-height') : compact ? number('--control-icon-size') : 0};
 }
 
@@ -363,7 +366,6 @@ export class FolderGrid {
         name.classList.add('card-name');
         if (isFolder) {
             node.classList.add('folder-card');
-            name.prepend(icon('folder'));
             caption.append(name, this.folderActions(item.path));
         } else {
             name.classList.add('image-name');
@@ -380,6 +382,7 @@ export class FolderGrid {
         const row = this.layout.rows[index];
         const node = element('div', 'grid-row');
         node.classList.toggle('compact-row', Boolean(row.compact));
+        node.classList.toggle('folder-row', Boolean(row.folders));
         node.classList.toggle('heading-row', !row.items && !row.disclosure);
         positionRow(node, row);
         const scope = new TaskScope();
