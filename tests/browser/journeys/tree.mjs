@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import {mkdirSync} from 'node:fs';
+import {mkdirSync, readdirSync} from 'node:fs';
 import {join} from 'node:path';
 import {ScreenMode} from '../../../image_browser/web/static/shared/state.js';
 
@@ -17,6 +17,12 @@ export async function run(browser, {first, last, fixtureRoot}) {
     const expanded = () => evaluate('[...treeApp.tree.expanded].sort()');
     const folders = () => evaluate('treeApp.tree.rows.filter(row=>!row.status).map(row=>row.path)');
     const folderRequests = () => requests.filter(url => new URL(url).pathname === '/api/folder');
+    const currentVisible = path => waitFor(`(() => {
+        const node=document.querySelector(${JSON.stringify(row(path) + ' a[aria-current="page"]')});
+        if (!node) return false;
+        const bounds=node.getBoundingClientRect(), viewport=treeApp.tree.viewport.getBoundingClientRect();
+        return bounds.top >= viewport.top && bounds.bottom <= viewport.bottom;
+    })()`);
 
     await browser.start();
     await waitFor("document.querySelector('#grid .card') && document.getElementById('grid-viewport').getAttribute('aria-busy') === 'false'");
@@ -170,8 +176,13 @@ export async function run(browser, {first, last, fixtureRoot}) {
     assert.equal(await evaluate('treeApp.state.folder'), '');
     await evaluate("treeApp.tree.toggleBranch('Mixed'); treeApp.tree.setOpen(false)");
     assert.ok(await evaluate("treeApp.tree.expanded.has('Mixed') && !treeApp.tree.pending.size"), 'Hiding cancels tree requests while preserving expansion');
+    await evaluate("treeApp.folderLink('Single').click()");
+    await waitFor("treeApp.state.folder === 'Single' && !treeApp.grid.loadingFolder");
+    assert.ok(await evaluate("treeApp.tree.pane.hidden && !treeApp.tree.listings.has('Mixed')"));
     await click('folders-toggle');
+    await currentVisible('Single');
     await waitFor('treeApp.tree.listings.has("Mixed") && !treeApp.tree.pending.size');
+    assert.equal(await evaluate('treeApp.tree.focused'), 'Single', 'Revealing the new folder also resumes unrelated cancelled branches');
     await activate('Packed.cbz', 'button');
     await waitFor(`document.querySelector(${JSON.stringify(row('Packed.cbz/Chapter 3') + ' a')})`);
     assert.ok((await folders()).includes('Packed.cbz/Chapter 3') && !(await folders()).some(path => path.endsWith('.jpg')), 'Archive branches show folders, never member files');
@@ -183,6 +194,64 @@ export async function run(browser, {first, last, fixtureRoot}) {
     await attach();
     await waitFor(`document.querySelector(${JSON.stringify(row('Packed.cbz/Chapter 3') + ' a[aria-current=page]')})`);
     assert.deepEqual(await expanded(), ['', 'Packed.cbz'], 'A bookmarked folder reveals its ancestors without opening its children');
+
+    // Card navigation reveals collapsed ancestors without moving focus into the tree.
+    await open('/?folder=Album');
+    await attach();
+    await currentVisible('Album');
+    assert.ok(!(await expanded()).includes('Album'));
+    await waitFor("document.querySelector('.card[data-path=\"Album/Chapter 2\"] .picture')");
+    await evaluate("document.getElementById('filter').focus(); document.querySelector('.card[data-path=\"Album/Chapter 2\"] .picture').click()");
+    await currentVisible('Album/Chapter 2');
+    assert.ok((await expanded()).includes('Album'), 'Entering a folder reveals its collapsed parent');
+    assert.equal(await evaluate('document.activeElement.id'), 'filter', 'Revealing a location preserves focus outside the tree');
+    await waitFor("document.querySelector('.card[data-path=\"Album/Chapter 2/deep\"] .picture')");
+    await evaluate("document.querySelector('.card[data-path=\"Album/Chapter 2/deep\"] .picture').click()");
+    await currentVisible('Album/Chapter 2/deep');
+    assert.ok((await expanded()).includes('Album/Chapter 2'), 'Deeper navigation expands the path to the destination');
+    await evaluate("document.querySelector('#item-path a[title=\"Album\"]').click()");
+    await currentVisible('Album');
+
+    // An obsolete ancestor request cannot reveal or focus a folder left behind.
+    const delayed = 'Names/' + readdirSync(join(fixtureRoot, 'Names'))[0];
+    await call('Fetch.enable', {patterns:[{urlPattern:'*/api/folder*'}]});
+    browser.network.folders = true;
+    await evaluate(`treeApp.folderLink(${JSON.stringify(delayed)}).click()`);
+    await waitFor('treeApp.tree.pending.has("Names")');
+    for (let attempt=0; !browser.held.length && attempt<160; attempt++) await browser.pause(50);
+    assert.ok(browser.held.length, 'Ancestor discovery is held in flight');
+    await evaluate("treeApp.folderLink('Single').click()");
+    await currentVisible('Single');
+    browser.network.folders = false;
+    for (const requestId of browser.held.splice(0)) await call('Fetch.continueRequest', {requestId}).catch(()=>{});
+    await call('Fetch.disable');
+    await waitFor('!treeApp.tree.pending.size && !treeApp.grid.loadingFolder');
+    assert.equal(await evaluate('treeApp.tree.focused'), 'Single', 'Late ancestor discovery keeps the latest location selected');
+    assert.equal(await evaluate('document.activeElement.id'), 'filter');
+
+    // A failed ancestor records the reached path; reopening retries the destination.
+    await open('/?folder=Single');
+    await attach();
+    await currentVisible('Single');
+    await call('Fetch.enable', {patterns:[{urlPattern:'*/api/folder?path=Names&*'}]});
+    browser.network.folders = true;
+    await evaluate(`treeApp.folderLink(${JSON.stringify(delayed)}).click()`);
+    await waitFor('treeApp.tree.pending.has("Names")');
+    for (let attempt=0; !browser.held.length && attempt<160; attempt++) await browser.pause(50);
+    assert.equal(browser.held.length, 1, 'Only ancestor discovery is held');
+    await call('Fetch.fulfillRequest', {requestId:browser.held.shift(), responseCode:404,
+        responseHeaders:[{name:'Content-Type', value:'application/json'}], body:Buffer.from('{"error":"Unreadable"}').toString('base64')});
+    await waitFor('treeApp.tree.errors.has("Names") && !treeApp.tree.pending.size');
+    assert.equal(await evaluate('treeApp.tree.revealed'), 'Names', 'An unreachable destination is not recorded as revealed');
+    const ancestorRequests = () => folderRequests().filter(url => new URL(url).searchParams.get('path') === 'Names').length;
+    const failedRequests = ancestorRequests();
+    browser.network.folders = false;
+    await call('Fetch.disable');
+    await click('folders-toggle');
+    await click('folders-toggle');
+    await currentVisible(delayed);
+    assert.equal(await evaluate('treeApp.tree.revealed'), delayed);
+    assert.equal(ancestorRequests(), failedRequests + 1, 'Reopening retries the failed ancestor once');
 
     // Thousands of siblings use a small DOM and retain scroll and focus when hidden.
     const large = join(fixtureRoot, 'Tree test');
@@ -209,6 +278,27 @@ export async function run(browser, {first, last, fixtureRoot}) {
     await nativeKey('End', 35);
     assert.equal(await evaluate('document.activeElement.closest(".tree-row").dataset.path'), 'Tree test/Folder 2399', 'Keyboard navigation reaches an unmounted row');
     await screenshot('tree-large');
+
+    // Navigation scrolls to an unmounted row, including navigation while hidden and history.
+    await evaluate("document.getElementById('grid-viewport').focus(); treeApp.folderLink('Tree test/Folder 1200').click()");
+    await currentVisible('Tree test/Folder 1200');
+    assert.equal(await evaluate('treeApp.tree.focused'), 'Tree test/Folder 1200');
+    assert.equal(await evaluate('document.activeElement.id'), 'grid-viewport');
+    await click('folders-toggle');
+    await evaluate("treeApp.folderLink('Tree test/Folder 2300').click()");
+    await waitFor("treeApp.state.folder === 'Tree test/Folder 2300'");
+    assert.ok(await evaluate('treeApp.tree.pane.hidden'));
+    await click('folders-toggle');
+    await currentVisible('Tree test/Folder 2300');
+    await evaluate('history.back()');
+    await currentVisible('Tree test/Folder 1200');
+    await evaluate('history.forward()');
+    await currentVisible('Tree test/Folder 2300');
+    await open('/?folder=Tree+test%2FFolder+2300');
+    await attach();
+    await currentVisible('Tree test/Folder 2300');
+    assert.ok(await evaluate("document.querySelectorAll('#folder-tree li').length < 45"), 'Revealing distant locations retains tree virtualization');
+    await screenshot('tree-location-revealed');
 
     // Narrow navigation overlays the image and dismisses without an extra mode.
     await call('Emulation.setDeviceMetricsOverride', {width: 320, height: 844, deviceScaleFactor: 1, mobile: true});

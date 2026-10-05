@@ -545,9 +545,13 @@ input[type=search] {
 
 .folder-tree {
     --tree-width: 240px;
+    --tree-min-width: 180px;
+    --tree-max-width: 600px;
+    --workspace-min-width: 320px;
     --tree-indent: 20px;
-    width: var(--tree-width);
-    flex: 0 0 var(--tree-width);
+    position: relative;
+    width: clamp(var(--tree-min-width), var(--tree-width), min(var(--tree-max-width), calc(100vw - var(--workspace-min-width))));
+    flex: 0 0 auto;
     display: flex;
     flex-direction: column;
     overflow: hidden;
@@ -555,6 +559,19 @@ input[type=search] {
     min-height: 0;
     background: var(--color-surface);
     border-right: 1px solid var(--color-border-subtle);
+}
+
+.sidebar-resizer {
+    position: absolute;
+    z-index: 1;
+    inset: 0 0 0 auto;
+    width: 6px;
+    cursor: col-resize;
+    touch-action: none;
+}
+
+.sidebar-resizer:hover, .sidebar-resizer:focus-visible {
+    background: var(--color-border);
 }
 
 #folder-navigation {
@@ -577,7 +594,6 @@ input[type=search] {
     align-items: center;
     width: 100%;
     height: var(--control-height);
-    min-width: calc(var(--depth) * var(--tree-indent) + 140px);
     padding-left: calc(var(--depth) * var(--tree-indent));
 }
 
@@ -605,10 +621,12 @@ input[type=search] {
     border-radius: var(--radius);
 }
 
-.tree-row > a > span {
+.tree-label {
+    flex: 1;
+    min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
-    white-space: nowrap;
+    white-space: pre;
 }
 
 .tree-row > a:hover {
@@ -660,6 +678,7 @@ input[type=search] {
 
 @media (max-width: 700px) {
     .folder-tree {
+        --workspace-min-width: 32px;
         position: absolute;
         z-index: 3;
         inset: 0 auto 0 0;

@@ -9,6 +9,7 @@ import {ImageViewer} from './static/viewer/image-viewer.js';
 import {MetadataPanel} from './static/ui/metadata.js';
 import {PreviewLoader} from './static/ui/preview-loader.js';
 import {SortControls} from './static/ui/sort-controls.js';
+import {SidebarResizer} from './static/ui/sidebar-resizer.js';
 import {currentFolder, filename, imageSize, readingLayout, readState, stateUrl, ScreenMode, ReadingLayout, FolderLayout, ViewerEntry, sortSettings, sortKey} from './static/shared/state.js';
 
 const FILTER_DELAY = 150;
@@ -43,6 +44,7 @@ class GalleryApp {
             select: (path, opener) => this.navigate(this.treeDestination(path), false, ViewerEntry.TOP, opener),
             visibilityChanged: open => this.info.setVisible(open),
         });
+        new SidebarResizer(byId('folder-tree'), byId('sidebar-resizer'));
         this.info = new MetadataPanel(byId('item-info'), () => this.tree.setOpen(true, false));
         history.scrollRestoration = 'manual';
         this.sortControls = new SortControls(byId('sort-popover'), changes => this.navigate(changes));

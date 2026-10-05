@@ -1,6 +1,7 @@
 import {getFolder, onFolderListing} from '../data/api.js';
 import {byId, element, plainClick} from '../shared/dom.js';
 import {setIconButton} from '../shared/icons.js';
+import {namePrefix} from '../shared/name-prefix.js';
 import {currentFolder, joinPath, parentPath, relatedScope, ScreenMode, sortKey} from '../shared/state.js';
 
 const OVERSCAN = 3;
@@ -17,6 +18,7 @@ export class FolderTree {
         this.narrow = matchMedia('(max-width: 700px)');
         this.rowHeight = parseFloat(getComputedStyle(this.pane).getPropertyValue('--control-height'));
         this.listings = new Map();
+        this.prefixes = new Map();
         this.expanded = new Set();
         this.pending = new Map();
         this.errors = new Set();
@@ -24,10 +26,11 @@ export class FolderTree {
         this.mounted = new Map();
         this.focused = '';
         this.position = {top: 0, left: 0};
-        this.initialized = false;
+        this.revealed = undefined;
         onFolderListing((path, folders) => {
             if (this.listings.get(path) === folders) return;
             this.listings.set(path, folders);
+            this.prefixes.set(path, namePrefix(folders));
             if (!folders.length) this.expanded.delete(path);
             if (!this.pane.hidden) this.rebuild();
         });
@@ -50,12 +53,16 @@ export class FolderTree {
     canExpand(path) { return !this.listings.has(path) || this.listings.get(path).length > 0; }
 
     update(state, rootName) {
+        const previous = this.state && this.current;
         this.state = state;
         const key = JSON.stringify([state.mode, this.current, state.layout, state.size, state.compact, sortKey(state), rootName]);
         this.rootName = rootName;
         if (key === this.key) return;
         this.key = key;
-        if (!this.pane.hidden) this.rebuild();
+        if (!this.pane.hidden) {
+            this.rebuild();
+            if (this.current !== previous) this.revealPath();
+        }
     }
 
     async setOpen(open, focus = true) {
@@ -69,36 +76,37 @@ export class FolderTree {
         this.toggle.setAttribute('aria-expanded', String(open));
         if (!this.narrow.matches) sessionStorage.setItem('foldersOpen', open ? '1' : '0');
         if (!open) { if (focus) this.toggle.focus({preventScroll: true}); return; }
-        const first = !this.initialized;
-        this.initialized = true;
         this.rebuild();
         this.viewport.scrollTop = this.position.top;
         this.viewport.scrollLeft = this.position.left;
-        if (first) {
-            const path = await this.revealInitialPath();
-            if (focus && !this.pane.hidden && document.activeElement === this.toggle) this.focusRow(path, true);
-        } else {
-            if (focus) this.focusRow(this.focused);
-            for (const path of this.expanded) {
-                if (this.pane.hidden) break;
-                if (!this.listings.has(path)) await this.load(path);
-            }
+        if (this.current !== this.revealed) {
+            const path = await this.revealPath();
+            if (path !== undefined && focus && !this.pane.hidden && document.activeElement === this.toggle) this.focusRow(path);
+        } else if (focus) this.focusRow(this.focused);
+        for (const path of this.expanded) {
+            if (this.pane.hidden) break;
+            if (!this.listings.has(path)) await this.load(path);
         }
     }
 
-    async revealInitialPath() {
+    async revealPath() {
         let path = '';
         const current = this.current;
         const parts = current.split('/').filter(Boolean);
         this.expanded.add(path);
         await this.load(path);
         for (const name of parts) {
-            if (this.pane.hidden || !this.listings.get(path)?.includes(name)) break;
+            if (this.pane.hidden || this.current !== current) return;
+            if (!this.listings.get(path)?.includes(name)) break;
             this.expanded.add(path);
             path = joinPath(path, name);
             if (path !== current) await this.load(path);
         }
+        if (this.pane.hidden || this.current !== current) return;
+        this.revealed = path;
+        this.focused = path;
         this.rebuild();
+        this.mountedRow(path)?.scrollIntoView({block: 'nearest', inline: 'nearest'});
         return path;
     }
 
@@ -129,7 +137,9 @@ export class FolderTree {
         for (const [path, task] of this.pending) if (relatedScope(path, scope)) {
             task.controller.abort(); this.pending.delete(path);
         }
-        for (const path of this.listings.keys()) if (relatedScope(path, scope)) this.listings.delete(path);
+        for (const path of this.listings.keys()) if (relatedScope(path, scope)) {
+            this.listings.delete(path); this.prefixes.delete(path);
+        }
         for (const path of this.errors) if (relatedScope(path, scope)) this.errors.delete(path);
         if (this.pane.hidden) return;
         for (const path of this.expanded) {
@@ -221,6 +231,28 @@ export class FolderTree {
             const link = node.querySelector('a');
             if (link) link.tabIndex = row.path === this.focused ? 0 : -1;
         }
+        this.updateLabels();
+    }
+
+    updateLabels() {
+        const updates = [];
+        for (const [index, node] of this.mounted) {
+            const row = this.rows[index];
+            const prefix = this.prefixes.get(row.parent?.path) || 0;
+            if (row.status || !prefix) continue;
+            const label = node.querySelector('.tree-label');
+            if (label.fullWidth === undefined) {
+                const range = document.createRange();
+                range.selectNodeContents(label);
+                label.fullWidth = range.getBoundingClientRect().width;
+            }
+            const fits = label.fullWidth <= label.getBoundingClientRect().width;
+            updates.push([label, fits ? row.name : '…' + row.name.slice(prefix)]);
+        }
+        // Finish measuring before changing any text, so rows share one layout pass.
+        for (const [label, text] of updates) {
+            if (label.firstChild.data !== text) label.firstChild.data = text;
+        }
     }
 
     scheduleRows() {
@@ -253,12 +285,13 @@ export class FolderTree {
         link.href = this.destination(row.path);
         link.title = row.path || this.rootName;
         link.setAttribute('role', 'treeitem');
+        link.setAttribute('aria-label', row.name);
         link.setAttribute('aria-level', row.depth + 1);
         link.setAttribute('aria-posinset', row.sibling + 1);
         link.setAttribute('aria-setsize', row.count);
         if (row.path === this.current) link.setAttribute('aria-current', 'page');
         if (expandable) link.setAttribute('aria-expanded', String(this.expanded.has(row.path)));
-        link.append(element('span', '', row.name));
+        link.append(element('span', 'tree-label', row.name));
         node.append(disclosure, link);
         return node;
     }
@@ -276,10 +309,14 @@ export class FolderTree {
         }
     }
 
+    mountedRow(path) {
+        return [...this.mounted.values()].find(node => node.classList.contains('tree-row') && node.dataset.path === path);
+    }
+
     focusRow(path, reveal = false) {
         this.focused = path;
         this.renderRows();
-        const node = [...this.mounted.values()].find(node => node.classList.contains('tree-row') && node.dataset.path === path);
+        const node = this.mountedRow(path);
         node?.querySelector('a').focus({preventScroll: true});
         if (reveal) node?.scrollIntoView({block: 'nearest', inline: 'nearest'});
     }
