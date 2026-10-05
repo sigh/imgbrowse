@@ -1,6 +1,7 @@
 """Optional Chrome + Node 22+ smoke test against a temporary image collection."""
 
 import argparse
+import io
 import os
 import shutil
 import subprocess
@@ -16,9 +17,10 @@ from urllib.request import Request, urlopen
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from PIL import Image, ImageDraw
-from PIL.ExifTags import Base, GPS, IFD
+from PIL.ExifTags import GPS, IFD, Base
 
-from image_browser.server import GalleryHandler, GalleryServer, STATIC_FILES
+from image_browser.http.assets import STATIC_FILES
+from image_browser.http.server import GalleryHandler, GalleryServer
 
 
 def chrome_executable():
@@ -149,6 +151,18 @@ def main():
                     (large / f'page{number}.jpg').write_bytes(data)
                 server.gallery.invalidate('')
                 subprocess.run(['node', str(Path(__file__).with_name('performance.mjs')),
+                                debug_port, base], check=True, timeout=60)
+                # Exercise a real archive larger than the original listing budget,
+                # with membership and ordered-view retention deliberately disabled.
+                buffer = io.BytesIO()
+                Image.new('RGB', (2, 2), 'steelblue').save(buffer, 'JPEG')
+                with zipfile.ZipFile(root / 'Large.cbz', 'w', zipfile.ZIP_DEFLATED) as archive:
+                    for number in range(31000):
+                        archive.writestr(f'page{number:05}.jpg', buffer.getvalue())
+                server.gallery.invalidate('Large.cbz')
+                server.gallery.catalog.indexes.max_weight = 1
+                server.gallery.catalog.views.max_weight = 1
+                subprocess.run(['node', str(Path(__file__).with_name('large-catalog.mjs')),
                                 debug_port, base], check=True, timeout=60)
         finally:
             if browser is not None:

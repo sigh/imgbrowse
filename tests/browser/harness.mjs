@@ -13,14 +13,16 @@ export async function connectBrowser(port, base, screenshots = '') {
     const exceptions = [];
     const requests = [];
     const held = [];
-    const network = {images: false, walk: false, folders: false, metadata: false};
+    const network = {images: false, walk: false, folders: false, metadata:false, entries:false, order:false};
     socket.addEventListener('message', event => {
         const message = JSON.parse(event.data);
         if (message.method === 'Network.requestWillBeSent') requests.push(message.params.request.url);
         if (message.method === 'Fetch.requestPaused') {
             const {requestId, request} = message.params;
             if ((network.images && request.url.includes('/image?')) || (network.walk && request.url.includes('/api/walk'))
-                || (network.folders && request.url.includes('/api/folder')) || (network.metadata && request.url.includes('/api/metadata'))) held.push(requestId);
+                || (network.folders && request.url.includes('/api/folder'))
+                || (network.entries && request.url.includes('/api/folder/entries'))
+                || (network.order && request.url.includes('/api/folder?') && new URL(request.url).searchParams.get('sort') === 'modified') || (network.metadata && request.url.includes('/api/metadata'))) held.push(requestId);
             else call('Fetch.continueRequest', {requestId}).catch(() => {});
         }
         if (message.method === 'Runtime.exceptionThrown') exceptions.push(message.params.exceptionDetails);
@@ -126,7 +128,7 @@ export async function connectBrowser(port, base, screenshots = '') {
 
     async function start(path = '/') {
         await call('Fetch.disable');
-        network.images = network.walk = network.folders = network.metadata = false;
+        network.images = network.walk = network.folders = network.metadata = network.entries = network.order = false;
         held.length = 0;
         await call('Emulation.setDeviceMetricsOverride', {width:1440,height:900,deviceScaleFactor:1,mobile:false});
         await open('/');

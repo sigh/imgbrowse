@@ -11,6 +11,10 @@ export const ItemType = Object.freeze({FOLDER: 'folder', MEDIA: 'image', FILE: '
 export const joinPath = (parent, name) => parent ? parent + '/' + name : name;
 export const parentPath = path => path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : '';
 export const filename = path => path.split('/').pop();
+export const entryKey = item => JSON.stringify([item.path, item.type]);
+/** A refresh affects its descendants and projections retained by ancestors. */
+export const relatedScope = (path, scope) => !scope || path === scope || path.startsWith(scope + '/')
+    || !path || scope.startsWith(path + '/');
 export const currentFolder = state => state.mode === ScreenMode.BROWSE ? state.folder : state.collection;
 
 /** One normalized ordering identity for URLs, requests, caches, and readers. */

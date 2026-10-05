@@ -300,7 +300,7 @@ export class ThumbnailStrip {
         const scope = this.scope;
         this.container.setAttribute('aria-busy', 'true');
         try {
-            const change = await this.window.load(edge, scope.signal);
+            const change = await this.window.load(edge, scope.signal, {anchor:this.image});
             if (!change) return;
             const left = this.container.scrollLeft;
             const shifted = edge.reverse ? change.added : change.removed;

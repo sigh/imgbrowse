@@ -91,3 +91,13 @@ test('prefetch uses discovered order and cancels when sorting changes', async ()
     assert.equal(prefetchSignal.aborted, true);
     assert.deepEqual(navigation.paths, []);
 });
+
+test('navigation recovers from a removed selection without needing a stale continuation first', async () => {
+    const {navigation, selections} = navigator(async options => {
+        if (options.anchor) throw Object.assign(new Error('removed'), {code:'invalid_request'});
+        return page(['Album/1.jpg']);
+    });
+    await navigation.request(false, true, ViewerEntry.TOP);
+    assert.deepEqual(selections, [['Album/1.jpg', ViewerEntry.TOP]]);
+    assert.equal(navigation.outcome, null);
+});

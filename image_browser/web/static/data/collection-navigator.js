@@ -1,6 +1,6 @@
 import {TaskScope} from '../shared/dom.js';
 import {isVideo} from '../shared/media-kind.js';
-import {sortKey, sortSettings, ViewerEntry} from '../shared/state.js';
+import {relatedScope, sortKey, sortSettings, ViewerEntry} from '../shared/state.js';
 
 export const NavigationOutcome = Object.freeze({
     FINDING:'finding', ONLY:'only', ERROR:'error', EMPTY:'empty', BOUNDARY:'boundary',
@@ -10,11 +10,20 @@ const NEARBY_COUNT = 16;
 
 /** Collection discovery, movement and prefetching; no DOM or display messages. */
 export class CollectionNavigator {
-    constructor({walk, loadOriginal, select, changed, loadingDelay = 700}) {
+    constructor({walk, loadOriginal, select, changed, subscribeInvalidation = () => {}, loadingDelay = 700}) {
         Object.assign(this, {walk, loadOriginal, select, changed, loadingDelay});
         this.paths = [];
         this.boundary = null;
         this.singleImage = false;
+        subscribeInvalidation(({scope, root, ordering}) => {
+            if (!this.state || (scope !== undefined ? !relatedScope(this.state.collection, scope)
+                : root !== this.state.collection || sortKey(ordering) !== sortKey(this.state))) return;
+            this.paths = [];
+            this.singleImage = false;
+            this.clearOutcome();
+            this.stopPrefetch();
+            this.changed();
+        });
     }
 
     get moving() { return Boolean(this.moveScope); }
@@ -58,6 +67,8 @@ export class CollectionNavigator {
             this.walk({...sortSettings(this.state), root:collection, anchor:image, reverse, limit:NEARBY_COUNT}, signal)
                 .then(result => {
                     signal.throwIfAborted();
+                    const other = results.get(!reverse);
+                    if (other && Object.entries(result.revisions || {}).some(([path, revision]) => other.revisions?.[path] && other.revisions[path] !== revision)) results.delete(!reverse);
                     results.set(reverse, result);
                     const before = results.get(true), after = results.get(false);
                     this.setPaths([...(before ? [...before.images].reverse() : []), image, ...(after?.images || [])], collection);
@@ -118,8 +129,19 @@ export class CollectionNavigator {
         let cursor = null;
         try {
             do {
-                const result = await this.walk({...sortSettings(this.state), root:this.state.collection,
-                    anchor:wrap ? null : this.state.image, reverse, cursor, limit:1}, scope.signal);
+                let result;
+                const options = {...sortSettings(this.state), root:this.state.collection,
+                    anchor:wrap ? null : this.state.image, reverse, cursor, limit:1};
+                try { result = await this.walk(options, scope.signal); }
+                catch (error) {
+                    if (error.code !== 'stale_view'
+                        && !(options.anchor && ['invalid_request','not_found'].includes(error.code))) throw error;
+                    try { result = await this.walk({...options, cursor:null}, scope.signal); }
+                    catch (error) {
+                        if (!['invalid_request','not_found'].includes(error.code) || !options.anchor) throw error;
+                        result = await this.walk({...options, anchor:null, cursor:null}, scope.signal);
+                    }
+                }
                 scope.signal.throwIfAborted();
                 warning ||= result.warnings.length > 0;
                 if (result.images.length) {

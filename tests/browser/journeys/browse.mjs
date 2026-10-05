@@ -119,8 +119,7 @@ export async function run(browser, fixtures) {
     await click('folders-toggle');
 
     // Filtering reuses the name index; only missing complete entries need a page.
-    const folderRequests = () => requests.filter(url => url.includes('/api/folder')
-        && !new URL(url).searchParams.has('names')).length;
+    const folderRequests = () => requests.filter(url => new URL(url).pathname === '/api/folder').length;
     const countBeforeFilter = folderRequests();
     await evaluate("{ const input=document.getElementById('filter'); input.value='root12'; input.dispatchEvent(new Event('input')); }");
     await waitFor("document.getElementById('summary').textContent.includes('11 matches')");

@@ -1,1 +1,1 @@
-"""Image Browser server components."""
+"""Read-only image and video browser application."""

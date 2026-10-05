@@ -49,7 +49,8 @@ def check(base, root):
             assert response.status == 200 and response.read(), path
     with get('/api/folder?path=') as response:
         listing = json.load(response)
-        assert listing['folders'] == ['book.cbz'] and listing['images'] == ['page.jpg', 'video.webm']
+        assert listing['items'] == [{'name':'book.cbz', 'type':'folder'},
+                                    {'name':'page.jpg', 'type':'image'}, {'name':'video.webm', 'type':'image'}]
     with get('/api/location?path=page.jpg') as response:
         assert json.load(response)['filesystem_path'] == str(root / 'page.jpg')
     with get('/api/metadata?path=page.jpg') as response:
@@ -57,11 +58,10 @@ def check(base, root):
     for path in ('page.jpg', 'book.cbz/Chapter/page.jpg'):
         with get('/image?path=' + path) as response:
             assert response.read() == (root / 'page.jpg').read_bytes()
-        with get('/thumbnail?path=' + path) as response:
-            with Image.open(io.BytesIO(response.read())) as thumbnail:
-                assert thumbnail.format == 'JPEG'
+        with get('/thumbnail?path=' + path) as response, Image.open(io.BytesIO(response.read())) as thumbnail:
+            assert thumbnail.format == 'JPEG'
     with get('/api/folder?path=book.cbz') as response:
-        assert json.load(response)['folders'] == ['Chapter']
+        assert json.load(response)['items'] == [{'name':'Chapter', 'type':'folder'}]
     with get('/api/video?path=video.webm') as response:
         assert json.load(response)['duration'] > 0
     with get('/thumbnail?path=video.webm') as response:

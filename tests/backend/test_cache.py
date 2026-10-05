@@ -8,13 +8,38 @@ from concurrent.futures import Future, ThreadPoolExecutor
 from pathlib import Path
 from unittest.mock import patch
 
-from image_browser.archives import ArchiveCache
-from image_browser.cache import SharedCache
-from image_browser.catalog import Gallery
-from image_browser.work import Cancelled
+from image_browser.app import Gallery
+from image_browser.runtime.cache import SharedCache
+from image_browser.runtime.work import Cancelled
+from image_browser.storage.archives import ArchiveCache
 
 
 class CacheTests(unittest.TestCase):
+    def test_error_retention_is_an_explicit_policy(self):
+        cache = SharedCache(1024)
+        with self.assertRaises(ValueError):
+            cache.get('key', lambda: (_ for _ in ()).throw(ValueError('bad')))
+        self.assertEqual(cache.get('key', lambda: 'recovered'), 'recovered')
+        cache = SharedCache(1024, cache_errors=lambda error: isinstance(error, ValueError))
+        with self.assertRaises(ValueError):
+            cache.get('key', lambda: (_ for _ in ()).throw(ValueError('bad')))
+        with self.assertRaisesRegex(ValueError, 'bad'):
+            cache.get('key', lambda: self.fail('A retained failure must not reload'))
+
+    def test_scoped_invalidation_preserves_unrelated_pending_load(self):
+        cache = SharedCache(100)
+        entered, release = threading.Event(), threading.Event()
+        def load():
+            entered.set(); release.wait(2)
+            return b'alive'
+        with ThreadPoolExecutor(1) as pool:
+            pending = pool.submit(cache.get, 'B', load, len)
+            self.assertTrue(entered.wait(1))
+            cache.invalidate(lambda key: key == 'A')
+            release.set()
+            self.assertEqual(pending.result(), b'alive')
+        self.assertEqual(cache.get('B', lambda: self.fail('Unrelated work was discarded')), b'alive')
+
     def test_cancelled_load_does_not_unregister_its_replacement(self):
         cache = SharedCache(100)
         entered, release = threading.Event(), threading.Event()
@@ -34,7 +59,7 @@ class CacheTests(unittest.TestCase):
                 replacements.append(pool.submit(cache.get, 'key', replacement))
                 self.assertTrue(entered.wait(2))
             first.add_done_callback(retry)
-            with patch('image_browser.cache.Future', side_effect=[first, Future()]):
+            with patch('image_browser.runtime.cache.Future', side_effect=[first, Future()]):
                 old = pool.submit(cache.get, 'key', cancelled)
                 try:
                     with self.assertRaises(Cancelled):
@@ -87,7 +112,7 @@ class CacheTests(unittest.TestCase):
             for name in ('1.jpg', '2.jpg', '3.jpg'):
                 (Path(root) / name).write_bytes(b'fixture')
             gallery = Gallery(root)
-            with patch.object(gallery, '_listing', wraps=gallery._listing) as scan:
+            with patch.object(gallery.storage, 'children', wraps=gallery.storage.children) as scan:
                 gallery.listing('')
                 for _ in range(10):
                     gallery.walk(anchor='2.jpg', limit=1)
@@ -106,7 +131,7 @@ class CacheTests(unittest.TestCase):
                 for i in range(12):
                     archive.writestr(f'{i}.jpg', b'fixture')
             cache = ArchiveCache()
-            with patch('image_browser.archives.zipfile.ZipFile', wraps=zipfile.ZipFile) as open_archive:
+            with patch('image_browser.storage.archives.zipfile.ZipFile', wraps=zipfile.ZipFile) as open_archive:
                 reader = cache.get(file)
                 for i in range(12):
                     self.assertIs(cache.get(file), reader)
@@ -118,7 +143,7 @@ class CacheTests(unittest.TestCase):
 
 class SchedulingTests(unittest.TestCase):
     def test_background_work_leaves_capacity_for_navigation(self):
-        from image_browser.work import WorkGate, request_work
+        from image_browser.runtime.work import WorkGate, request_work
 
         gate = WorkGate(capacity=2, background=1)
         running, release, demand_done = threading.Event(), threading.Event(), threading.Event()
@@ -140,7 +165,7 @@ class SchedulingTests(unittest.TestCase):
             job.result(); request.result()
 
     def test_cancelled_queued_work_does_not_run(self):
-        from image_browser.work import Cancelled, WorkGate, request_work
+        from image_browser.runtime.work import Cancelled, WorkGate, request_work
 
         gate = WorkGate(capacity=1, background=1)
         stop = threading.Event()

@@ -3,7 +3,6 @@
 import re
 from bisect import bisect_left, bisect_right
 from dataclasses import dataclass
-from datetime import datetime
 from functools import cached_property, cmp_to_key
 
 
@@ -65,14 +64,3 @@ class Ordering:
 
 
 DEFAULT_ORDERING = Ordering()
-
-
-def archive_modified(info):
-    """Compare valid ZIP local calendar dates without applying a host timezone."""
-    if info is None:
-        return None
-    try:
-        date = datetime(*info.date_time)
-        return int(date.strftime('%Y%m%d%H%M%S'))
-    except (ValueError, TypeError, OverflowError):
-        return None

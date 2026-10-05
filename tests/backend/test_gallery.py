@@ -6,7 +6,8 @@ from unittest.mock import patch
 
 from PIL import Image
 
-from image_browser.catalog import WALK_BUDGET, Gallery
+from image_browser.app import Gallery
+from image_browser.catalog.limits import WALK_BUDGET
 
 
 class GalleryTests(unittest.TestCase):
@@ -47,7 +48,7 @@ class GalleryTests(unittest.TestCase):
         self.image('album/chapter1/a.jpg')
         anchor = self.image('album/chapter99/b.jpg')
         self.image('album/chapter99/c.jpg')
-        with patch.object(self.gallery, 'listing', wraps=self.gallery.listing) as listing:
+        with patch.object(self.gallery.catalog, 'snapshot', wraps=self.gallery.catalog.snapshot) as listing:
             result = self.gallery.walk(root='album', anchor=anchor, limit=1)
             self.assertEqual(result['images'], ['album/chapter99/c.jpg'])
             self.assertEqual([call.args[0] for call in listing.call_args_list], ['album/chapter99'])
@@ -56,14 +57,14 @@ class GalleryTests(unittest.TestCase):
     def test_walk_shares_folder_names_only_when_already_read(self):
         self.image('album/page.jpg')
         self.image('album/chapter/page.jpg')
-        with patch.object(self.gallery, 'listing', wraps=self.gallery.listing) as listing:
+        with patch.object(self.gallery.catalog, 'snapshot', wraps=self.gallery.catalog.snapshot) as listing:
             result = self.gallery.walk(root='album', limit=1)
             self.assertEqual(result['folders'], ['chapter'])
             self.assertEqual([call.args[0] for call in listing.call_args_list], ['album'])
         self.assertEqual(self.gallery.walk(root='album/chapter')['folders'], [])
 
     def test_failed_walk_listing_does_not_report_a_leaf(self):
-        with patch.object(self.gallery, 'listing', side_effect=PermissionError('Unreadable')):
+        with patch.object(self.gallery.catalog, 'snapshot', side_effect=PermissionError('Unreadable')):
             result = self.gallery.walk()
         self.assertNotIn('folders', result)
         self.assertEqual(result['warnings'], [{'path': '', 'message': 'Unreadable'}])
@@ -71,7 +72,7 @@ class GalleryTests(unittest.TestCase):
     def test_preview_never_backtracks_but_viewer_does(self):
         (self.root / 'series/first/leaf').mkdir(parents=True)
         image = self.image('series/second/1.jpg')
-        with patch.object(self.gallery, 'listing', wraps=self.gallery.listing) as listing:
+        with patch.object(self.gallery.catalog, 'snapshot', wraps=self.gallery.catalog.snapshot) as listing:
             self.assertIsNone(self.gallery.representative('series'))
             self.assertEqual([call.args[0] for call in listing.call_args_list],
                              ['series', 'series/first', 'series/first/leaf'])
@@ -85,13 +86,13 @@ class GalleryTests(unittest.TestCase):
     def test_walk_pages_but_cover_completes_its_first_branch(self):
         for number in range(WALK_BUDGET + 10):
             (self.root / f'empty{number}').mkdir()
-        with patch.object(self.gallery, 'listing', wraps=self.gallery.listing) as listing:
+        with patch.object(self.gallery.catalog, 'snapshot', wraps=self.gallery.catalog.snapshot) as listing:
             result = self.gallery.walk()
             self.assertLessEqual(listing.call_count, WALK_BUDGET)
             self.assertIsNotNone(result['cursor'])
         deep = '/'.join(['deep'] * (WALK_BUDGET + 2))
         self.image(deep + '/1.jpg')
-        with patch.object(self.gallery, 'listing', wraps=self.gallery.listing) as listing:
+        with patch.object(self.gallery.catalog, 'snapshot', wraps=self.gallery.catalog.snapshot) as listing:
             result = self.gallery.representative('deep')
             self.assertEqual(listing.call_count, WALK_BUDGET + 2)
             self.assertEqual(result, deep + '/1.jpg')

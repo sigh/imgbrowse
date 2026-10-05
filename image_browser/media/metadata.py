@@ -1,11 +1,14 @@
 """On-demand metadata for one visible item, without traversing descendants."""
 
 from contextlib import ExitStack
-from datetime import datetime, timezone
+from datetime import datetime
 from math import isfinite
 
 from PIL import Image
-from PIL.ExifTags import Base, GPS, IFD
+from PIL.ExifTags import GPS, IFD, Base
+
+from image_browser.catalog.model import DiskEntry, Timestamp
+from image_browser.runtime.work import Invalidated, check_cancelled
 
 
 def _capture_date(exif):
@@ -14,7 +17,8 @@ def _capture_date(exif):
     if not taken:
         return None
     try:
-        date = datetime.strptime(str(taken), '%Y:%m:%d %H:%M:%S')
+        # A camera date stays timezone-free unless EXIF supplies its offset.
+        date = datetime.strptime(str(taken), '%Y:%m:%d %H:%M:%S')  # noqa: DTZ007
     except ValueError:
         return str(taken)
     offset = exif.get(Base.OffsetTimeOriginal)
@@ -47,28 +51,36 @@ def _gps_location(gps):
         return None
 
 
-def metadata(gallery, relative, image_work, archive_work):
+def metadata(gallery, relative, image_work, archive_work, *, kind=None):
+    valid = gallery.refresh.watch(relative)
     with gallery.directory_work:
-        entry = gallery._locate(relative)
+        entry = gallery.storage.locate(relative)
+    descriptor = gallery.storage.describe(relative, entry=entry, kind=kind)
+    version = (entry.stat.st_dev, entry.stat.st_ino, entry.stat.st_mtime_ns, entry.stat.st_size)
+    facts = gallery.catalog.facts.get(descriptor, valid=valid,
+        expected_version=version if isinstance(descriptor.source, DiskEntry) else None)
     result = {
         'root_path': str(gallery.root),
         'name': relative.rsplit('/', 1)[-1] if relative else gallery.root.name,
         'filesystem_path': str(entry.file),
         'archive_member': entry.inner if entry.archive else None,
-        'modified': datetime.fromtimestamp(entry.stat.st_mtime, timezone.utc).isoformat(),
+        **facts.serialize(),
     }
-    if entry.is_container:
+    if descriptor.type == 'folder':
         result['kind'] = 'archive' if entry.archive and not entry.inner else 'directory'
         listing = gallery.listing(relative, entry=entry)
         result.update(folders=len(listing['folders']), media=len(listing['images']))
         if entry.archive:
             result['archive_size'] = entry.stat.st_size
+            if entry.inner:
+                result['container_modified'] = Timestamp.instant(entry.stat.st_mtime_ns).serialize()
+        if not valid():
+            raise Invalidated('Refreshed during metadata request')
         return result
 
     source = entry.file_source()
     result.update(kind=source.kind, size=source.size)
     if source.member:
-        result['modified'] = datetime(*source.member.date_time).isoformat()
         result['compressed_size'] = source.member.compress_size
     if source.kind == 'image':
         try:
@@ -91,5 +103,9 @@ def metadata(gallery, relative, image_work, archive_work):
                 if location is not None:
                     result['location'] = location
         except (OSError, ValueError, Image.DecompressionBombError) as error:
+            check_cancelled()
             result['metadata_error'] = str(error)
+    check_cancelled()
+    if not valid():
+        raise Invalidated('Refreshed during metadata request')
     return result

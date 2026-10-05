@@ -9,8 +9,8 @@ from unittest.mock import patch
 
 from PIL import Image
 
-from image_browser.sources import MediaSource
-from image_browser.thumbnails import ThumbnailCache
+from image_browser.media.sources import MediaSource
+from image_browser.media.thumbnails import ThumbnailCache
 
 
 class ThumbnailTests(unittest.TestCase):
@@ -27,7 +27,7 @@ class ThumbnailTests(unittest.TestCase):
     def test_thumbnail_reuse_and_file_change(self):
         path = self.root / self.image('page.jpg')
         first = self.cache.get(MediaSource(path, path.stat()))
-        with patch('image_browser.thumbnails.Image.open', side_effect=AssertionError('decoded twice')):
+        with patch('image_browser.media.thumbnails.Image.open', side_effect=AssertionError('decoded twice')):
             self.assertEqual(self.cache.get(MediaSource(path, path.stat())), first)
         timestamp = path.stat().st_mtime_ns
         Image.new('RGB', (20, 20), 'red').save(path)

@@ -10,12 +10,15 @@ readme = "README.md"
 requires-python = ">=3.9"
 dependencies = ["Pillow>=10"]
 
+[project.optional-dependencies]
+test = ["build", "setuptools>=61", "wheel"]
+
 [project.scripts]
 imgbrowse = "image_browser.cli:main"
 
 [tool.setuptools]
-packages = ["image_browser"]
-include-package-data = false
+include-package-data = true
 
-[tool.setuptools.package-data]
-image_browser = ["web/*.html", "web/*.css", "web/*.js", "web/*.svg", "web/static/*/*.js"]
+[tool.setuptools.packages.find]
+include = ["image_browser", "image_browser.*"]
+namespaces = false

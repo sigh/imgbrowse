@@ -6,7 +6,7 @@ import shutil
 import subprocess
 from time import monotonic
 
-from .work import check_cancelled
+from image_browser.runtime.work import check_cancelled
 
 EXTRACTION_TIMEOUT = 10
 

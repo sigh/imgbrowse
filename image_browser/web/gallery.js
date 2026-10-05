@@ -28,7 +28,7 @@ class GalleryApp {
             mediaLink: (image, collection, label, mode) => this.mediaLink(image, collection, label, mode),
             folderLoaded: name => this.folderLoaded(name),
             refresh: () => this.refresh(),
-            showInfo: path => this.info.show(path),
+            showInfo: (path, kind) => this.info.show(path, kind),
         });
         this.viewer = new ImageViewer(this.previews, {
             selectImage: (image, entry) => this.navigate({image}, true, entry),
@@ -95,12 +95,12 @@ class GalleryApp {
         this.refreshing = true;
         this.savePosition();
         try {
-            await refreshScope(currentFolder(this.state));
-            clearOriginals();
-            this.grid.invalidate();
-            this.tree.refresh();
+            const scope = await refreshScope(currentFolder(this.state));
+            clearOriginals(scope);
+            this.grid.invalidate(scope);
+            this.tree.refresh(scope);
             this.render(true, true);
-            this.info.refresh();
+            this.info.refresh(scope);
         } catch (error) {
             this.showError(error);
         } finally {

@@ -140,14 +140,14 @@ export async function run(browser, {first, second, last}) {
     await change('order', 'desc');
     await waitFor(app(`app.grid.items.map(item => item.path).join('|') === ${JSON.stringify([first, second, last].join('|'))}`));
     const listing = await evaluate("fetch('/api/folder?path=Album&sort=modified&order=desc').then(response => response.json())");
-    assert.deepEqual(listing.folders, ['Chapter 1', 'Chapter 2']);
+    assert.deepEqual(listing.items.filter(item => item.type === 'folder').map(item => item.name), ['Chapter 1', 'Chapter 2']);
     assert.deepEqual(listing.natural_folders, ['Chapter 1', 'Chapter 2']);
     const invalid = await evaluate("fetch('/api/folder?sort=capture').then(response => response.status)");
     assert.equal(invalid, 400);
     await change('order', 'asc');
     await waitFor(app(`app.grid.items.map(item => item.path).join('|') === ${JSON.stringify([last, second, first].join('|'))}`));
     const ascending = await evaluate("fetch('/api/folder?path=Album&sort=modified').then(response => response.json())");
-    assert.deepEqual(ascending.folders, ['Chapter 2', 'Chapter 1']);
+    assert.deepEqual(ascending.items.filter(item => item.type === 'folder').map(item => item.name), ['Chapter 2', 'Chapter 1']);
     assert.deepEqual(ascending.natural_folders, ['Chapter 1', 'Chapter 2'], 'Tree publications retain natural folder order');
     await change('sort', 'natural');
     await waitFor(app(`app.grid.items.map(item => item.path).join('|') === ${JSON.stringify([first, second, last].join('|'))}`));

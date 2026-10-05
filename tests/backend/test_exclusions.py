@@ -12,8 +12,8 @@ from urllib.parse import urlencode
 
 from PIL import Image
 
-from image_browser.catalog import Gallery
-from image_browser.server import GalleryServer
+from image_browser.app import Gallery
+from image_browser.http.server import GalleryServer
 
 
 class ExclusionTests(unittest.TestCase):

@@ -3,7 +3,7 @@ import {element, TaskScope} from '../shared/dom.js';
 import {loadOriginal} from '../data/media-cache.js';
 import {isVideo, canRetryMedia} from '../shared/media-kind.js';
 import {CollectionWindow} from '../data/collection-window.js';
-import {filename, ImageSize, ReadingLayout, ViewerEntry, sortKey, sortSettings} from '../shared/state.js';
+import {filename, ImageSize, ItemType, ReadingLayout, ViewerEntry, sortKey, sortSettings} from '../shared/state.js';
 import {imageScale} from './viewer-viewport.js';
 
 const PAGE_SIZE = 8;
@@ -101,7 +101,7 @@ export class ContinuousReader {
             while (pending.length && !scope.signal.aborted) {
                 const item = pending.shift();
                 try {
-                    const info = await getMetadata(item.path, item.work.signal);
+                    const info = await getMetadata(item.path, item.work.signal, {kind:ItemType.MEDIA});
                     item.work.signal.throwIfAborted();
                     if (info.width && info.height) {
                         const point = this.point();
@@ -236,15 +236,30 @@ export class ContinuousReader {
         if (!this.window.canLoad(edge)) return;
         const scope = this.scope;
         try {
-            const change = await this.window.load(edge, scope.signal);
+            const change = await this.window.load(edge, scope.signal, {anchor:this.currentPath});
             if (!change) return;
             const point = this.point();
-            const added = change.added.map(path => this.createItem(path));
-            if (edge.reverse) { this.items.unshift(...added); this.failures[0].after(...added.map(item => item.row)); }
-            else { this.items.push(...added); this.failures[1].before(...added.map(item => item.row)); }
-            if (change.removed.length) {
-                const retired = this.items.splice(edge.reverse ? this.paths.length : 0, change.removed.length);
-                for (const item of retired) { this.unmount(item); item.work.dispose(); item.row.remove(); }
+            let added;
+            if (change.reconciled) {
+                const retained = new Map(this.items.map(item => [item.path, item]));
+                const wanted = new Set(this.paths);
+                for (const item of this.items) if (!wanted.has(item.path)) {
+                    this.unmount(item); item.work.dispose(); item.row.remove();
+                }
+                added = [];
+                this.items = this.paths.map(path => {
+                    if (retained.has(path)) return retained.get(path);
+                    const item = this.createItem(path); added.push(item); return item;
+                });
+                this.failures[0].after(...this.items.map(item => item.row));
+            } else {
+                added = change.added.map(path => this.createItem(path));
+                if (edge.reverse) { this.items.unshift(...added); this.failures[0].after(...added.map(item => item.row)); }
+                else { this.items.push(...added); this.failures[1].before(...added.map(item => item.row)); }
+                if (change.removed.length) {
+                    const retired = this.items.splice(edge.reverse ? this.paths.length : 0, change.removed.length);
+                    for (const item of retired) { this.unmount(item); item.work.dispose(); item.row.remove(); }
+                }
             }
             this.resize(point);
             this.dimensions(added, scope);

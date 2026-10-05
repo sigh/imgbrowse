@@ -9,9 +9,9 @@ import zipfile
 from pathlib import Path
 from unittest.mock import patch
 
-from image_browser.catalog import Gallery
-from image_browser.ordering import Ordering
-from image_browser.work import Cancelled, Invalidated, request_work
+from image_browser.app import Gallery
+from image_browser.catalog.ordering import Ordering
+from image_browser.runtime.work import Cancelled, Invalidated, request_work
 
 
 class OrderingTests(unittest.TestCase):
@@ -99,7 +99,7 @@ class OrderingTests(unittest.TestCase):
             self.assertEqual(self.sequence(order), ['book.cbz/page10.jpg', 'book.cbz/page2.jpg',
                                                    'book.cbz/explicit/a.jpg', 'book.cbz/implicit/b.jpg'])
 
-    def test_continuations_bind_order_direction_root_generation_and_revision(self):
+    def test_continuations_bind_order_direction_root_and_data_revision(self):
         self.file('a.jpg', 1_700_000_000_000_000_001)
         self.file('b.jpg', 1_700_000_000_000_000_002)
         order = Ordering(sort='modified')
@@ -110,18 +110,18 @@ class OrderingTests(unittest.TestCase):
             options = {'ordering': order, **changes}
             with self.subTest(changes=changes), self.assertRaises(ValueError):
                 self.gallery.walk(cursor=copy.deepcopy(cursor), **options)
-        self.gallery.listings.invalidate()
-        with self.assertRaisesRegex(ValueError, 'listing changed'):
-            self.gallery.walk(cursor=copy.deepcopy(cursor), ordering=order)
+        self.gallery.catalog.indexes.invalidate()
+        self.assertEqual(self.gallery.walk(cursor=copy.deepcopy(cursor), ordering=order)['images'], ['b.jpg'])
+        os.utime(self.root / 'a.jpg', ns=(1_700_000_000_000_000_003, 1_700_000_000_000_000_003))
         self.gallery.invalidate('')
-        with self.assertRaisesRegex(ValueError, 'no longer matches'):
+        with self.assertRaisesRegex(ValueError, 'listing changed'):
             self.gallery.walk(cursor=cursor, ordering=order)
 
     def test_modified_deep_anchor_does_not_scan_earlier_subtrees(self):
         self.file('chapter1/a.jpg', 1)
         self.file('chapter99/b.jpg', 2)
         self.file('chapter99/c.jpg', 3)
-        with patch.object(self.gallery, '_listing', wraps=self.gallery._listing) as listing:
+        with patch.object(self.gallery.storage, 'children', wraps=self.gallery.storage.children) as listing:
             page = self.gallery.walk(anchor='chapter99/b.jpg', ordering=Ordering(sort='modified'), limit=1)
             self.assertEqual(page['images'], ['chapter99/c.jpg'])
             self.assertEqual([call.args[0] for call in listing.call_args_list], ['chapter99'])
@@ -131,14 +131,14 @@ class OrderingTests(unittest.TestCase):
         self.gallery.listing('')
         with request_work(cancel=lambda: True), self.assertRaises(Cancelled):
             self.gallery.listing('', ordering=Ordering(sort='modified'))
-        original = self.gallery._ordered_snapshot
+        original = self.gallery.catalog.ordered_view
         def refreshed(*args):
             result = original(*args)
             self.gallery.invalidate('')
             return result
-        with patch.object(self.gallery, '_ordered_snapshot', side_effect=refreshed), self.assertRaises(Invalidated):
+        with patch.object(self.gallery.catalog, 'ordered_view', side_effect=refreshed), self.assertRaises(Invalidated):
             self.gallery.listing('', ordering=Ordering(sort='modified'))
-        self.assertEqual(self.gallery.ordered.weight, 0)
+        self.assertEqual(self.gallery.catalog.views.weight, 0)
 
     def test_sort_inputs_are_strictly_validated(self):
         for settings in [{'sort':'capture'}, {'order':'backwards'}, {'sort':None}, {'order':False}]:

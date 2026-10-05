@@ -5,7 +5,6 @@ export class ResourceCache {
         this.values = new Map();
         this.pending = new Map();
         this.bytes = 0;
-        this.generation = 0;
     }
 
     peek(key) { return this.values.get(key)?.value; }
@@ -18,6 +17,23 @@ export class ResourceCache {
         return entry?.value;
     }
 
+    /** Publish an authoritative value, superseding any older shared request. */
+    set(key, value, weight = () => 1) {
+        const bytes = weight(value);
+        this.clear(candidate => candidate === key);
+        this._retain(key, value, bytes);
+    }
+
+    _retain(key, value, bytes) {
+        this.values.set(key, {value, bytes}); this.bytes += bytes;
+        while (this.bytes > this.maxBytes || this.values.size > this.maxEntries) {
+            const oldest = this.values.keys().next().value;
+            const entry = this.values.get(oldest);
+            this.values.delete(oldest); this.bytes -= entry.bytes;
+            this.dispose(entry.value);
+        }
+    }
+
     async get(key, load, signal, weight = () => 1) {
         signal?.throwIfAborted();
         const cached = this.getCached(key);
@@ -25,20 +41,15 @@ export class ResourceCache {
         let task = this.pending.get(key);
         if (!task) {
             const controller = new AbortController();
-            const generation = this.generation;
             task = {controller, users: 0};
             this.pending.set(key, task);
             task.promise = Promise.resolve().then(() => load(controller.signal)).then(value => {
-                if (generation === this.generation && !controller.signal.aborted) {
-                    const bytes = weight(value);
-                    this.values.set(key, {value, bytes}); this.bytes += bytes;
-                    while (this.bytes > this.maxBytes || this.values.size > this.maxEntries) {
-                        const oldest = this.values.keys().next().value;
-                        const entry = this.values.get(oldest);
-                        this.values.delete(oldest); this.bytes -= entry.bytes;
-                        this.dispose(entry.value);
-                    }
-                } else this.dispose(value);
+                if (this.pending.get(key) === task && !controller.signal.aborted) {
+                    this._retain(key, value, weight(value));
+                } else {
+                    this.dispose(value);
+                    throw new DOMException('Aborted', 'AbortError');
+                }
                 return value;
             }).finally(() => {
                 if (this.pending.get(key) === task) this.pending.delete(key);
@@ -63,11 +74,13 @@ export class ResourceCache {
         });
     }
 
-    clear() {
-        this.generation++;
-        for (const task of this.pending.values()) task.controller.abort();
-        this.pending.clear();
-        for (const entry of this.values.values()) this.dispose(entry.value);
-        this.values.clear(); this.bytes = 0;
+    clear(predicate = () => true) {
+        for (const [key, task] of this.pending) if (predicate(key)) {
+            this.pending.delete(key); task.controller.abort();
+        }
+        for (const [key, entry] of this.values) if (predicate(key)) {
+            this.values.delete(key); this.bytes -= entry.bytes;
+            this.dispose(entry.value);
+        }
     }
 }

@@ -263,7 +263,7 @@ export async function run(browser, fixtures) {
         await open(stateUrl({...readState(''), folder, filter:'page', compact:!scenario.previews}));
         await waitFor("document.getElementById('summary').textContent.includes('60 matches')");
         await evaluate(`import('/gallery.js').then(({app}) => {
-            const row = app.grid.layout.byPath.get('item:' + ${JSON.stringify(folder + '/page20.jpg')});
+            const row = app.grid.layout.byPath.get('item:' + JSON.stringify([${JSON.stringify(folder + '/page20.jpg')}, 'image']));
             app.grid.viewport.scrollTop = row.top + 11;
         })`);
         await pause(160);
@@ -272,7 +272,7 @@ export async function run(browser, fixtures) {
             url: location.search, header: document.querySelector('.app-header').offsetHeight,
         }))`);
         const anchorIndex = context.items.indexOf(context.position.path);
-        assert.deepEqual(context.position.neighbors.slice(0, 4), [1,-1,2,-2].map(offset => context.items[anchorIndex + offset]));
+        assert.deepEqual(context.position.neighbors.slice(0, 4).map(item => item.path), [1,-1,2,-2].map(offset => context.items[anchorIndex + offset]));
         assert.equal(context.position.neighbors.length, 16, 'Return metadata stores a bounded neighborhood');
         if (scenario.name === 'next') await screenshot('return-before-deletion');
         if (scenario.name === 'preview-next') await screenshot('return-previews-before-deletion');

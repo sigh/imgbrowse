@@ -1,4 +1,4 @@
-import {filename, parentPath} from '../shared/state.js';
+import {entryKey, filename, parentPath} from '../shared/state.js';
 
 /** Row metadata for a virtual grid. Appending a page only changes its last row. */
 export class GridLayout {
@@ -112,7 +112,7 @@ export class GridLayout {
             }
             current.items.push(item);
             this.itemCount++;
-            this.byPath.set('item:' + item.path, current);
+            this.byPath.set('item:' + entryKey(item), current);
             const {labelInset, minLabelHeight, labelExtraHeight} = this.itemGeometry(item, compact, this.number, this.recursive);
             const labelHeight = Math.max(minLabelHeight,
                 this.labelHeight(filename(item.path), cardWidth - labelInset, this.cardFont) + labelExtraHeight);

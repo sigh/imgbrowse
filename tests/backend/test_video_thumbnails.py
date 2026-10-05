@@ -11,24 +11,24 @@ from unittest.mock import patch
 
 from PIL import Image
 
-from image_browser.sources import MediaSource
-from image_browser.thumbnails import ThumbnailCache
-from image_browser.video_thumbnails import render_video_thumbnail, video_metadata
-from image_browser.work import Cancelled
+from image_browser.media.sources import MediaSource
+from image_browser.media.thumbnails import ThumbnailCache
+from image_browser.media.video import render_video_thumbnail, video_metadata
+from image_browser.runtime.work import Cancelled
 
 FIXTURE = Path(__file__).parent.parent / 'fixtures' / 'sample.webm'
 
 
 class VideoThumbnailTests(unittest.TestCase):
     def test_optional_dependency(self):
-        with patch('image_browser.video_thumbnails.shutil.which', return_value=None), \
+        with patch('image_browser.media.video.shutil.which', return_value=None), \
                 self.assertRaisesRegex(ValueError, 'FFmpeg'):
             render_video_thumbnail(FIXTURE, (400, 300))
 
     def test_cache_reuse_and_invalidation(self):
         cache = ThumbnailCache()
         source = MediaSource(FIXTURE, FIXTURE.stat())
-        with patch('image_browser.thumbnails.render_video_thumbnail', return_value=b'jpeg') as render:
+        with patch('image_browser.media.thumbnails.render_video_thumbnail', return_value=b'jpeg') as render:
             self.assertEqual(cache.get(source), b'jpeg')
             self.assertEqual(cache.get(source), b'jpeg')
             self.assertEqual(render.call_count, 1)
@@ -60,8 +60,8 @@ class VideoThumbnailTests(unittest.TestCase):
             verify(short)
 
     def test_dimensions_without_duration(self):
-        with patch('image_browser.video_thumbnails.shutil.which', return_value='ffprobe'), \
-             patch('image_browser.video_thumbnails.run_video_tool',
+        with patch('image_browser.media.video.shutil.which', return_value='ffprobe'), \
+             patch('image_browser.media.video.run_video_tool',
                    return_value=b'{"streams":[{"width":320,"height":180}],"format":{}}'):
             self.assertEqual(video_metadata(FIXTURE), {'width':320, 'height':180})
 
@@ -79,10 +79,10 @@ class VideoThumbnailTests(unittest.TestCase):
             children.append(child)
             return child
 
-        with patch('image_browser.video_thumbnails.shutil.which', return_value='ffmpeg'), \
-             patch('image_browser.video_thumbnails.subprocess.Popen', side_effect=start), \
-             patch('image_browser.video_thumbnails.EXTRACTION_TIMEOUT', .05), \
-             patch('image_browser.video_thumbnails.check_cancelled',
+        with patch('image_browser.media.video.shutil.which', return_value='ffmpeg'), \
+             patch('image_browser.media.video.subprocess.Popen', side_effect=start), \
+             patch('image_browser.media.video.EXTRACTION_TIMEOUT', .05), \
+             patch('image_browser.media.video.check_cancelled',
                    side_effect=[None, Cancelled()] if cancelled else None), \
              self.assertRaises(Cancelled if cancelled else ValueError):
             render_video_thumbnail(FIXTURE, (400, 300))

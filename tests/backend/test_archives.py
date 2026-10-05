@@ -10,9 +10,9 @@ from unittest.mock import patch
 
 from PIL import Image
 
-from image_browser.catalog import Gallery
-from image_browser.thumbnails import ThumbnailCache
-from image_browser.work import WorkGate
+from image_browser.app import Gallery
+from image_browser.media.thumbnails import ThumbnailCache
+from image_browser.runtime.work import WorkGate
 
 
 class ArchiveTests(unittest.TestCase):

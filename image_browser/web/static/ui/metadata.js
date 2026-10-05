@@ -1,5 +1,6 @@
 import {getMetadata} from '../data/api.js';
 import {metadataInfo} from '../data/metadata-data.js';
+import {relatedScope} from '../shared/state.js';
 import {element} from '../shared/dom.js';
 import {setIconButton} from '../shared/icons.js';
 
@@ -29,14 +30,16 @@ export class MetadataPanel {
 
     update({folder, image = null}) {
         const selected = image || folder;
-        if (selected === this.selected) return;
-        this.selected = selected;
-        this.setPath(selected);
+        const kind = image ? 'image' : 'folder';
+        if (selected === this.selected && kind === this.selectedKind) return;
+        this.selected = selected; this.selectedKind = kind;
+        this.setPath(selected, kind);
     }
 
-    setPath(path) {
-        if (path !== this.path) {
+    setPath(path, kind = null) {
+        if (path !== this.path || kind !== this.kind) {
             this.path = path;
+            this.kind = kind;
             this.loadedPath = undefined;
             this.request?.abort();
             this.updatePath();
@@ -58,8 +61,8 @@ export class MetadataPanel {
         this.sync();
     }
 
-    show(path) {
-        this.setPath(path);
+    show(path, kind) {
+        this.setPath(path, kind);
         this.openSidebar();
         this.section.open = true;
         this.sync();
@@ -74,7 +77,8 @@ export class MetadataPanel {
         this.load();
     }
 
-    refresh() {
+    refresh(scope) {
+        if (scope !== undefined && !relatedScope(this.path || '', scope)) return;
         this.loadedPath = undefined;
         this.request?.abort();
         this.sync();
@@ -85,7 +89,7 @@ export class MetadataPanel {
         const controller = this.request = new AbortController();
         this.details.classList.add('loading');
         try {
-            const data = await getMetadata(path, controller.signal, data => this.render(data));
+            const data = await getMetadata(path, controller.signal, {kind:this.kind, onBasic:data => this.render(data)});
             if (controller.signal.aborted) return;
             this.render(data);
             this.loadedPath = path;

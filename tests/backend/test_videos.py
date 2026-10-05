@@ -7,7 +7,7 @@ from http.client import HTTPConnection
 from pathlib import Path
 from threading import Thread
 
-from image_browser.server import GalleryServer
+from image_browser.http.server import GalleryServer
 
 
 class VideoTests(unittest.TestCase):

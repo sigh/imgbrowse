@@ -6,9 +6,10 @@ import zipfile
 from contextlib import contextmanager
 from pathlib import PurePosixPath
 
-from .cache import SharedCache
-from .sources import IMAGE_EXTENSIONS
-from .visibility import visible_name
+from image_browser.media.sources import IMAGE_EXTENSIONS
+from image_browser.runtime.cache import SharedCache
+from image_browser.storage.policy import cache_storage_error
+from image_browser.storage.visibility import visible_name
 
 ARCHIVE_EXTENSIONS = {'.zip', '.cbz'}
 MAX_IMAGE_BYTES = 128 * 1024 * 1024
@@ -31,7 +32,6 @@ class ArchiveIndex:
         self.direct_files = {}
         self.reader = zipfile.ZipFile(file)
         self.lock = threading.Lock()
-        self.sorted_listings = {}
         archive = self.reader
         if len(archive.infolist()) > MAX_ARCHIVE_ENTRIES:
             raise ValueError('Archive has too many entries')
@@ -57,17 +57,14 @@ class ArchiveIndex:
                     self.files[name] = info
                     self.direct_files.setdefault('/'.join(parts[:-1]), set()).add(parts[-1])
 
-    def listing(self, inner, natural_key):
+    def children(self, inner):
+        """Yield raw child headers; catalog policy owns classification and order."""
         if inner not in self.folders:
             raise FileNotFoundError('Archive folder not found')
-        with self.lock:
-            if inner not in self.sorted_listings:
-                names = sorted(self.direct_files.get(inner, ()), key=natural_key)
-                self.sorted_listings[inner] = {
-                    'folders': sorted(self.folders[inner], key=natural_key),
-                    'images': [name for name in names if PurePosixPath(name).suffix.lower() in IMAGE_EXTENSIONS],
-                    'other_files': [name for name in names if PurePosixPath(name).suffix.lower() not in IMAGE_EXTENSIONS]}
-            return self.sorted_listings[inner]
+        for name in self.folders[inner]:
+            yield name, True, self.folder_info.get(str(PurePosixPath(inner) / name))
+        for name in self.direct_files.get(inner, ()):
+            yield name, False, self.files[str(PurePosixPath(inner) / name)]
 
     @contextmanager
     def open(self, member):
@@ -101,7 +98,7 @@ class ArchiveCache:
 
     def __init__(self, exclude=()):
         self.excluded = frozenset(exclude)
-        self.cache = SharedCache(64 * 1024 * 1024, max_entries=16)
+        self.cache = SharedCache(64 * 1024 * 1024, max_entries=16, cache_errors=cache_storage_error)
 
     def get(self, file, file_stat=None):
         file_stat = file_stat or file.stat()
@@ -114,5 +111,5 @@ class ArchiveCache:
         return self.cache.get(key, load,
                               lambda index: sum(512 + len(info.filename) * 4 for info in index.reader.infolist()))
 
-    def invalidate(self):
-        self.cache.invalidate()
+    def invalidate(self, predicate=lambda file: True):
+        self.cache.invalidate(lambda key: predicate(key[0]))

@@ -71,3 +71,61 @@ test('synchronous cache reads retain recently used values', async () => {
     assert.equal(cache.peek('a'), 'a');
     assert.equal(cache.peek('b'), undefined);
 });
+
+test('scoped refresh preserves unrelated pending requests and adjacency', async () => {
+    const cache = new ResourceCache(100);
+    let release;
+    const pending = cache.get('B', () => new Promise(resolve => { release = resolve; }));
+    await Promise.resolve(); cache.clear(key => key === 'A'); release('alive');
+    assert.equal(await pending, 'alive');
+    assert.equal(cache.peek('B'), 'alive');
+    const sequence = new Sequence(async () => assert.fail('Unrelated adjacency was discarded'));
+    sequence.seed('B', ['B/a','B/b'], {revision:'v1', start:true, end:true});
+    sequence.clear('A');
+    assert.deepEqual((await sequence.walk({root:'B', anchor:'B/a'})).images, ['B/b']);
+});
+
+test('changed view revisions discard stale adjacency and boundaries', async () => {
+    const sequence = new Sequence(async () => assert.fail('Expected the new seeded order'));
+    sequence.seed('A', ['A/a','A/b','A/c'], {revision:'old', start:true, end:true});
+    sequence.seed('A', ['A/c','A/a','A/b'], {revision:'new', start:true, end:true});
+    assert.deepEqual((await sequence.walk({root:'A'})).images, ['A/c','A/a','A/b']);
+    assert.deepEqual((await sequence.walk({root:'A', anchor:'A/b'})).images, []);
+});
+
+test('authoritative publication retires older producers and preserves cache accounting', async () => {
+    const disposed = [];
+    const cache = new ResourceCache(10, 2, value => disposed.push(value));
+    let finish, shared;
+    const pending = cache.get('x', signal => {
+        shared = signal;
+        return new Promise(resolve => { finish = resolve; });
+    });
+    const rejected = assert.rejects(pending, {name:'AbortError'});
+    await Promise.resolve();
+    cache.set('x', 'current', () => 6);
+    assert.equal(shared.aborted, true);
+    finish('obsolete'); await rejected;
+    assert.equal(cache.peek('x'), 'current');
+    assert.equal(cache.bytes, 6);
+    cache.set('x', 'replacement', () => 6);
+    cache.set('y', 'other', () => 6);
+    assert.equal(cache.peek('x'), undefined);
+    assert.equal(cache.peek('y'), 'other');
+    assert.equal(cache.bytes, 6);
+    assert.deepEqual(disposed, ['obsolete', 'current', 'replacement']);
+});
+
+test('sequence does not connect natural neighbors back to a removed anchor', async () => {
+    const requests = [];
+    const sequence = new Sequence(async options => {
+        requests.push(options);
+        return requests.length === 1 ? {images:['b'], cursor:null, warnings:[], anchor_missing:true}
+            : {images:['a'], cursor:null, warnings:[]};
+    });
+    const next = await sequence.walk({root:'Album', anchor:'removed'});
+    assert.equal(next.anchor_missing, true);
+    const previous = await sequence.walk({root:'Album', anchor:'b', reverse:true});
+    assert.deepEqual(previous.images, ['a']);
+    assert.equal(requests.length, 2, 'Reverse discovery must not reuse an edge to the deleted anchor');
+});

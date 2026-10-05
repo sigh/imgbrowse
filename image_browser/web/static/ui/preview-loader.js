@@ -37,19 +37,19 @@ export class PreviewLoader {
         }), target, scope.signal, true).catch(() => {});
     }
 
-    thumbnail(target, path, scope) {
-        if (cachedThumbnail(path)) return this.attachImage(target, path, scope, scope.signal);
+    thumbnail(target, path, scope, kind = 'image') {
+        if (cachedThumbnail(path, kind)) return this.attachImage(target, path, scope, scope.signal, kind);
         if (isVideo(path)) {
             const placeholder = icon('video');
             placeholder.classList.add('video-placeholder');
             target.replaceChildren(placeholder);
         }
-        return this.enqueue(signal => this.attachImage(target, path, scope, signal), target, scope.signal, isVideo(path), () => Boolean(cachedThumbnail(path)));
+        return this.enqueue(signal => this.attachImage(target, path, scope, signal, kind), target, scope.signal, isVideo(path), () => Boolean(cachedThumbnail(path, kind)));
     }
 
-    async attachImage(target, path, scope, signal) {
+    async attachImage(target, path, scope, signal, kind = 'image') {
         let result;
-        try { result = await getThumbnail(path, signal); }
+        try { result = await getThumbnail(path, signal, kind); }
         catch (error) {
             signal.throwIfAborted();
             if (error.code !== PreviewErrorCode.VIDEO_UNAVAILABLE) throw error;

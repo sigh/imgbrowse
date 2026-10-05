@@ -17,7 +17,7 @@ test('basic video facts arrive before a delayed probe, followed by complete fact
         return new Promise(resolve => { release = () => resolve(response({width:640, height:480, duration:61})); });
     };
     const updates = [];
-    const pending = getMetadata('delayed.webm', undefined, data => updates.push(data));
+    const pending = getMetadata('delayed.webm', undefined, {onBasic:data => updates.push(data)});
     await videoStarted;
     assert.deepEqual(updates, [{...basic, video_pending:true}]);
     release();
@@ -48,7 +48,7 @@ test('an obsolete metadata response cannot publish basic facts or start a video 
         calls++;
         return new Promise(resolve => { release = () => resolve(response({kind:MetadataKind.VIDEO})); });
     };
-    const pending = getMetadata('obsolete.webm', controller.signal, () => assert.fail('Obsolete facts published'));
+    const pending = getMetadata('obsolete.webm', controller.signal, {onBasic:() => assert.fail('Obsolete facts published')});
     controller.abort();
     release();
     await assert.rejects(pending, {name:'AbortError'});

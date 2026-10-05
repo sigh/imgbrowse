@@ -1,7 +1,7 @@
 import {getFolder, onFolderListing} from '../data/api.js';
 import {byId, element, plainClick} from '../shared/dom.js';
 import {setIconButton} from '../shared/icons.js';
-import {currentFolder, joinPath, parentPath, ScreenMode, sortKey} from '../shared/state.js';
+import {currentFolder, joinPath, parentPath, relatedScope, ScreenMode, sortKey} from '../shared/state.js';
 
 const OVERSCAN = 3;
 const TYPEAHEAD_INTERVAL = 700;
@@ -125,13 +125,16 @@ export class FolderTree {
         this.pending.clear();
     }
 
-    async refresh() {
-        this.stopRequests();
-        this.listings.clear(); this.errors.clear();
+    async refresh(scope = '') {
+        for (const [path, task] of this.pending) if (relatedScope(path, scope)) {
+            task.controller.abort(); this.pending.delete(path);
+        }
+        for (const path of this.listings.keys()) if (relatedScope(path, scope)) this.listings.delete(path);
+        for (const path of this.errors) if (relatedScope(path, scope)) this.errors.delete(path);
         if (this.pane.hidden) return;
         for (const path of this.expanded) {
             if (this.pane.hidden) break;
-            await this.load(path);
+            if (!this.listings.has(path)) await this.load(path);
         }
         this.rebuild();
     }

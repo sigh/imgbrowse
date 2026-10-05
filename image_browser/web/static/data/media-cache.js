@@ -1,9 +1,10 @@
 import {ResourceCache} from './resource-cache.js';
+import {relatedScope} from '../shared/state.js';
 import {imageUrl} from './api.js';
 
 /** A few decoded originals; decoded pixel cost counts toward the budget. */
 export const originals = new ResourceCache(96 * 1024 * 1024, 4, value => URL.revokeObjectURL(value.url));
-export const clearOriginals = () => originals.clear();
+export const clearOriginals = (scope = '') => originals.clear(path => relatedScope(path, scope));
 
 /** Decoded images return immediately; uncached images return a loading promise. */
 export function loadOriginal(path, signal, prefetch = false) {

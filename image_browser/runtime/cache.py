@@ -3,9 +3,10 @@
 import threading
 from collections import OrderedDict
 from concurrent.futures import Future, TimeoutError
+from dataclasses import dataclass, field
 from time import monotonic
 
-from .work import (
+from image_browser.runtime.work import (
     Cancelled,
     Invalidated,
     cancellation,
@@ -15,15 +16,21 @@ from .work import (
 )
 
 
+@dataclass(eq=False)
+class PendingLoad:
+    future: Future = field(default_factory=lambda: Future())
+    consumers: list = field(default_factory=list)
+
+
 class SharedCache:
-    def __init__(self, max_weight, ttl=300, max_entries=4096):
+    def __init__(self, max_weight, ttl=300, max_entries=4096, *, cache_errors=lambda error: False):
         self.max_weight = max_weight
         self.ttl = ttl
         self.max_entries = max_entries
+        self.cache_errors = cache_errors
         self.entries = OrderedDict()
         self.pending = {}
         self.weight = 0
-        self.generation = 0
         self.lock = threading.Lock()
         self.hits = self.loads = 0
 
@@ -35,11 +42,18 @@ class SharedCache:
                 return entry[1]
         return None
 
-    def get(self, key, load, weight=lambda value: 1, *, generation=None, valid=None):
-        """Share a load; optional epoch checks run under the lock and must not block."""
+    def completed(self, predicate=lambda key: True):
+        """Inspect retained values without exposing ownership or cache storage."""
+        with self.lock:
+            now = monotonic()
+            return tuple(entry[1] for key, entry in self.entries.items()
+                         if predicate(key) and entry[0] > now and not isinstance(entry[1], Exception))
+
+    def get(self, key, load, weight=lambda value: 1, *, valid=None):
+        """Share a load; optional scope checks run under the lock and must not block."""
         check_cancelled()
         with self.lock:
-            if (generation is not None and generation != self.generation) or (valid is not None and not valid()):
+            if valid is not None and not valid():
                 raise Invalidated('Refreshed during request')
             entry = self.entries.get(key)
             if entry and entry[0] > monotonic():
@@ -50,13 +64,12 @@ class SharedCache:
                 return entry[1]
             if entry:
                 self.weight -= self.entries.pop(key)[2]
-            token = (self.generation, key)
-            pending = self.pending.get(token)
+            pending = self.pending.get(key)
             owner = pending is None
             if owner:
-                pending = self.pending[token] = (Future(), [])
+                pending = self.pending[key] = PendingLoad()
                 self.loads += 1
-            future, consumers = pending
+            future, consumers = pending.future, pending.consumers
             consumers.append(cancellation())
         if not owner:
             while True:
@@ -69,7 +82,7 @@ class SharedCache:
                     continue
                 except Cancelled:
                     # The producer left before starting its work; a live consumer retries.
-                    return self.get(key, load, weight, generation=generation, valid=valid)
+                    return self.get(key, load, weight, valid=valid)
         try:
             def abandoned():
                 with self.lock:
@@ -77,30 +90,30 @@ class SharedCache:
                 return all(callback() for callback in callbacks)
             with request_work(current_priority(), abandoned):
                 value = load()
+                check_cancelled()
             cost = max(1, weight(value))
-            self._store(token, value, cost, self.ttl)
+            self._store(key, pending, value, cost, self.ttl)
             future.set_result(value)
             return value
         except Exception as error:
-            if isinstance(error, (OSError, ValueError)) and not isinstance(error, Cancelled):
-                self._store(token, type(error)(str(error)), 256, 2)
+            if self.cache_errors(error):
+                self._store(key, pending, type(error)(str(error)), 256, 2)
             # Remove before waking consumers, allowing retry after cancellation.
-            self._release(token, pending)
+            self._release(key, pending)
             future.set_exception(error)
             raise
         finally:
-            self._release(token, pending)
+            self._release(key, pending)
 
-    def _release(self, token, pending):
+    def _release(self, key, pending):
         with self.lock:
             # A consumer can already have started a replacement after cancellation.
-            if self.pending.get(token) is pending:
-                del self.pending[token]
+            if self.pending.get(key) is pending:
+                del self.pending[key]
 
-    def _store(self, token, value, cost, ttl):
-        generation, key = token
+    def _store(self, key, pending, value, cost, ttl):
         with self.lock:
-            if generation != self.generation or cost > self.max_weight:
+            if self.pending.get(key) is not pending or cost > self.max_weight:
                 return
             previous = self.entries.pop(key, None)
             if previous:
@@ -113,7 +126,9 @@ class SharedCache:
 
     def invalidate(self, predicate=lambda key: True):
         with self.lock:
-            self.generation += 1
+            for key in list(self.pending):
+                if predicate(key):
+                    del self.pending[key]
             for key in list(self.entries):
                 if predicate(key):
                     self.weight -= self.entries.pop(key)[2]

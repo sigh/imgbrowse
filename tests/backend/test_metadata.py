@@ -12,11 +12,11 @@ from unittest.mock import patch
 from urllib.parse import urlencode
 
 from PIL import Image
-from PIL.ExifTags import Base, GPS, IFD
+from PIL.ExifTags import GPS, IFD, Base
 from PIL.TiffImagePlugin import IFDRational
 
-from image_browser.metadata import _gps_location
-from image_browser.server import GalleryServer
+from image_browser.http.server import GalleryServer
+from image_browser.media.metadata import _gps_location
 
 
 class MetadataTests(unittest.TestCase):
@@ -25,13 +25,14 @@ class MetadataTests(unittest.TestCase):
         for names, expected_status in [(['photo.jpg'], 200), (['../photo.jpg'], 400)]:
             connection = HTTPConnection('127.0.0.1', self.server.server_port, timeout=5)
             try:
-                with patch('image_browser.metadata.Image.open', side_effect=AssertionError('No decoding')):
-                    connection.request('GET', '/api/folder?' + urlencode({'path':'', 'names':json.dumps(names)}))
+                with patch('image_browser.media.metadata.Image.open', side_effect=AssertionError('No decoding')):
+                    connection.request('POST', '/api/folder/entries', json.dumps({'path':'', 'items':[{'name':name, 'type':'image'} for name in names]}), {'Content-Type':'application/json'})
                     response = connection.getresponse()
                     data = json.loads(response.read())
                     self.assertEqual(response.status, expected_status)
                     if expected_status == 200:
-                        self.assertEqual(data['entries'], [{'name':'photo.jpg', 'type':'image', 'modified':modified}])
+                        self.assertEqual(data['entries'][0]['modified'], modified)
+                        self.assertEqual(data['entries'][0]['status'], 'ready')
                         self.assertNotIn('images', data)
             finally:
                 connection.close()
@@ -107,8 +108,8 @@ class MetadataTests(unittest.TestCase):
         (self.root / 'nested/deeper').mkdir()
         (self.root / 'nested/deeper/other.jpg').write_bytes(self.image)
         (self.root / 'notes.txt').write_text('ignored')
-        with patch.object(self.server.gallery, '_scan_directory',
-                          wraps=self.server.gallery._scan_directory) as scan:
+        with patch.object(self.server.gallery.storage, 'scan_directory',
+                          wraps=self.server.gallery.storage.scan_directory) as scan:
             status, data = self.request('')
             self.assertEqual(status, 200)
             self.assertEqual((data['kind'], data['folders'], data['media']), ('directory', 1, 1))
@@ -142,7 +143,7 @@ class MetadataTests(unittest.TestCase):
         with zipfile.ZipFile(self.root / 'trip.zip', 'w') as archive:
             archive.writestr('chapter/clip.mp4', b'unsupported archived video')
             archive.writestr('chapter/notes.txt', b'notes')
-        with patch('image_browser.metadata.Image.open', side_effect=AssertionError('Other files must not be decoded')):
+        with patch('image_browser.media.metadata.Image.open', side_effect=AssertionError('Other files must not be decoded')):
             for path, size, member in [('sunrise.heic', 17, None),
                                        ('trip.zip/chapter/clip.mp4', 26, 'chapter/clip.mp4'),
                                        ('trip.zip/chapter/notes.txt', 5, 'chapter/notes.txt')]:
@@ -177,7 +178,7 @@ class MetadataTests(unittest.TestCase):
         (self.root / 'link.jpg').symlink_to(self.root / 'photo.jpg')
         for path in ['../photo.jpg', '/etc/passwd', '.hidden.jpg', 'link.jpg', 'missing.jpg']:
             with self.subTest(path=path):
-                self.assertIn(self.request(path)[0], (400, 404))
+                self.assertIn(self.request(path)[0], (400, 403, 404))
 
 
 if __name__ == '__main__':

@@ -1,11 +1,12 @@
 import {isVideo, fileExtension} from '../shared/media-kind.js';
-import {getFolder, walkImages, sequence} from '../data/api.js';
-import {formatMetadataDate} from '../data/metadata-data.js';
+import {getFolder, walkImages, sequence, entries, invalidateViews} from '../data/api.js';
+import {formatMetadataDate, timestampValue} from '../data/metadata-data.js';
 import {byId, element, plainClick, setButtonLabel, TaskScope} from '../shared/dom.js';
 import {icon} from '../shared/icons.js';
 import {GridLayout} from './grid-layout.js';
+import {FactDemand} from '../data/entry-store.js';
 import {FolderData} from '../data/folder-data.js';
-import {filename, joinPath, ScreenMode, ItemType} from '../shared/state.js';
+import {entryKey, filename, joinPath, ScreenMode, ItemType} from '../shared/state.js';
 
 const OVERSCAN = 230;
 const DISCOVERY_MARGIN = 400;
@@ -70,7 +71,10 @@ export class FolderGrid {
         this.restorePosition = null;
         this.scrollScheduled = false;
         this.viewport.addEventListener('scroll', () => this.scheduleRender());
-        this.moreButton.addEventListener('click', () => this.refresh());
+        this.moreButton.addEventListener('click', () => {
+            if (this.facts?.errors.size) { this.facts.retry(); this.scheduleRender(); }
+            else this.refresh();
+        });
         this.resizeObserver = new ResizeObserver(() => {
             if (!this.state?.active) return;
             if (this.viewport.clientWidth !== this.layout.width) this.relayout();
@@ -95,16 +99,17 @@ export class FolderGrid {
         } else this.scheduleRender();
     }
 
-    get loadingPage() { return this.data.entriesLoading(this.directory) || Boolean(this.directory?.window.edges.some(edge => edge.loading)); }
+    get loadingPage() { return Boolean(this.directory?.window.edges.some(edge => edge.loading)); }
 
     stop() {
         this.scope?.dispose();
+        this.facts?.dispose(); this.facts = null;
         this.loadingFolder = false;
         if (this.directory) for (const edge of this.directory.window.edges) edge.loading = false;
         this.viewport.setAttribute('aria-busy', 'false');
     }
 
-    invalidate() { this.data.clear(); }
+    invalidate(scope) { this.data.clear(scope); }
 
     get canSavePosition() { return !this.loadingFolder && !this.restorePosition; }
 
@@ -117,12 +122,13 @@ export class FolderGrid {
         if (!card) return {id: this.viewport.id};
         const action = ['folder-overview', 'folder-view', 'list-name', 'picture', 'image-name']
             .find(name => node.classList.contains(name));
-        return {path: card.dataset.path, selector: action ? '.' + action : '.card-caption a'};
+        return {path: card.dataset.path, type:card.dataset.type, selector: action ? '.' + action : '.card-caption a'};
     }
 
     restoreFocus(bookmark = {}) {
         if (bookmark.path) {
             this.focusPath = bookmark.path;
+            this.focusType = bookmark.type;
             this.focusSelector = bookmark.selector;
             this.viewport.focus({preventScroll: true});
             this.scheduleRender();
@@ -134,14 +140,14 @@ export class FolderGrid {
         const [index] = this.layout.visibleRange(top + 1, top + 1);
         const row = this.layout.rows[index];
         if (!row) return null;
-        const position = {path: row.items?.[0].path ?? row.path, heading: !row.items,
+        const position = {path: row.items?.[0].path ?? row.path, type:row.items?.[0].type, heading: !row.items,
             offset: top - row.top, rowHeight: row.height};
         if (!this.state.recursive && row.items) {
             // Original filtered order: next item wins ties with the previous one.
             position.neighbors = [];
             for (let distance = 1; distance <= RETURN_NEIGHBORS; distance++) {
                 for (const index of [row.startIndex + distance, row.startIndex - distance]) {
-                    if (this.items[index]) position.neighbors.push(this.items[index].path);
+                    if (this.items[index]) position.neighbors.push({path:this.items[index].path, type:this.items[index].type});
                 }
             }
         }
@@ -150,11 +156,11 @@ export class FolderGrid {
 
     restore() {
         if (!this.restorePosition || this.loadingFolder) return;
-        const {path, heading, offset, rowHeight} = this.restorePosition;
-        let row = this.layout.byPath.get((heading ? 'heading:' : 'item:') + path);
+        const {path, type, heading, offset, rowHeight} = this.restorePosition;
+        let row = this.layout.byPath.get(heading ? 'heading:' + path : 'item:' + entryKey({path, type:type || ItemType.MEDIA}));
         if (!row && !this.state.recursive) {
             for (const neighbor of this.restorePosition.neighbors || []) {
-                row = this.layout.byPath.get('item:' + neighbor);
+                row = this.layout.byPath.get('item:' + entryKey(typeof neighbor === 'string' ? {path:neighbor, type:ItemType.MEDIA} : neighbor));
                 if (row) break;
             }
         }
@@ -165,7 +171,7 @@ export class FolderGrid {
             this.items = this.directory.window.paths.map(mediaItem);
             this.resetLayout();
             this.container.style.height = this.layout.height + 'px';
-            row = this.layout.byPath.get('item:' + path);
+            row = this.layout.byPath.get('item:' + entryKey({path, type:ItemType.MEDIA}));
         }
         if (this.restorePosition.reveal) this.focusPath = path;
         // Restoring ordinary history never initiates a traversal.
@@ -188,6 +194,7 @@ export class FolderGrid {
         if (!this.focusPath && entry.node.contains(document.activeElement)) {
             const bookmark = this.captureFocus(document.activeElement);
             this.focusPath = bookmark.path;
+            this.focusType = bookmark.type;
             this.focusSelector = bookmark.selector;
         }
         entry.scope.dispose();
@@ -248,7 +255,7 @@ export class FolderGrid {
             link.setAttribute('aria-controls', 'item-info');
             link.addEventListener('click', event => {
                 event.stopPropagation();
-                this.showInfo(item.path);
+                this.showInfo(item.path, item.type);
             });
             action = 'File info for';
         } else if (item.type === ItemType.FOLDER) {
@@ -296,20 +303,55 @@ export class FolderGrid {
     createCard(item, scope, compact) {
         const node = element('article', 'card');
         node.dataset.path = item.path;
-        node.classList.toggle('selected-media', this.state.selected === item.path);
+        node.dataset.type = item.type;
+        node.classList.toggle('selected-media', item.type === ItemType.MEDIA && this.state.selected === item.path);
         if (compact) this.renderListItem(node, item, scope);
         else this.renderPreview(node, item, scope);
         if (!this.state.recursive) {
             const name = node.querySelector('.list-name, .card-name');
             const label = element('div', 'item-label');
-            const time = element('time', 'item-modified', formatMetadataDate(item.modified) || '—');
-            time.title = item.modified ? 'Modified: ' + time.textContent : 'Modified time unavailable';
-            time.setAttribute('aria-label', time.title);
-            if (item.modified) time.dateTime = item.modified;
+            const time = element('time', 'item-modified');
+            this.renderDate(time, item);
             name.before(label);
             label.append(name, time);
         }
         return node;
+    }
+
+    renderDate(time, item) {
+        const fact = this.facts?.state(item) || entries.peek(item, this.directory?.listing.revision);
+        const pending = !fact || fact.status === 'loading';
+        time.textContent = pending ? 'Loading date…' : fact.status === 'error' ? 'Date unavailable' : formatMetadataDate(fact.modified) || '—';
+        time.title = pending ? 'Loading modified time' : fact.status === 'error' ? fact.error.message
+            : fact.modified ? 'Modified: ' + time.textContent : 'Modified time unavailable';
+        time.setAttribute('aria-label', time.title);
+        if (fact?.modified) time.dateTime = timestampValue(fact.modified);
+        else time.removeAttribute('datetime');
+    }
+
+    factsChanged() {
+        if (!this.directory || !this.state?.active) return;
+        for (const {node} of this.rowNodes.values()) for (const card of node.querySelectorAll('.card')) {
+            const time = card.querySelector('.item-modified');
+            if (time) this.renderDate(time, {path:card.dataset.path, type:card.dataset.type});
+        }
+        const errors = [...(this.facts?.errors.values() || [])];
+        const stale = errors.find(error => error.code === 'stale_view');
+        if (stale && !this.reconciling) {
+            this.reconciling = true;
+            invalidateViews(this.directory.path);
+            this.restorePosition = this.position();
+            this.loadFolder(true).finally(() => { this.reconciling = false; });
+            return;
+        }
+        if (this.directory.preparation) {
+            const {completed = 0, total} = this.directory.preparation;
+            this.status.textContent = 'Preparing modified order…' + (total ? ` ${completed} / ${total}` : '');
+        } else if (errors.length) this.status.textContent = 'Some dates could not be read. Retry to load them.';
+        else if (this.facts?.loading) this.status.textContent = 'Loading dates…';
+        else if (!this.state.recursive) this.updateSummary();
+        this.moreButton.hidden = !errors.length && !this.directory.window.edges.some(edge => edge.failed);
+        this.viewport.setAttribute('aria-busy', String(Boolean(this.directory.preparation || this.facts?.loading)));
     }
 
     renderPreview(node, item, scope) {
@@ -327,7 +369,7 @@ export class FolderGrid {
             name.classList.add('image-name');
             caption.append(name);
         }
-        this.previews.thumbnail(picture, item.path, scope).catch(() => {
+        this.previews.thumbnail(picture, item.path, scope, item.type).catch(() => {
             if (!scope.signal.aborted) picture.textContent = 'Preview unavailable';
         });
         caption.title = item.path;
@@ -342,7 +384,7 @@ export class FolderGrid {
         positionRow(node, row);
         const scope = new TaskScope();
         if (row.items) row.items.forEach(item => node.append(this.createCard(
-            this.state.recursive ? item : this.directory.entries.get(filename(item.path)), scope, row.compact)));
+            item, scope, row.compact)));
         else if (row.disclosure) {
             node.classList.add('other-files-heading');
             const control = element('button', 'other-files-toggle', row.label);
@@ -362,7 +404,7 @@ export class FolderGrid {
 
     rowSignature(row) {
         return JSON.stringify([row.compact, this.state.linkPresentation, row.label, row.expanded,
-            this.state.selected, row.items?.map(item => item.path) ?? row.path]);
+            this.state.selected, row.items?.map(entryKey) ?? row.path]);
     }
 
     renderRows() {
@@ -372,35 +414,36 @@ export class FolderGrid {
         const start = Math.max(0, top - OVERSCAN);
         const end = top + this.viewport.clientHeight + OVERSCAN;
         const [first, last] = this.layout.visibleRange(start, end);
-        const pending = [];
+        const wanted = [];
         for (const index of this.rowNodes.keys()) {
             const row = this.layout.rows[index];
             if (index < first || index >= last || !row || this.rowNodes.get(index).signature !== this.rowSignature(row)) this.removeRow(index);
-            else {
-                const node = this.rowNodes.get(index).node;
-                positionRow(node, row);
-            }
+            else positionRow(this.rowNodes.get(index).node, row);
         }
         for (let index = first; index < last; index++) {
-            if (this.rowNodes.has(index)) continue;
-            const row = this.layout.rows[index];
-            const missing = this.state.recursive ? [] : (row.items || [])
-                .filter(item => !this.directory.entries.has(filename(item.path)));
-            if (missing.length) pending.push(...missing);
-            else this.createRow(index);
+            if (!this.rowNodes.has(index)) this.createRow(index);
+            if (!this.state.recursive) wanted.push(...(this.layout.rows[index].items || []));
         }
+        if (!this.state.recursive && this.directory && !this.facts) {
+            this.facts = new FactDemand(entries, this.directory.path, this.directory.listing.revision,
+                () => this.factsChanged(), new Map((this.directory.listing.items || [])
+                    .filter(item => Object.hasOwn(item, 'modified_key'))
+                    .map(item => [entryKey({path:joinPath(this.directory.path, item.name), type:item.type}), item.modified_key])));
+        }
+        this.facts?.update(this.state.recursive ? [] : wanted);
+        this.factsChanged();
         if (this.focusPath && this.state.active) {
-            const item = [...this.container.querySelectorAll('.card')].find(node => node.dataset.path === this.focusPath);
+            const item = [...this.container.querySelectorAll('.card')].find(node => node.dataset.path === this.focusPath && (!this.focusType || node.dataset.type === this.focusType));
             const target = item?.querySelector(this.focusSelector || '.list-name, .card-caption a, .image-name, button');
             (target || item?.querySelector('a, button'))?.focus({preventScroll: true});
-            if (item || (!this.loadingFolder && !pending.length)) {
+            if (item || !this.loadingFolder) {
                 if (!item) this.viewport.focus({preventScroll: true});
                 this.focusPath = null;
+                this.focusType = null;
                 this.focusSelector = null;
             }
         }
         this.previews.schedule();
-        if (!this.state.recursive && pending.length) this.loadPage(false, pending);
         if (this.state.recursive && this.directory?.window.canLoad(this.directory.window.edges[0]) && this.viewport.scrollTop < DISCOVERY_MARGIN
             && !this.loadingPage && !this.loadingFolder && this.state.active) { this.loadPage(true); return; }
         const needsMore = end >= this.layout.height - DISCOVERY_MARGIN;
@@ -410,6 +453,7 @@ export class FolderGrid {
 
     async loadFolder(force) {
         this.scope?.dispose();
+        this.facts?.dispose(); this.facts = null;
         this.directory = null;
         const scope = this.scope = new TaskScope();
         this.loadingFolder = true;
@@ -424,8 +468,18 @@ export class FolderGrid {
         this.moreButton.hidden = true;
         this.viewport.setAttribute('aria-busy', 'true');
         try {
-            this.directory = await this.data.open(this.state, scope.signal, force);
+            const completed = await this.data.open(this.state, scope.signal, force, directory => {
+                if (scope.signal.aborted) return;
+                if (this.directory !== directory) { this.facts?.dispose(); this.facts = null; }
+                this.directory = directory;
+                this.rootName = directory.listing.root_name || 'Collection';
+                this.loadingFolder = false;
+                this.displayFolder();
+            });
             scope.signal.throwIfAborted();
+            if (this.directory?.preparation) this.restorePosition = this.position();
+            if (this.directory !== completed) { this.facts?.dispose(); this.facts = null; }
+            this.directory = completed;
             this.rootName = this.directory.listing.root_name || 'Collection';
             this.folderLoaded(this.rootName);
             this.loadingFolder = false;
@@ -474,34 +528,22 @@ export class FolderGrid {
                 + (listing.other_files.length ? ` · ${listing.other_files.length} other ${listing.other_files.length === 1 ? 'file' : 'files'}` : '')
                 + (this.state.filter ? ` · ${this.items.length} matches` : '');
         }
-        this.moreButton.hidden = !directory.error && !window.edges.some(edge => edge.failed);
+        this.moreButton.hidden = !this.facts?.errors.size && !window.edges.some(edge => edge.failed);
         // Empty Browse feedback precedes the disclosure; Overview's end marker follows its grid.
         if (this.state.recursive) this.container.after(this.status);
         else this.container.before(this.status);
     }
 
-    async loadPage(reverse = false, items = []) {
+    async loadPage(reverse = false) {
         if (!this.state.active || this.loadingFolder || this.loadingPage || !this.directory) return;
         const directory = this.directory;
         const scope = this.scope;
-        if (!this.state.recursive) {
-            if (!items.length || directory.error) return;
-            try {
-                await this.data.loadEntries(directory, items, scope.signal);
-                scope.signal.throwIfAborted();
-                this.scheduleRender();
-            } catch (error) {
-                if (!scope.signal.aborted) {
-                    directory.error = error.message;
-                    this.status.textContent = error.message;
-                    this.moreButton.hidden = false;
-                }
-            }
-            return;
-        }
+        if (!this.state.recursive) return;
         const edge = directory.window.edges[reverse ? 0 : 1];
         if (!directory.window.canLoad(edge)) return;
-        const result = await this.data.load(directory, reverse, scope.signal);
+        const bookmark = this.position();
+        const anchor = bookmark && !bookmark.heading ? bookmark.path : this.state.selected;
+        const result = await this.data.load(directory, reverse, scope.signal, anchor);
         if (scope.signal.aborted) return;
         if (!result) {
             this.status.textContent = edge.error;

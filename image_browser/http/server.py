@@ -6,42 +6,24 @@ import select
 import socket
 import zipfile
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from importlib.resources import files
 from urllib.parse import parse_qs, urlsplit
 
 from PIL import Image
 
-from .catalog import PAGE_SIZE, Gallery
-from .metadata import metadata
-from .ordering import Ordering
-from .previews import PreviewService
-from .ranges import UnsatisfiableRange, byte_range
-from .sources import VIDEO_TYPES
-from .thumbnails import ThumbnailCache
-from .work import Busy, Cancelled, Invalidated, WorkGate, check_cancelled, request_work
+from image_browser.app import Gallery
+from image_browser.catalog.errors import InvalidSelection, StaleView
+from image_browser.catalog.limits import PAGE_SIZE
+from image_browser.catalog.ordering import Ordering
+from image_browser.catalog.preparation import Preparing
+from image_browser.http.assets import APP_DIRECTORY, STATIC_FILES
+from image_browser.http.catalog_api import CatalogApi
+from image_browser.http.errors import error_details
+from image_browser.http.ranges import UnsatisfiableRange, byte_range
+from image_browser.media.metadata import metadata
+from image_browser.media.sources import VIDEO_TYPES
+from image_browser.runtime.work import Cancelled, check_cancelled, request_work
 
-APP_DIRECTORY = files('image_browser').joinpath('web')
 MAX_REQUEST_BYTES = 128 * 1024
-
-
-def javascript_assets(directory, prefix='static'):
-    """Serve only packaged JavaScript, using its directory structure as the URL."""
-    for entry in directory.iterdir():
-        path = f'{prefix}/{entry.name}'
-        if entry.is_dir():
-            yield from javascript_assets(entry, path)
-        elif entry.name.endswith('.js'):
-            yield '/' + path, path
-
-
-STATIC_FILES = {
-    '/': 'template.html',
-    '/index.html': 'template.html',
-    '/favicon.svg': 'favicon.svg',
-    '/gallery.css': 'gallery.css',
-    '/gallery.js': 'gallery.js',
-    **dict(javascript_assets(APP_DIRECTORY.joinpath('static'))),
-}
 
 
 class GalleryHandler(BaseHTTPRequestHandler):
@@ -103,15 +85,17 @@ class GalleryHandler(BaseHTTPRequestHandler):
                 priority = 3
             with request_work(priority, self.disconnected):
                 route()
+        except Preparing as error:
+            self.send_json(error.progress, 202)
         except (Cancelled, BrokenPipeError, ConnectionResetError):
             pass  # Navigating away cancels in-flight requests.
         except (ValueError, OSError, RuntimeError, zipfile.BadZipFile, Image.DecompressionBombError) as error:
             if self.response_started:
                 self.close_connection = True
                 return
-            status = 400 if isinstance(error, ValueError) or self.command == 'POST' else 404
+            status, detail = error_details(error)
             try:
-                self.send_json({'error': str(error)}, status)
+                self.send_json(detail, status)
             except (BrokenPipeError, ConnectionResetError):
                 pass
 
@@ -152,27 +136,22 @@ class GalleryHandler(BaseHTTPRequestHandler):
             self.send_json(gallery.location(path))
         elif url.path == '/api/metadata':
             self.send_json(metadata(gallery, path, self.gallery_server.image_work,
-                                    self.gallery_server.archive_work))
+                                    self.gallery_server.archive_work, kind=query.get('kind', [None])[0]))
         elif url.path == '/api/folder':
-            ordering = Ordering.from_params({name: values[0] for name, values in query.items()})
             if 'limit' in query or 'names' in query:
-                listing = gallery.folder_page(path, ordering=ordering,
-                    limit=int(query.get('limit', [PAGE_SIZE])[0]),
-                    names=json.loads(query['names'][0]) if 'names' in query else None,
-                    revision=query.get('revision', [None])[0])
-            else:
-                snapshot = gallery.snapshot(path, ordering=ordering)
-                listing = {**snapshot['listing'], 'natural_folders': snapshot['natural_folders'],
-                           'revision': snapshot['revision']}
+                raise ValueError('Use POST /api/folder/entries for item facts')
+            ordering = Ordering.from_params({name: values[0] for name, values in query.items()})
+            with gallery.catalog.preparations.required(query.get('order_token', [None])[0]):
+                listing = self.gallery_server.catalog_api.folder_index(path, ordering=ordering)
             self.send_json({'path': path, 'root_name': gallery.root.name, **listing})
         elif url.path == '/thumbnail':
-            self._serve_thumbnail(path)
+            self._serve_thumbnail(path, query.get('kind', [None])[0])
         elif url.path == '/image':
             self._serve_image(path)
         else:
             self.send_json({'error': 'Not found'}, 404)
 
-    def _serve_thumbnail(self, path):
+    def _serve_thumbnail(self, path, kind=None):
         service = self.gallery_server.previews
         preview = None
         try:
@@ -180,9 +159,9 @@ class GalleryHandler(BaseHTTPRequestHandler):
             try:
                 self.gallery.validate(path)
             except ValueError as error:
-                self.send_json({'error': str(error)}, 400)
+                self.send_json(error_details(error)[1], 400)
                 return
-            preview = service.prepare(path)
+            preview = service.prepare(path, kind=kind)
             if preview.source is None:
                 self.send_headers('image/jpeg', 0, 204)
                 return
@@ -203,12 +182,10 @@ class GalleryHandler(BaseHTTPRequestHandler):
         except (OSError, ValueError, RuntimeError, zipfile.BadZipFile, Image.DecompressionBombError) as error:
             if self.response_started:
                 raise
-            status = (503 if isinstance(error, (Busy, Invalidated)) else
-                      403 if isinstance(error, PermissionError) else
-                      404 if isinstance(error, (FileNotFoundError, NotADirectoryError)) else
-                      422 if isinstance(error, (ValueError, zipfile.BadZipFile, Image.UnidentifiedImageError,
-                                               Image.DecompressionBombError)) else 500)
-            body = {'error': str(error)}
+            status, body = error_details(error)
+            if isinstance(error, (ValueError, zipfile.BadZipFile, Image.UnidentifiedImageError,
+                                  Image.DecompressionBombError)) and not isinstance(error, (InvalidSelection, StaleView)):
+                status, body = 422, {'error':str(error), 'code':'preview_unavailable', 'retryable':False}
             if preview and preview.source:
                 body['media_kind'] = preview.source.kind
                 if preview.source.kind == 'video' and isinstance(error, ValueError):
@@ -278,6 +255,7 @@ class GalleryHandler(BaseHTTPRequestHandler):
     def _read_json(self):
         length = int(self.headers.get('Content-Length', '0'))
         if not 0 < length <= MAX_REQUEST_BYTES:
+            self.close_connection = True
             raise ValueError('Invalid request size')
         request = json.loads(self.rfile.read(length))
         if not isinstance(request, dict):
@@ -287,24 +265,35 @@ class GalleryHandler(BaseHTTPRequestHandler):
 
     def _post(self):
         path = urlsplit(self.path).path
+        if path == '/api/folder/entries':
+            request = self._read_json()
+            result = self.gallery_server.catalog_api.entry_page(request.get('path', ''), request.get('items'),
+                                             revision=request.get('revision'))
+            self.send_json(result)
+            return
+        if path == '/api/order/cancel':
+            request = self._read_json()
+            self.gallery.catalog.preparations.cancel(request.get('token'))
+            self.send_json({'status': 'cancelled'})
+            return
         if path == '/api/refresh':
             request = self._read_json()
-            self.gallery.invalidate(request.get('path', ''))
-            self.thumbnails.invalidate()
-            self.send_json({'generation': self.gallery.generation})
+            scope = self.gallery.invalidate(request.get('path', ''))
+            self.send_json({'scope': scope})
             return
         if path != '/api/walk':
             self.send_json({'error': 'Not found'}, 404)
             return
         request = self._read_json()
-        result = self.gallery.walk(
-            root=request.get('root', ''),
-            anchor=request.get('anchor'),
-            reverse=request.get('reverse', False),
-            cursor=request.get('cursor'),
-            ordering=Ordering.from_params(request),
-            limit=request.get('limit', PAGE_SIZE),
-        )
+        with self.gallery.catalog.preparations.required(request.get('order_token')):
+            result = self.gallery.walk(
+                root=request.get('root', ''),
+                anchor=request.get('anchor'),
+                reverse=request.get('reverse', False),
+                cursor=request.get('cursor'),
+                ordering=Ordering.from_params(request),
+                limit=request.get('limit', PAGE_SIZE),
+            )
         self.send_json(result)
 
 
@@ -314,9 +303,10 @@ class GalleryServer(ThreadingHTTPServer):
 
     def __init__(self, address, root, exclude=()):
         self.gallery = Gallery(root, exclude)
-        self.thumbnails = ThumbnailCache()
-        self.archive_work = WorkGate(2, 1)
-        self.previews = PreviewService(self.gallery, self.thumbnails, self.archive_work)
-        self.image_work = WorkGate(4, 1)
-        self.video_work = WorkGate(2, 1)
+        self.catalog_api = CatalogApi(self.gallery)
+        self.thumbnails = self.gallery.thumbnails
+        self.archive_work = self.gallery.archive_work
+        self.previews = self.gallery.preview_service
+        self.image_work = self.gallery.image_work
+        self.video_work = self.gallery.video_work
         super().__init__(address, GalleryHandler)

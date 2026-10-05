@@ -5,9 +5,10 @@ from hashlib import sha256
 
 from PIL import Image, ImageOps
 
-from .cache import SharedCache
-from .video_thumbnails import render_video_thumbnail, video_metadata
-from .work import ByteBudget, WorkGate
+from image_browser.media.video import render_video_thumbnail, video_metadata
+from image_browser.runtime.cache import SharedCache
+from image_browser.runtime.work import ByteBudget, WorkGate
+from image_browser.storage.policy import cache_storage_error
 
 DEFAULT_CACHE_BYTES = 64 * 1024 * 1024
 THUMBNAIL_SIZE = (400, 300)
@@ -36,18 +37,14 @@ class ThumbnailCache:
     """Share pending decodes and retain encoded bytes within a memory budget."""
 
     def __init__(self, max_bytes=DEFAULT_CACHE_BYTES, workers=4):
-        self.cache = SharedCache(max_bytes)
+        self.cache = SharedCache(max_bytes, cache_errors=cache_storage_error)
         self.workers = WorkGate(workers, max(1, workers - 1))
         self.video_workers = WorkGate(1, 1)
-        self.metadata = SharedCache(1024 * 1024)
+        self.metadata = SharedCache(1024 * 1024, cache_errors=cache_storage_error)
 
     @property
     def bytes_used(self):
         return self.cache.weight
-
-    @property
-    def generation(self):
-        return self.cache.generation
 
     @staticmethod
     def key(source):
@@ -59,7 +56,7 @@ class ThumbnailCache:
     def cached_video_info(self, source):
         return self.metadata.peek(source.cache_key) if source.kind == 'video' else None
 
-    def get(self, source, archives=None, archive_work=None, *, generation=None) -> bytes:
+    def get(self, source, archives=None, archive_work=None, *, valid=None) -> bytes:
         """Render a resolved source; folder covers and direct media share this cache."""
         def load():
             if source.kind == 'video':
@@ -69,7 +66,7 @@ class ThumbnailCache:
             with self.workers, ARCHIVE_BUFFER_BUDGET.reserve(size):
                 file = io.BytesIO(source.read_member(archives, archive_work)) if source.member else source.file
                 return render_thumbnail(file)
-        return self.cache.get(self.key(source), load, len, generation=generation)
+        return self.cache.get(self.key(source), load, len, valid=valid)
 
     def video_info(self, source):
         def load():
@@ -77,6 +74,6 @@ class ThumbnailCache:
                 return video_metadata(source.file)
         return self.metadata.get(source.cache_key, load, lambda _: 128)
 
-    def invalidate(self):
-        self.cache.invalidate()
-        self.metadata.invalidate()
+    def invalidate(self, predicate=lambda file: True):
+        self.cache.invalidate(lambda key: predicate(key[0][0]))
+        self.metadata.invalidate(lambda key: predicate(key[0]))

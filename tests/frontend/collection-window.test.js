@@ -125,3 +125,54 @@ test('an old cancellation cannot clear the loading state of a reopened view', as
     assert.equal(after.loading, false);
     assert.deepEqual(window.paths, ['p1', 'p2']);
 });
+
+test('stale continuations reconcile around the visible anchor without mixing orders', async () => {
+    const requests = [];
+    const window = new CollectionWindow(async options => {
+        requests.push(options);
+        if (options.cursor) throw Object.assign(new Error('changed'), {code:'stale_view'});
+        return {images:['new-next'], cursor:null, warnings:[], revisions:{Album:'new'}};
+    }, {root:'Album', image:'anchor', pageSize:2, maxPaths:10});
+    window.paths.unshift('old-before');
+    window.revisions = {Album:'old'};
+    const after = window.edges[1]; after.cursor = 'old-cursor';
+    const result = await window.load(after, new AbortController().signal);
+    assert.deepEqual(window.paths, ['anchor','new-next']);
+    assert.deepEqual(result.removed, ['old-before']);
+    assert.equal(result.reconciled, true);
+    assert.equal(requests[1].cursor, null);
+    assert.equal(requests[1].anchor, 'anchor');
+});
+
+test('a removed anchor rebuilds from the collection boundary without retaining obsolete paths', async () => {
+    const window = new CollectionWindow(async options => {
+        if (options.cursor) throw Object.assign(new Error('changed'), {code:'stale_view'});
+        if (options.anchor) throw Object.assign(new Error('removed'), {code:'not_found'});
+        return {images:['new-first'], cursor:null, warnings:[]};
+    }, {root:'Album', image:'removed-anchor', pageSize:2, maxPaths:10});
+    const after = window.edges[1]; after.cursor = 'old';
+    const result = await window.load(after, new AbortController().signal);
+    assert.equal(result.reconciled, true);
+    assert.deepEqual(window.paths, ['new-first']);
+    assert.deepEqual(result.removed, ['removed-anchor']);
+});
+
+test('a removed anchor also reconciles before any continuation has been created', async () => {
+    const window = new CollectionWindow(async options => {
+        if (options.anchor) throw Object.assign(new Error('removed'), {code:'invalid_request'});
+        return {images:['new-first'], cursor:null, warnings:[]};
+    }, {root:'Album', image:'removed-anchor', pageSize:2, maxPaths:10});
+    const result = await window.load(window.edges[1], new AbortController().signal);
+    assert.equal(result.reconciled, true);
+    assert.deepEqual(window.paths, ['new-first']);
+    assert.deepEqual(result.removed, ['removed-anchor']);
+});
+
+test('natural insertion-point neighbors remain usable while the missing anchor is removed', async () => {
+    const window = new CollectionWindow(async () => ({images:['next'], cursor:null, warnings:[], anchor_missing:true}),
+        {root:'Album', image:'removed-anchor', pageSize:2, maxPaths:10});
+    const result = await window.load(window.edges[1], new AbortController().signal);
+    assert.equal(result.reconciled, true);
+    assert.deepEqual(window.paths, ['next']);
+    assert.deepEqual(result.removed, ['removed-anchor']);
+});

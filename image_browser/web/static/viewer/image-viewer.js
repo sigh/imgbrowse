@@ -1,6 +1,6 @@
 import {setIconButton} from '../shared/icons.js';
 import {loadOriginal} from '../data/media-cache.js';
-import {walkImages} from '../data/api.js';
+import {walkImages, sequence} from '../data/api.js';
 import {byId, plainClick, TaskScope} from '../shared/dom.js';
 import {filename, parentPath, ZOOM, ScreenMode, ReadingLayout, ImageSize, ViewerEntry, sortKey, sortSettings} from '../shared/state.js';
 import {ViewerViewport, imageScale} from './viewer-viewport.js';
@@ -39,6 +39,7 @@ export class ImageViewer {
         this.key = null;
         this.navigation = new CollectionNavigator({
             walk:walkImages, loadOriginal, select:selectImage,
+            subscribeInvalidation:listener => sequence.onInvalidation(listener),
             changed:outcomeChanged => this.navigationChanged(outcomeChanged), loadingDelay:LOADING_DELAY,
         });
         this.filmstrip = new ThumbnailStrip(this.strip, previews, selectImage);

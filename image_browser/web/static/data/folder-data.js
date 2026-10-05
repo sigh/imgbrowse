@@ -1,5 +1,5 @@
 import {CollectionWindow} from './collection-window.js';
-import {filename, joinPath, parentPath, sortKey, sortSettings} from '../shared/state.js';
+import {filename, joinPath, parentPath, relatedScope, sortKey, sortSettings} from '../shared/state.js';
 
 const MAX_PATHS = 2000;
 const PAGE_SIZE = 60;
@@ -12,30 +12,41 @@ export class FolderData {
     }
 
     key(state) { return JSON.stringify([state.folder, sortKey(state)]); }
-    clear() { this.cache.clear(); }
+    clear(scope = '') {
+        for (const [key, directory] of this.cache) if (relatedScope(directory.path, scope)) this.cache.delete(key);
+    }
 
     createWindow(path, ordering, image) {
         return new CollectionWindow(this.walkImages, {root:path, ordering, image, pageSize:PAGE_SIZE, maxPaths:MAX_PATHS});
     }
 
-    async open(state, signal, force = false) {
+    async open(state, signal, force = false, progress = () => {}) {
         const key = this.key(state);
         if (force) this.cache.delete(key);
         let directory = this.cache.get(key);
         if (!directory) {
             const path = state.folder, ordering = sortSettings(state);
-            const {entries = [], ...listing} = await this.getFolder(path, signal, ordering, state.recursive ? {} : {limit:PAGE_SIZE});
+            const create = (listing, preparation = null) => {
+                if (signal.aborted) return;
+                directory = {path, key, ordering, listing, preparation,
+                    window:this.createWindow(path, ordering)};
+                directory.window.edges[0].done = true;
+                return directory;
+            };
+            const listing = await this.getFolder(path, signal, ordering, (listing, preparation) => {
+                signal.throwIfAborted();
+                if (listing) progress(create(listing, preparation));
+                else if (directory) { directory.preparation = preparation; progress(directory); }
+            });
             signal.throwIfAborted();
-            directory = {path, key, ordering, listing, entries:new Map(), pending:null, error:'',
-                window:this.createWindow(path, ordering)};
-            this.retainEntries(directory, entries);
+            create(listing);
             directory.window.edges[0].done = true;
         }
         signal.throwIfAborted();
         this.remember(directory);
         const {path, ordering, listing} = directory;
         this.seed(path, listing.images.slice(0, 2048).map(name => joinPath(path, name)),
-            {...ordering, start:true, end:listing.images.length <= 2048 && !listing.folders.length});
+            {...ordering, revision:listing.view_revision, start:true, end:listing.images.length <= 2048 && !listing.folders.length});
         return directory;
     }
 
@@ -43,33 +54,8 @@ export class FolderData {
         this.cache.delete(directory.key);
         this.cache.set(directory.key, directory);
         const count = () => [...this.cache.values()].reduce((sum, item) => sum + item.window.paths.length
-            + item.entries.size + item.listing.folders.length + item.listing.images.length + item.listing.other_files.length, 0);
+            + item.listing.folders.length + item.listing.images.length + item.listing.other_files.length, 0);
         while (this.cache.size > 3 || count() > 20000) this.cache.delete(this.cache.keys().next().value);
-    }
-
-    retainEntries(directory, entries) {
-        for (const entry of entries) {
-            directory.entries.delete(entry.name);
-            directory.entries.set(entry.name, {...entry, path:joinPath(directory.path, entry.name)});
-        }
-        while (directory.entries.size > MAX_PATHS) directory.entries.delete(directory.entries.keys().next().value);
-    }
-
-    entriesLoading(directory) { return Boolean(directory?.pending && !directory.pending.aborted); }
-
-    async loadEntries(directory, items, signal) {
-        const names = items.map(item => filename(item.path)).filter(name => !directory.entries.has(name)).slice(0, PAGE_SIZE);
-        if (!names.length || this.entriesLoading(directory) || directory.error) return;
-        directory.pending = signal;
-        try {
-            const page = await this.getFolder(directory.path, signal, directory.ordering,
-                {names, ...(directory.listing.revision ? {revision:directory.listing.revision} : {})});
-            signal.throwIfAborted();
-            this.retainEntries(directory, page.entries);
-            this.remember(directory);
-        } finally {
-            if (directory.pending === signal) directory.pending = null;
-        }
     }
 
     reveal(directory, path) {
@@ -77,8 +63,8 @@ export class FolderData {
         directory.window.windowed = true;
     }
 
-    async load(directory, reverse, signal) {
-        const result = await directory.window.load(directory.window.edges[reverse ? 0 : 1], signal);
+    async load(directory, reverse, signal, anchor) {
+        const result = await directory.window.load(directory.window.edges[reverse ? 0 : 1], signal, {anchor});
         if (result) this.remember(directory);
         return result;
     }
@@ -90,6 +76,6 @@ export class FolderData {
         if (index < 0) return;
         const start = Math.max(0, index - 32), end = Math.min(images.length, index + 33);
         this.seed(collection, images.slice(start, end).map(name => joinPath(collection, name)),
-            {...directory.ordering, start:start === 0, end:end === images.length && !folders.length});
+            {...directory.ordering, revision:directory.listing.view_revision, start:start === 0, end:end === images.length && !folders.length});
     }
 }

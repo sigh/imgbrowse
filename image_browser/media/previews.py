@@ -3,16 +3,16 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Callable
 
-from .sources import MediaSource
-from .work import Invalidated, check_cancelled
+from image_browser.media.sources import MediaSource
+from image_browser.runtime.work import Invalidated, check_cancelled
 
 
 @dataclass(frozen=True)
 class PreparedPreview:
     source: MediaSource | None
-    generation: int
-    render_generation: int
+    valid: Callable[[], bool]
     etag: str | None
 
 
@@ -24,15 +24,14 @@ class PreviewService:
 
     def check(self, preview):
         check_cancelled()
-        if preview.generation != self.gallery.generation:
+        if not preview.valid():
             raise Invalidated('Refreshed during request')
 
-    def prepare(self, path):
-        generation = self.gallery.generation
-        render_generation = self.thumbnails.generation
-        source = self.gallery.thumbnail_source(path)
+    def prepare(self, path, kind=None):
+        valid = self.gallery.refresh.watch(path)
+        source = self.gallery.thumbnail_source(path, kind=kind)
         etag = self.thumbnails.etag(source) if source else None
-        preview = PreparedPreview(source, generation, render_generation, etag)
+        preview = PreparedPreview(source, valid, etag)
         self.check(preview)
         return preview
 
@@ -41,7 +40,7 @@ class PreviewService:
         if preview.source is None:
             raise ValueError('An empty preview has no image to render')
         data = self.thumbnails.get(preview.source, self.gallery.archives, self.archive_work,
-                                   generation=preview.render_generation)
+                                   valid=preview.valid)
         self.check(preview)
         return data
 

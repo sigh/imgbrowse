@@ -5,7 +5,7 @@ import signal
 from pathlib import Path
 from stat import S_ISDIR
 
-from .server import GalleryServer
+from image_browser.http.server import GalleryServer
 
 
 def main(argv=None):

@@ -16,9 +16,9 @@ from urllib.parse import urlencode
 
 from PIL import Image
 
-from image_browser.server import GalleryServer
-from image_browser.thumbnails import render_thumbnail
-from image_browser.work import Cancelled, Invalidated, request_work
+from image_browser.http.server import GalleryServer
+from image_browser.media.thumbnails import render_thumbnail
+from image_browser.runtime.work import Cancelled, Invalidated, request_work
 
 
 class PreviewTests(unittest.TestCase):
@@ -51,12 +51,12 @@ class PreviewTests(unittest.TestCase):
         branch = '/'.join(['deep'] * 28)
         path = branch + '/1.jpg'
         self.image(path)
-        with patch('image_browser.thumbnails.render_thumbnail', wraps=render_thumbnail) as render:
+        with patch('image_browser.media.thumbnails.render_thumbnail', wraps=render_thumbnail) as render:
             status, headers, body = self.request('deep')
             self.assertEqual(status, 200)
             self.assertEqual(headers['X-Media-Kind'], 'image')
             self.assertEqual(Image.open(io.BytesIO(body)).format, 'JPEG')
-            with patch.object(self.gallery, '_listing', side_effect=AssertionError('rescanned')):
+            with patch.object(self.gallery.storage, 'children', side_effect=AssertionError('rescanned')):
                 self.assertEqual(self.request('deep')[2], body)
                 self.assertEqual(self.request(path)[2], body)
             self.assertEqual(render.call_count, 1)
@@ -68,14 +68,14 @@ class PreviewTests(unittest.TestCase):
             self.assertEqual(self.gallery.thumbnail_source('book/1.jpg'), source)
             self.assertEqual(self.request('book/1.jpg')[0], 200)
         self.gallery.invalidate('book')
-        with patch.object(self.gallery, '_locate', wraps=self.gallery._locate) as locate:
+        with patch.object(self.gallery.storage, 'locate', wraps=self.gallery.storage.locate) as locate:
             self.gallery.thumbnail_source('book/1.jpg')
             self.assertEqual(locate.call_count, 1)
 
     def test_empty_first_branch_does_not_search_siblings(self):
         (self.root / 'book/first/empty').mkdir(parents=True)
         self.image('book/second/1.jpg')
-        with patch.object(self.gallery, '_listing', wraps=self.gallery._listing) as listing:
+        with patch.object(self.gallery.storage, 'children', wraps=self.gallery.storage.children) as listing:
             status, headers, body = self.request('book')
             self.assertEqual((status, body), (204, b''))
             self.assertNotIn('Content-Length', headers)
@@ -135,7 +135,7 @@ class PreviewTests(unittest.TestCase):
     def test_shared_selection_survives_owner_cancellation(self):
         self.image('book/chapter/1.jpg')
         entered, release, cancel_owner = Event(), Event(), Event()
-        original = self.gallery._representative
+        original = self.gallery.covers._select
 
         def select(*args):
             entered.set()
@@ -147,7 +147,7 @@ class PreviewTests(unittest.TestCase):
                 prepared = self.server.previews.prepare('book')
                 return self.server.previews.render(prepared)
 
-        with patch.object(self.gallery, '_representative', side_effect=select) as selection, ThreadPoolExecutor(2) as pool:
+        with patch.object(self.gallery.covers, '_select', side_effect=select) as selection, ThreadPoolExecutor(2) as pool:
             owner = pool.submit(cover, cancel_owner.is_set)
             self.assertTrue(entered.wait(2))
             follower = pool.submit(cover, lambda: False)
@@ -155,8 +155,8 @@ class PreviewTests(unittest.TestCase):
                 joined = False
                 deadline = monotonic() + 2
                 while monotonic() < deadline:
-                    with self.gallery.previews.lock:
-                        joined = any(len(consumers) == 2 for _, consumers in self.gallery.previews.pending.values())
+                    with self.gallery.covers.cache.lock:
+                        joined = any(len(task.consumers) == 2 for task in self.gallery.covers.cache.pending.values())
                     if joined:
                         break
                     sleep(.005)
@@ -172,14 +172,14 @@ class PreviewTests(unittest.TestCase):
     def test_abandoned_cover_stops_before_next_directory_or_decode(self):
         self.image('book/chapter/1.jpg')
         cancel = Event()
-        original = self.gallery.listing
+        original = self.gallery.catalog.snapshot
 
         def listing(*args, **kwargs):
             result = original(*args, **kwargs)
             cancel.set()
             return result
 
-        with request_work(2, cancel.is_set), patch.object(self.gallery, 'listing', side_effect=listing) as scan, \
+        with request_work(2, cancel.is_set), patch.object(self.gallery.catalog, 'snapshot', side_effect=listing) as scan, \
              patch.object(self.server.thumbnails, 'get', side_effect=AssertionError('decoded abandoned cover')):
             with self.assertRaises(Cancelled):
                 self.server.previews.prepare('book')
@@ -198,7 +198,7 @@ class PreviewTests(unittest.TestCase):
         archive_path = self.root / 'book.cbz'
         with zipfile.ZipFile(archive_path, 'w') as archive:
             archive.writestr('chapter/1.jpg', first)
-        original = self.gallery._locate
+        original = self.gallery.storage.locate
 
         def locate(path):
             result = original(path)
@@ -207,8 +207,8 @@ class PreviewTests(unittest.TestCase):
             self.gallery.invalidate('book.cbz/chapter')
             return result
 
-        with patch.object(self.gallery, '_locate', side_effect=locate):
-            self.assertEqual(self.request('book.cbz')[0], 503)
+        with patch.object(self.gallery.storage, 'locate', side_effect=locate):
+            self.assertEqual(self.request('book.cbz')[0], 409)
         self.assertEqual(self.request('book.cbz')[0], 200)
         self.assertEqual(self.gallery.representative('book.cbz'), 'book.cbz/other/2.jpg')
 
@@ -229,13 +229,13 @@ class PreviewTests(unittest.TestCase):
     def test_video_cover_does_not_probe_metadata_and_unavailability_is_explicit(self):
         (self.root / 'videos').mkdir()
         (self.root / 'videos/1.mp4').write_bytes(b'video')
-        with patch('image_browser.thumbnails.render_video_thumbnail', return_value=b'jpeg'), \
-             patch('image_browser.thumbnails.video_metadata', side_effect=AssertionError('ffprobe')):
+        with patch('image_browser.media.thumbnails.render_video_thumbnail', return_value=b'jpeg'), \
+             patch('image_browser.media.thumbnails.video_metadata', side_effect=AssertionError('ffprobe')):
             status, headers, body = self.request('videos')
             self.assertEqual((status, body, headers['X-Media-Kind']), (200, b'jpeg', 'video'))
             self.assertNotIn('X-Video-Duration', headers)
         self.server.thumbnails.invalidate()
-        with patch('image_browser.thumbnails.render_video_thumbnail', side_effect=ValueError('No FFmpeg')):
+        with patch('image_browser.media.thumbnails.render_video_thumbnail', side_effect=ValueError('No FFmpeg')):
             status, _, body = self.request('videos')
             self.assertEqual(status, 422)
             self.assertEqual(json.loads(body)['code'], 'video_preview_unavailable')

@@ -19,7 +19,7 @@ test('image facts and optional EXIF are prepared without changing source data', 
     assert.equal(modified.age, new Intl.RelativeTimeFormat(undefined, {numeric:'auto'}).format(-5, 'day'));
     assert.equal(taken.value, '2026-09-28 08:42');
     assert.equal(taken.datetime, data.exif.Taken);
-    assert.ok(taken.age);
+    assert.equal(taken.age, undefined);
     assert.deepEqual(camera, {label:'Camera', value:'Fujifilm X-T5'});
     assert.deepEqual(data, original);
 });
@@ -36,7 +36,7 @@ test('archive and member facts retain their date meaning', () => {
     const member = metadataInfo({...image, filesystem_path:archive.filesystem_path, archive_member:'Chapter/page.jpg'}, now);
     assert.equal(member.facts.at(-1).label, 'Modified');
     const folder = metadataInfo({...archive, kind:MetadataKind.DIRECTORY, archive_member:'Chapter', modified:image.modified}, now);
-    assert.equal(folder.facts.find(row => row.datetime).label, 'Archive date');
+    assert.equal(folder.facts.find(row => row.datetime).label, 'Modified');
 });
 
 test('video duration is optional and uses the same format as previews', () => {
@@ -115,4 +115,21 @@ test('capture offsets identify one instant across browser timezones', () => {
             assert.equal(row.age, new Intl.RelativeTimeFormat(undefined, {numeric:'auto'}).format(-4, 'hour'), TZ);
         }
     }
+});
+
+
+test('timezone-free calendar dates survive DST gaps and skipped days without invented ages', () => {
+    const moduleUrl = new URL('../../image_browser/web/static/data/metadata-data.js', import.meta.url).href;
+    const script = `import {formatMetadataDate, formatRelativeAge} from ${JSON.stringify(moduleUrl)};
+        const values = ['2024-10-06T02:45:00', '2011-12-30T12:00:00'];
+        console.log(JSON.stringify(values.map(value => [formatMetadataDate({kind:'calendar', value}), formatRelativeAge({kind:'calendar',value})])));`;
+    for (const TZ of ['UTC', 'Australia/Sydney', 'Pacific/Apia', 'America/New_York']) {
+        const values = JSON.parse(execFileSync(process.execPath, ['--input-type=module', '-e', script],
+            {env:{...process.env, TZ}, encoding:'utf8'}));
+        assert.deepEqual(values, [['2024-10-06 02:45',null], ['2011-12-30 12:00',null]], TZ);
+    }
+    assert.equal(formatMetadataDate({kind:'calendar',value:'2024-02-30T12:00:00'}), undefined);
+    const timestamp = {kind:'instant',value:image.modified,key:'1790683200000000000'};
+    assert.equal(formatMetadataDate(timestamp), formatMetadataDate(image.modified));
+    assert.equal(formatRelativeAge(timestamp, now), formatRelativeAge(image.modified, now));
 });
