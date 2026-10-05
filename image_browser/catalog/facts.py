@@ -2,14 +2,13 @@
 
 import stat
 
-from image_browser.catalog.errors import StaleView
 from image_browser.catalog.model import ArchiveEntry, EntryFacts, Timestamp
 from image_browser.runtime.cache import SharedCache
 from image_browser.runtime.work import Busy, Cancelled, Invalidated, check_cancelled
 
 
 class FactRepository:
-    def __init__(self, resolve, work, changed=lambda entry, facts: False):
+    def __init__(self, resolve, work, changed=lambda entry, facts: None):
         self.resolve = resolve
         self.work = work
         self.changed = changed
@@ -33,14 +32,15 @@ class FactRepository:
             result = self.cache.get(key, load, weight, valid=valid)
         if valid is not None and not valid():
             raise Invalidated('Refreshed during fact request')
-        if self.changed(entry, result):
-            raise StaleView('Modified facts changed; reload the ordered view')
+        self.changed(entry, result)
         return result
 
     def read(self, entry):
         check_cancelled()
         source = entry.source
         if isinstance(source, ArchiveEntry):
+            if entry.type == 'folder':
+                return EntryFacts(source.modified, source.archive_version + (source.inner, source.crc))
             return EntryFacts(source.modified, source.archive_version + (source.inner, source.crc),
                               source.size, source.compressed_size)
         try:
@@ -58,7 +58,8 @@ class FactRepository:
         if stat.S_ISLNK(attributes.st_mode):
             return EntryFacts(None, None, unavailable='Symbolic links are not included')
         version = (attributes.st_dev, attributes.st_ino, attributes.st_mtime_ns, attributes.st_size)
-        return EntryFacts(Timestamp.instant(attributes.st_mtime_ns), version, attributes.st_size)
+        size = attributes.st_size if entry.type != 'folder' else None
+        return EntryFacts(Timestamp.instant(attributes.st_mtime_ns), version, size)
 
     def invalidate(self, predicate):
         self.cache.invalidate(lambda key: predicate(key[0]))

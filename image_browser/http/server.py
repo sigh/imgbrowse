@@ -141,8 +141,14 @@ class GalleryHandler(BaseHTTPRequestHandler):
             if 'limit' in query or 'names' in query:
                 raise ValueError('Use POST /api/folder/entries for item facts')
             ordering = Ordering.from_params({name: values[0] for name, values in query.items()})
-            with gallery.catalog.preparations.required(query.get('order_token', [None])[0]):
-                listing = self.gallery_server.catalog_api.folder_index(path, ordering=ordering)
+            try:
+                with gallery.catalog.preparations.required(query.get('order_token', [None])[0]):
+                    listing = self.gallery_server.catalog_api.folder_index(path, ordering=ordering)
+            except Preparing as error:
+                if 'order_token' not in query:
+                    error.progress['listing'] = {'path': path, 'root_name': gallery.root.name,
+                        **self.gallery_server.catalog_api.folder_index(path)}
+                raise
             self.send_json({'path': path, 'root_name': gallery.root.name, **listing})
         elif url.path == '/thumbnail':
             self._serve_thumbnail(path, query.get('kind', [None])[0])

@@ -95,17 +95,6 @@ test('selective refresh leaves unrelated pending facts and values alive', async 
     assert.notEqual(entryKey(item('same', 'folder')), entryKey(item('same')));
 });
 
-test('a view verifies fact keys without relying on retention of its backend projection', async () => {
-    const a = item('a.jpg');
-    const store = new EntryStore(async () => ({entries:[{name:'a.jpg', type:'image', status:'ready',
-        modified:{kind:'instant',value:'1970-01-01T00:00:00.000000002+00:00',key:'2'}}]}));
-    const demand = new FactDemand(store, 'Album', 'same-membership', () => {}, new Map([[entryKey(a), '1']]));
-    demand.update([a]); await tick(); await tick();
-    assert.equal(store.peek(a, 'same-membership').modified.key, '2', 'The shared fact remains usable by other views');
-    assert.equal(demand.state(a).error.code, 'stale_view', 'Only the incompatible ordered view needs reconciliation');
-    demand.dispose();
-});
-
 test('Info publishing newer facts notifies visible demand without another scroll or request', async () => {
     const a = item('a.jpg');
     const store = new EntryStore(async () => ({entries:[{name:'a.jpg',type:'image',status:'ready',facts_revision:'old',modified:null}]}));
@@ -124,12 +113,25 @@ test('Info publishing newer facts notifies visible demand without another scroll
 test('stale invalidation notifies the view and does not turn cancellation into a retry failure', async () => {
     const store = new EntryStore(() => new Promise(() => {}));
     const a = item('a.jpg');
-    const demand = new FactDemand(store, 'Album', 'old-membership', () => {});
+    const events = [];
+    const demand = new FactDemand(store, 'Album', 'old-membership', event => events.push(event));
     demand.update([a]); await tick();
     store.invalidate('Album', {stale:true}); await tick();
-    assert.equal(demand.state(a).error.code, 'stale_view');
+    assert.ok(events.some(event => event?.scope === 'Album' && event.stale));
+    assert.equal(demand.errors.size, 0);
+    assert.equal(demand.disposed, true, 'An obsolete membership cannot start more fact requests');
     assert.equal(demand.loading, false);
     demand.dispose();
+});
+
+test('a stale folder notifies its view even without visible files', () => {
+    const store = new EntryStore(() => assert.fail('An obsolete demand must not fetch facts'));
+    let event;
+    const demand = new FactDemand(store, 'Album', 'v1', change => { event = change; });
+    store.invalidate('Album', {stale:true});
+    assert.deepEqual(event, {scope:'Album', stale:true});
+    assert.equal(demand.errors.size, 0);
+    assert.equal(demand.disposed, true);
 });
 
 test('Info supersedes an older pending Browse fact without allowing late publication', async () => {

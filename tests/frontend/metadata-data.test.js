@@ -1,12 +1,32 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {execFileSync} from 'node:child_process';
-import {metadataInfo, formatMetadataDate, formatRelativeAge} from '../../image_browser/web/static/data/metadata-data.js';
+import {metadataInfo, formatBytes, formatMetadataDate, formatRelativeAge} from '../../image_browser/web/static/data/metadata-data.js';
 import {MetadataKind} from '../../image_browser/web/static/shared/media-kind.js';
 
 const now = Date.parse('2026-10-04T12:00:00Z');
 const image = {kind:MetadataKind.IMAGE, name:'photo.jpg', filesystem_path:'/media/photo.jpg', archive_member:null,
     width:1600, height:2400, format:'JPEG', size:840000, modified:'2026-09-29T12:00:00Z'};
+
+test('size formatting preserves zero and uses binary units', () => {
+    assert.equal(formatBytes(null), undefined);
+    assert.equal(formatBytes(undefined), undefined);
+    for (const [value, label] of [[0,'0 bytes'], [1023,'1023 bytes'], [1024,'1 KiB'],
+        [1536,'1.5 KiB'], [1048576,'1 MiB'], [1073741824,'1 GiB']]) {
+        assert.equal(formatBytes(value), label);
+    }
+});
+
+test('nullable sizes are omitted from Info while zero-byte files remain visible', () => {
+    for (const data of [{kind:MetadataKind.DIRECTORY, size:null},
+        {kind:MetadataKind.FILE, size:null}, {kind:MetadataKind.ARCHIVE, size:null, archive_size:null}]) {
+        assert.equal(metadataInfo({name:'fixture', ...data}, now).facts.some(row => row.label === 'Size' || row.label === 'Archive size'), false);
+    }
+    const file = metadataInfo({kind:MetadataKind.FILE, name:'empty.txt', size:0}, now);
+    assert.deepEqual(file.facts.find(row => row.label === 'Size'), {label:'Size', value:'0 bytes'});
+    const archive = metadataInfo({kind:MetadataKind.ARCHIVE, size:null, archive_size:1024}, now);
+    assert.deepEqual(archive.facts, [{label:'Archive size', value:'1 KiB'}]);
+});
 
 test('image facts and optional EXIF are prepared without changing source data', () => {
     const data = {...image, exif:{Taken:'2026-09-28T08:42:00', 'Camera make':'Fujifilm', 'Camera model':'X-T5'}};

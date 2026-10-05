@@ -59,8 +59,8 @@ export class EntryStore {
 
 /** One view's visible demand. Obsolete requests leave shared facts available. */
 export class FactDemand {
-    constructor(store, path, revision, changed, comparisons = new Map()) {
-        Object.assign(this, {store, path, revision, changed, comparisons});
+    constructor(store, path, revision, changed) {
+        Object.assign(this, {store, path, revision, changed});
         this.wanted = new Map();
         this.active = new Set();
         this.errors = new Map();
@@ -70,21 +70,17 @@ export class FactDemand {
                 if (!relatedScope(this.path, event.scope)) return;
                 for (const task of this.active) task.controller.abort();
                 this.errors.clear();
-                if (event.stale && this.wanted.size) this.errors.set(this.wanted.keys().next().value,
-                    Object.assign(new Error('Folder view changed'), {code:'stale_view'}));
+                if (event.stale) this.dispose();
             } else {
                 const changed = [...this.wanted.values()].filter(item => event.keys.has(store.key(item, this.revision)));
                 if (!changed.length) return;
                 for (const item of changed) this.errors.delete(entryKey(item));
-                this.checkRevisions();
             }
-            this.changed(); this.pump();
+            this.changed(event); this.pump();
         });
     }
 
     state(item) {
-        const error = this.errors.get(entryKey(item));
-        if (error?.code === 'stale_view') return {status:'error', error};
         return this.store.peek(item, this.revision) || (this.errors.has(entryKey(item))
             ? {status:'error', error:this.errors.get(entryKey(item))} : {status:'loading'});
     }
@@ -95,17 +91,7 @@ export class FactDemand {
         for (const task of this.active) {
             if (!task.items.some(item => this.wanted.has(entryKey(item)))) task.controller.abort();
         }
-        this.checkRevisions();
         this.pump();
-    }
-
-    checkRevisions() {
-        for (const item of this.wanted.values()) {
-            const fact = this.store.peek(item, this.revision), key = entryKey(item);
-            if (fact && this.comparisons.has(key) && this.comparisons.get(key) !== (fact.modified?.key ?? null)) {
-                this.errors.set(key, Object.assign(new Error('Modified order changed'), {code:'stale_view'}));
-            }
-        }
     }
 
     retry() { this.errors.clear(); this.pump(); }
@@ -144,7 +130,7 @@ export class FactDemand {
                 }
             }).finally(() => {
                 this.active.delete(task);
-                if (!this.disposed) { this.checkRevisions(); this.changed(); this.pump(); }
+                if (!this.disposed) { this.changed(); this.pump(); }
             });
         }
     }

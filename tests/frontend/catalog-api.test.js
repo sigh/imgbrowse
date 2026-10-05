@@ -1,9 +1,46 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import {entries, getFolder, getMetadata} from '../../image_browser/web/static/data/api.js';
+import {createApi, entries, getFolder, getMetadata} from '../../image_browser/web/static/data/api.js';
 
 const tick = () => new Promise(resolve => setTimeout(resolve, 0));
 const response = (data, status = 200) => ({ok:status < 400, status, json:async () => data});
+
+test('an immediately ready order needs one request and no temporary listing', async () => {
+    const calls = [];
+    const api = createApi(async url => {
+        calls.push(url);
+        return response({revision:'v1', view_revision:'size-v1', items:[{name:'a.jpg', type:'image', sort_key:'10'}]});
+    });
+    const listing = await api.getFolder('Ready', undefined, {sort:'size'}, () => assert.fail('Ready orders need no preview'));
+    assert.deepEqual(listing.images, ['a.jpg']);
+    assert.deepEqual(calls, ['/api/folder?path=Ready&sort=size&order=asc']);
+    await api.getFolder('Ready', undefined, {sort:'size'});
+    assert.equal(calls.length, 1);
+});
+
+test('preparation supplies one preview that late consumers share without another request', async () => {
+    const listing = {revision:'v1', view_revision:'natural-v1', items:[{name:'a.jpg', type:'image'}]};
+    let calls = 0;
+    const api = createApi(async url => {
+        if (url === '/api/order/cancel') return response({status:'cancelled'});
+        assert.match(url, /sort=size/);
+        if (++calls === 1) return response({status:'preparing', token:'lease', completed:0, total:2, listing}, 202);
+        if (calls === 2) return response({status:'preparing', token:'lease', completed:1, total:2}, 202);
+        return response({...listing, view_revision:'size-v1'});
+    });
+    const firstUpdates = [], secondUpdates = [];
+    const first = api.getFolder('Preparing', undefined, {sort:'size'}, (listing, preparation) => firstUpdates.push({listing, preparation}));
+    await tick();
+    const second = api.getFolder('Preparing', undefined, {sort:'size'}, (listing, preparation) => secondUpdates.push({listing, preparation}));
+    assert.deepEqual(secondUpdates[0].listing.images, ['a.jpg'], 'Late consumers receive the retained preview immediately');
+    await Promise.all([first, second]);
+    for (const updates of [firstUpdates, secondUpdates]) {
+        assert.equal(updates.filter(update => update.listing).length, 1);
+        assert.equal(updates[1].listing, null);
+        assert.equal(updates[1].preparation.completed, 1);
+    }
+    assert.equal(calls, 3, 'Consumers share the preparation and its polls');
+});
 
 test('one cancelled consumer cannot interrupt another consumers preparation progress', async t => {
     const original = globalThis.fetch;
@@ -24,6 +61,25 @@ test('one cancelled consumer cannot interrupt another consumers preparation prog
     assert.equal((await second).images[0], 'a.jpg');
     assert.ok(updates.some(progress => progress?.completed === 1));
     assert.equal(modified, 2);
+});
+
+test('a replacement request cannot inherit an abandoned preparations preview', async () => {
+    const listing = {revision:'old', view_revision:'old', items:[{name:'old.jpg', type:'image'}]};
+    let calls = 0;
+    const api = createApi(async url => {
+        if (url === '/api/order/cancel') return response({status:'cancelled'});
+        if (++calls === 1) return response({status:'preparing', token:'old', listing}, 202);
+        return response({revision:'new', view_revision:'new', items:[{name:'new.jpg', type:'image'}]});
+    });
+    const controller = new AbortController();
+    const old = api.getFolder('Replacement', controller.signal, {sort:'size'});
+    await tick();
+    const cancelled = assert.rejects(old, {name:'AbortError'});
+    controller.abort();
+    const current = await api.getFolder('Replacement', undefined, {sort:'size'}, () => assert.fail('An abandoned preview must not be replayed'));
+    await cancelled;
+    assert.deepEqual(current.images, ['new.jpg']);
+    assert.equal(api.entries.revisions.get('Replacement'), 'new');
 });
 
 test('an obsolete image metadata response cannot publish facts into the shared store', async t => {

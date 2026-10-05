@@ -38,7 +38,7 @@ class Traversal:
             previous_sequence = cursor.get('refresh_sequence', refresh_sequence)
             if type(previous_sequence) is not int or not 0 <= previous_sequence <= refresh_sequence:
                 raise ValueError('Invalid continuation refresh context')
-            if (cursor.get('version') != 1 or cursor.get('root') != root
+            if (cursor.get('version') != 2 or cursor.get('root') != root
                     or cursor.get('ordering') != ordering.params() or cursor.get('reverse') is not reverse):
                 raise ValueError('Continuation no longer matches this collection or sort order; refresh the view')
             cursor = cursor.get('frames')
@@ -46,7 +46,7 @@ class Traversal:
                 raise ValueError('Invalid continuation')
         elif cursor is not None:
             raise ValueError('Invalid ordered continuation')
-        stack = self._walk_stack(root, anchor, cursor, phases)
+        stack = self._walk_stack(root, anchor, cursor, phases, ordering)
         items, warnings, snapshots = [], [], {}
         anchor_missing = False
         started = monotonic()
@@ -84,22 +84,23 @@ class Traversal:
             snapshot = snapshots[path].view if snapshots[path] else None
             names = snapshot.groups[phase] if snapshot else ()
             after = frame['after']
-            values = snapshot.dates.get(phase, {}) if snapshot else {}
+            policy = ordering.for_group(phase)
+            values = snapshot.values.get(phase, {}) if snapshot else {}
             if snapshot and frame.get('revision', snapshot.revision) != snapshot.revision:
                 raise StaleView('Folder listing changed during traversal; refresh the view')
             if snapshot:
                 frame['revision'] = snapshot.revision
             position = frame.get('position')
             if after is not None and position is None:
-                if ordering.sort == 'modified' and after not in values:
+                if policy.requires_facts and after not in values:
                     raise ValueError('Selected item is no longer listed; refresh or reopen the folder')
                 if (snapshot and phase == 'images' and anchor is not None
                         and path == relative_name(PurePosixPath(anchor).parent)
                         and after == PurePosixPath(anchor).name
                         and EntryId(after, 'image') not in snapshots[path].index.entries):
                     anchor_missing = True
-                position = ordering.position(after, values.get(after))
-            index = ordering.seek(snapshot.keys[phase] if snapshot else [], position, reverse)
+                position = policy.position(after, values.get(after))
+            index = policy.seek(snapshot.keys[phase] if snapshot else [], position, reverse)
             if not 0 <= index < len(names):
                 frame['phase'] += 1
                 frame['after'] = None
@@ -107,7 +108,7 @@ class Traversal:
                 continue
             name = names[index]
             frame['after'] = name
-            frame['position'] = ordering.position(name, values.get(name))
+            frame['position'] = policy.position(name, values.get(name))
             child = str(PurePosixPath(path) / name)
             if phase == 'images':
                 items.append(child)
@@ -115,7 +116,7 @@ class Traversal:
                 stack.append({'path': child, 'phase': 0, 'after': None})
         if not valid():
             raise Invalidated('Refreshed during traversal')
-        continuation = {'version': 1, 'root': root, 'ordering': ordering.params(), 'reverse': reverse,
+        continuation = {'version': 2, 'root': root, 'ordering': ordering.params(), 'reverse': reverse,
                         'frames': stack, 'refresh_sequence': refresh_sequence} if stack else None
         result = {'images': items, 'cursor': continuation, 'warnings': warnings,
                   'revisions': {path: snapshot.view.revision for path, snapshot in snapshots.items() if snapshot is not None}}
@@ -127,11 +128,11 @@ class Traversal:
             result['folders'] = list(snapshots[root].index.groups['folders'])
         return result
 
-    def _walk_stack(self, root, anchor, cursor, phases):
+    def _walk_stack(self, root, anchor, cursor, phases, ordering):
         """Validate a continuation, or seed traversal directly at an image."""
         root_path = PurePosixPath(root)
         if cursor is not None:
-            return self._validate_cursor(root_path, cursor)
+            return self._validate_cursor(root_path, cursor, phases, ordering)
         if anchor is None:
             return [{'path': root, 'phase': 0, 'after': None}]
 
@@ -155,7 +156,7 @@ class Traversal:
         })
         return stack
 
-    def _validate_cursor(self, root, cursor):
+    def _validate_cursor(self, root, cursor, phases, ordering):
         if not isinstance(cursor, list) or len(cursor) > MAX_CURSOR_DEPTH:
             raise ValueError('Invalid continuation')
         stack = []
@@ -174,12 +175,12 @@ class Traversal:
                 raise ValueError('Invalid continuation name')
             position = frame.get('position')
             if position is not None:
-                if (not isinstance(position, dict) or set(position) != {'name', 'modified'}
-                        or position['name'] != after):
+                if frame['phase'] >= len(phases):
                     raise ValueError('Invalid continuation position')
-                value = position['modified']
-                if value is not None and (not isinstance(value, str) or not value.lstrip('-').isdigit() or len(value) > 30):
-                    raise ValueError('Invalid continuation date')
+                policy = ordering.for_group(phases[frame['phase']])
+                name, _ = policy.decode_position(position)
+                if name != after:
+                    raise ValueError('Invalid continuation position')
             stack.append(dict(frame))
         return stack
 

@@ -55,7 +55,7 @@ export async function run(browser, {fixtureRoot, first}) {
                 singleText:label.childNodes.length === 1 && label.firstChild.nodeType === Node.TEXT_NODE,
                 clipped:label.scrollWidth > label.clientWidth, ellipsis:getComputedStyle(label).textOverflow};
         }).filter(Boolean)`);
-        assert.equal(labels.length, expected.length);
+        assert.equal(labels.length, expected.length, folder);
         for (const label of labels) {
             const index = folders[folder].indexOf(label.name);
             assert.ok(index >= 0 && label.title.endsWith('/' + label.name), 'Full names stay available on hover and to assistive technology');
@@ -76,6 +76,8 @@ export async function run(browser, {fixtureRoot, first}) {
         await evaluate(`document.querySelector(${JSON.stringify(selector)}).click()`);
         const childSelector = `.tree-row[data-path=${JSON.stringify(folder + '/' + folders[folder][0])}] .tree-label`;
         await waitFor(`document.querySelector(${JSON.stringify(childSelector)})`);
+        await evaluate(`document.querySelector(${JSON.stringify(childSelector)}).scrollIntoView({block:'start'})`);
+        await waitFor(`Array.from(document.querySelectorAll('.tree-row')).filter(row => row.dataset.path.startsWith(${JSON.stringify(folder + '/')})).length === ${folders[folder].length}`);
         await checkLabels(folder, abbreviated[folder], ['Sidebar tails', 'Sidebar unrelated'].includes(folder));
         if (folder === 'Sidebar spacing' || folder === 'Sidebar words') {
             await checkSpacing(folder);

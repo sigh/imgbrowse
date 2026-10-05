@@ -21,10 +21,10 @@ class OrderingTests(unittest.TestCase):
         self.root = Path(self.temp.name)
         self.gallery = Gallery(self.root)
 
-    def file(self, name, modified):
+    def file(self, name, modified, size=7):
         path = self.root / name
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_bytes(b'fixture')
+        path.write_bytes(b'x' * size)
         os.utime(path, ns=(modified, modified))
 
     def sequence(self, ordering, reverse=False, anchor=None):
@@ -105,7 +105,8 @@ class OrderingTests(unittest.TestCase):
         order = Ordering(sort='modified')
         page = self.gallery.walk(ordering=order, limit=1)
         cursor = json.loads(json.dumps(page['cursor']))
-        self.assertEqual(cursor['frames'][0]['position']['modified'], '1700000000000000001')
+        self.assertEqual(cursor['version'], 2)
+        self.assertEqual(cursor['frames'][0]['position']['value'], '1700000000000000001')
         for changes in [{'ordering': Ordering(sort='modified', order='desc')}, {'reverse': True}, {'root': 'other'}]:
             options = {'ordering': order, **changes}
             with self.subTest(changes=changes), self.assertRaises(ValueError):
@@ -144,3 +145,90 @@ class OrderingTests(unittest.TestCase):
         for settings in [{'sort':'capture'}, {'order':'backwards'}, {'sort':None}, {'order':False}]:
             with self.subTest(settings=settings), self.assertRaises(ValueError):
                 Ordering.from_params(settings)
+
+    def test_size_order_keeps_ties_missing_values_and_folder_boundaries(self):
+        for path, size in [('zero.jpg', 0), ('page2.jpg', 2), ('page10.jpg', 2), ('large.jpg', 10),
+                           ('missing.jpg', 3), ('chapter2/a.jpg', 4), ('chapter2/b.jpg', 1),
+                           ('chapter10/c.jpg', 8), ('notes2.txt', 4), ('notes10.txt', 1)]:
+            self.file(path, 1, size)
+        self.gallery.listing('')
+        (self.root / 'missing.jpg').unlink()
+        for direction, media, notes, children in [
+            ('asc', ['zero.jpg', 'page2.jpg', 'page10.jpg', 'large.jpg', 'missing.jpg'],
+             ['notes10.txt', 'notes2.txt'], ['chapter2/b.jpg', 'chapter2/a.jpg', 'chapter10/c.jpg']),
+            ('desc', ['large.jpg', 'page2.jpg', 'page10.jpg', 'zero.jpg', 'missing.jpg'],
+             ['notes2.txt', 'notes10.txt'], ['chapter2/a.jpg', 'chapter2/b.jpg', 'chapter10/c.jpg']),
+        ]:
+            ordering = Ordering('size', direction)
+            with self.subTest(direction=direction):
+                listing = self.gallery.listing('', ordering=ordering)
+                self.assertEqual(listing['images'], media)
+                self.assertEqual(listing['folders'], ['chapter2', 'chapter10'])
+                self.assertEqual(listing['other_files'], notes)
+                expected = media + children
+                self.assertEqual(self.sequence(ordering), expected)
+                self.assertEqual(self.sequence(ordering, reverse=True), expected[::-1])
+                for index, path in enumerate(expected):
+                    self.assertEqual(self.sequence(ordering, anchor=path), expected[index + 1:])
+                    self.assertEqual(self.sequence(ordering, reverse=True, anchor=path), expected[:index][::-1])
+
+    def test_name_sort_reads_no_facts_and_size_sort_skips_folder_facts(self):
+        self.file('Chapter/a.jpg', 1, 5)
+        self.file('b.jpg', 2, 1)
+        self.file('notes.txt', 3, 0)
+        with patch.object(self.gallery.catalog.facts, 'get', side_effect=AssertionError('Name sort read facts')):
+            self.gallery.listing('', ordering=Ordering('natural', 'desc'))
+        with patch.object(self.gallery.catalog.facts, 'read', wraps=self.gallery.catalog.facts.read) as reads:
+            self.gallery.listing('', ordering=Ordering('size'))
+            self.assertEqual([call.args[0].type for call in reads.call_args_list], ['image', 'file'])
+
+    def test_size_and_modified_values_remain_separate_and_reuse_shared_facts(self):
+        self.file('a.jpg', 1, 10)
+        self.file('b.jpg', 2, 1)
+        with patch.object(self.gallery.catalog.facts, 'read', wraps=self.gallery.catalog.facts.read) as reads:
+            for ordering, expected in [(Ordering('modified'), ['a.jpg', 'b.jpg']),
+                                       (Ordering('size'), ['b.jpg', 'a.jpg']),
+                                       (Ordering('size', 'desc'), ['a.jpg', 'b.jpg']),
+                                       (Ordering('modified', 'desc'), ['b.jpg', 'a.jpg'])]:
+                self.assertEqual(self.gallery.listing('', ordering=ordering)['images'], expected)
+            self.assertEqual(reads.call_count, 2)
+
+    def test_archive_size_order_uses_uncompressed_headers_without_payload_reads(self):
+        with zipfile.ZipFile(self.root / 'Book.cbz', 'w', zipfile.ZIP_DEFLATED) as archive:
+            archive.writestr('page2.jpg', b'x' * 4096)
+            archive.writestr('page10.jpg', b'')
+            archive.writestr('Chapter/a.jpg', b'x')
+            archive.writestr('notes.txt', b'x' * 2048)
+            archive.writestr('empty.txt', b'')
+        with patch.object(zipfile.ZipFile, 'open', side_effect=AssertionError('Sorting read an archive payload')):
+            listing = self.gallery.listing('Book.cbz', ordering=Ordering('size'))
+            self.assertEqual(listing['images'], ['page10.jpg', 'page2.jpg'])
+            self.assertEqual(listing['other_files'], ['empty.txt', 'notes.txt'])
+            self.assertEqual(self.sequence(Ordering('size')), ['Book.cbz/page10.jpg', 'Book.cbz/page2.jpg', 'Book.cbz/Chapter/a.jpg'])
+
+    def test_comparison_positions_preserve_exact_integers_and_validate_their_policy(self):
+        timestamp = 1700000000000000001
+        modified = Ordering('modified')
+        position = json.loads(json.dumps(modified.position('page.jpg', timestamp)))
+        self.assertEqual(modified.decode_position(position), ('page.jpg', timestamp))
+        ordering = Ordering('size')
+        self.assertEqual(ordering.decode_position(ordering.position('page.jpg', 1024)), ('page.jpg', 1024))
+        for invalid in [{'name':'a', 'modified':'1'}, {'name':'a', 'value':1},
+                        {'name':'a', 'value':'-1'}, {'name':'a', 'value':'--2'},
+                        {'name':'a', 'value':'1.5'}, {'name':'a', 'value':'1' * 31}]:
+            with self.subTest(invalid=invalid), self.assertRaises(ValueError):
+                ordering.decode_position(invalid)
+        with self.assertRaises(ValueError):
+            Ordering().decode_position({'name':'a', 'value':'1'})
+
+    def test_size_change_with_same_modified_time_invalidates_continuation(self):
+        self.file('a.jpg', 1, 1)
+        self.file('b.jpg', 2, 2)
+        ordering = Ordering('size')
+        cursor = self.gallery.walk(ordering=ordering, limit=1)['cursor']
+        self.file('a.jpg', 1, 3)
+        self.gallery.invalidate('')
+        with self.assertRaisesRegex(ValueError, 'listing changed'):
+            self.gallery.walk(ordering=ordering, cursor=cursor)
+        with self.assertRaises(ValueError):
+            self.gallery.walk(ordering=ordering, cursor={**cursor, 'version':1})

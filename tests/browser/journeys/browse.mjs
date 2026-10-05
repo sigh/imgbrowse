@@ -134,14 +134,14 @@ export async function run(browser, fixtures) {
     const folderRequests = () => requests.filter(url => new URL(url).pathname === '/api/folder').length;
     const countBeforeFilter = folderRequests();
     await evaluate("{ const input=document.getElementById('filter'); input.value='root12'; input.dispatchEvent(new Event('input')); }");
-    await waitFor("document.getElementById('summary').textContent.includes('11 matches')");
+    await waitFor("document.getElementById('folder-summary').textContent.includes('11 matches')");
     await waitFor("document.querySelector('.card[data-path=\"root120.jpg\"] .item-modified[datetime]')");
     assert.equal(folderRequests(), countBeforeFilter);
     await call('Page.reload');
-    await waitFor("document.getElementById('summary')?.textContent.includes('11 matches')");
+    await waitFor("document.getElementById('folder-summary')?.textContent.includes('11 matches')");
     await waitFor("document.querySelector('.card[data-path=\"root120.jpg\"] .item-modified[datetime]')");
     assert.equal(folderRequests(), countBeforeFilter + 1);
-    assert.ok(await evaluate("document.getElementById('summary').textContent.includes('11 matches')"));
+    assert.ok(await evaluate("document.getElementById('folder-summary').textContent.includes('11 matches')"));
     await evaluate("{ const input=document.getElementById('filter'); input.value=''; input.dispatchEvent(new Event('input')); }");
     await waitFor("!new URLSearchParams(location.search).has('filter')");
     await evaluate("document.getElementById('grid-viewport').scrollTop = 1800");

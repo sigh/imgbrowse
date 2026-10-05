@@ -224,7 +224,7 @@ export async function run(browser, fixtures) {
 
     // Recursive paging and Back reuse discovered items without rebuilding the traversal.
     await open('/?view=grid');
-    await waitFor("document.getElementById('summary').textContent.includes('60 items')");
+    await waitFor("document.getElementById('folder-summary').textContent.includes('60 items')");
     assert.ok(await evaluate("document.activeElement.id === 'grid-viewport' && !document.getElementById('overview-folder').matches(':focus-visible')"), 'Opening Overview focuses its contents without outlining the selected navigation button');
     await screenshot('overview-new-page');
     await nativeKey('Tab', 9);
@@ -233,7 +233,7 @@ export async function run(browser, fixtures) {
         await evaluate("document.getElementById('grid-viewport').scrollTop = document.getElementById('grid-viewport').scrollHeight");
         await pause(100);
     }
-    await waitFor("document.getElementById('summary').textContent === '173 items'");
+    await waitFor("document.getElementById('folder-summary').textContent === '173 items'");
     await evaluate("document.getElementById('grid-viewport').scrollTop = 1800");
     await pause(160);
     const recursiveAnchor = await evaluate('history.state.overviewPosition.path');
@@ -261,7 +261,7 @@ export async function run(browser, fixtures) {
         const names = Array.from({length:60}, (_, index) => 'page' + String(index).padStart(2, '0') + '.jpg');
         for (const name of [...names, 'excluded.jpg']) writeFileSync(join(directory, name), returnImage);
         await open(stateUrl({...readState(''), folder, filter:'page', compact:!scenario.previews}));
-        await waitFor("document.getElementById('summary').textContent.includes('60 matches')");
+        await waitFor("document.getElementById('folder-summary').textContent.includes('60 matches')");
         await evaluate(`import('/gallery.js').then(({app}) => {
             const row = app.grid.layout.byPath.get('item:' + JSON.stringify([${JSON.stringify(folder + '/page20.jpg')}, 'image']));
             app.grid.viewport.scrollTop = row.top + 11;

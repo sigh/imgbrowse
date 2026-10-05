@@ -12,7 +12,12 @@ from image_browser.catalog.model import (
     OrderedView,
     fingerprint,
 )
-from image_browser.catalog.ordering import DEFAULT_ORDERING, natural_key
+from image_browser.catalog.ordering import (
+    DEFAULT_ORDERING,
+    SORT_CRITERIA,
+    Ordering,
+    natural_key,
+)
 from image_browser.catalog.preparation import OrderPreparations
 from image_browser.runtime.cache import SharedCache
 from image_browser.runtime.work import Invalidated, check_cancelled
@@ -51,10 +56,10 @@ class CatalogRepository:
         index = self.index(path, entry=entry, valid=valid)
         key = (path, ordering, index.revision)
         # Each HTTP consumer owns a preparation lease, even when view loads are shared.
-        if (ordering.sort == 'modified' and self.views.peek(key) is None
-                and self.sort_values.peek((path, index.revision)) is None
+        if (ordering.requires_facts and self.views.peek(key) is None
+                and self.sort_values.peek((path, index.revision, ordering.sort)) is None
                 and self.preparations.asynchronous):
-            self.preparations.ready(index, valid)
+            self.preparations.ready(index, ordering, valid)
         view = self.views.get(key, lambda: self.ordered_view(index, ordering, valid),
             lambda result: 256 + sum(160 + len(name) * 4 for names in result.groups.values() for name in names),
             valid=valid)
@@ -63,41 +68,38 @@ class CatalogRepository:
         return CatalogSnapshot(index, view)
 
     def ordered_view(self, index, ordering, valid):
-        dates = {}
-        if ordering.sort == 'modified':
-            dates = self.sort_values.peek((index.path, index.revision))
-            if dates is None:
-                dates = self.preparations.ready(index, valid)
-            if dates is None:
-                dates = self.sort_values.get((index.path, index.revision),
-                    lambda: self.modified_values(index, valid),
-                    lambda groups: 256 + sum(96 + len(name) * 4 for values in groups.values() for name in values),
-                    valid=valid)
+        values = {}
+        if ordering.requires_facts:
+            def load_values():
+                prepared = self.preparations.ready(index, ordering, valid)
+                return self.comparison_values(index, ordering, valid) if prepared is None else prepared
+            values = self.sort_values.get((index.path, index.revision, ordering.sort), load_values,
+                lambda groups: 256 + sum(96 + len(name) * 4 for values in groups.values() for name in values),
+                valid=valid)
         groups, keys = {}, {}
         for kind, names in index.groups.items():
             check_cancelled()
-            # Other files retain natural order; they are outside media traversal.
-            policy = DEFAULT_ORDERING if kind == 'other_files' else ordering
-            values = dates.get(kind, {})
-            records = [(name, policy.key(name, values.get(name))) for name in names]
-            if policy.sort == 'modified':
+            policy = ordering.for_group(kind)
+            group_values = values.get(kind, {})
+            records = [(name, policy.key(name, group_values.get(name))) for name in names]
+            if policy.requires_facts:
                 records.sort(key=lambda pair: pair[1])
             elif policy.order == 'desc':
                 records.reverse()
             groups[kind] = tuple(name for name, _ in records)
             keys[kind] = tuple(key for _, key in records)
         revision = fingerprint((index.revision, ordering.params(),
-            [(kind, [(name, dates.get(kind, {}).get(name)) for name in names]) for kind, names in groups.items()]))
+            [(kind, [(name, values.get(kind, {}).get(name)) for name in names]) for kind, names in groups.items()]))
         return OrderedView(index.revision, ordering, MappingProxyType(groups), MappingProxyType(keys),
-                           MappingProxyType(dates), revision)
+                           MappingProxyType(values), revision)
 
-    def modified_values(self, index, valid, progress=lambda: None):
+    def comparison_values(self, index, ordering, valid, progress=lambda: None):
         groups = {}
-        for kind in ('images', 'folders'):
+        for kind in ordering.fact_groups:
             values = {}
             for name in index.groups[kind]:
                 facts = self.facts.get(index.entries[EntryId(name, ENTRY_TYPES[kind])], valid=valid)
-                values[name] = facts.modified.key if facts.modified else None
+                values[name] = ordering.value(facts)
                 progress()
             groups[kind] = MappingProxyType(values)
         return groups
@@ -107,20 +109,21 @@ class CatalogRepository:
         if parent == '.':
             parent = ''
         group = next(kind for kind, type in ENTRY_TYPES.items() if type == entry.type)
-        current = facts.modified.key if facts.modified else None
         # Early invalidation is an optimization. Clients also receive the view's
         # comparison keys, so agreement never depends on these values remaining cached.
-        projections = [view.dates for view in self.views.completed(lambda key: key[0] == parent)]
-        projections.extend(self.sort_values.completed(lambda key: key[0] == parent))
-        projections.extend(self.preparations.completed(parent))
-        if any(entry.name in dates.get(group, {}) and dates[group][entry.name] != current for dates in projections):
-            self.refresh.invalidate(entry.path)
+        projections = [(view.ordering, view.values) for view in self.views.completed(lambda key: key[0] == parent)]
+        for criterion in SORT_CRITERIA:
+            policy = Ordering(criterion)
+            projections.extend((policy, values) for values in self.sort_values.completed(
+                lambda key, criterion=criterion: key[0] == parent and key[2] == criterion))
+            projections.extend((policy, values) for values in self.preparations.completed(parent, criterion))
+        if any(entry.name in values.get(group, {}) and values[group][entry.name] != policy.value(facts)
+               for policy, values in projections):
+            self.refresh.record_change(entry.path)
             self.indexes.invalidate(lambda path: path == parent)
-            self.views.invalidate(lambda key: key[0] == parent and key[1].sort == 'modified')
+            self.views.invalidate(lambda key: key[0] == parent and key[1].requires_facts)
             self.sort_values.invalidate(lambda key: key[0] == parent)
             self.preparations.invalidate(parent, exact=True)
-            return True
-        return False
 
     def invalidate(self, related):
         self.indexes.invalidate(related)

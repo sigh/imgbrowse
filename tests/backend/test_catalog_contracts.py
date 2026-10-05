@@ -41,11 +41,32 @@ class CatalogContractTests(unittest.TestCase):
         self.assertEqual(second['revision'], first['revision'])
         self.assertEqual(second['entries'][0]['name'], 'b.jpg')
 
+    def test_entry_sizes_mean_file_bytes_and_preserve_source_versions(self):
+        (self.root / 'Directory').mkdir()
+        (self.root / 'empty.txt').write_bytes(b'')
+        with zipfile.ZipFile(self.root / 'Packed.cbz', 'w', zipfile.ZIP_DEFLATED) as archive:
+            archive.writestr('Chapter/page.jpg', b'x' * 4096)
+        api = CatalogApi(self.gallery)
+        page = api.entry_page('', [{'name':'Directory', 'type':'folder'},
+                                   {'name':'Packed.cbz', 'type':'folder'},
+                                   {'name':'empty.txt', 'type':'file'}])
+        self.assertEqual([entry['size'] for entry in page['entries']], [None, None, 0])
+        for entry in page['entries']:
+            self.assertEqual(entry['status'], 'ready')
+            self.assertIsNotNone(entry['modified'])
+            self.assertEqual(entry['source_version'][-1], str((self.root / entry['name']).stat().st_size))
+        folder = api.entry_page('Packed.cbz', [{'name':'Chapter', 'type':'folder'}])['entries'][0]
+        self.assertIsNone(folder['size'])
+        self.assertIsNone(folder['modified'])
+        member = api.entry_page('Packed.cbz/Chapter', [{'name':'page.jpg', 'type':'image'}])['entries'][0]
+        self.assertEqual(member['size'], 4096)
+        self.assertLess(member['compressed_size'], member['size'])
+
     def test_traversal_survives_eviction_or_disabled_retention(self):
         for name, date in [('a.jpg', 2), ('b.jpg', 1), ('child/c.jpg', 3)]:
             self.file(name, date)
         for budget in (1, 32 * 1024 * 1024):
-            for ordering in (Ordering(), Ordering(order='desc'), Ordering('modified')):
+            for ordering in (Ordering(), Ordering(order='desc'), Ordering('modified'), Ordering('size')):
                 with self.subTest(budget=budget, ordering=ordering):
                     gallery = Gallery(self.root)
                     gallery.catalog.indexes.max_weight = gallery.catalog.views.max_weight = budget
@@ -110,12 +131,30 @@ class CatalogContractTests(unittest.TestCase):
         old = CatalogApi(self.gallery).folder_index('', ordering=Ordering('modified'))
         self.file('a.jpg', 3)
         self.gallery.catalog.facts.cache.invalidate()
-        with self.assertRaises(StaleView):
-            CatalogApi(self.gallery).entry_page('', [{'name':'a.jpg','type':'image'}], revision=old['revision'])
+        page = CatalogApi(self.gallery).entry_page('', [{'name':'a.jpg','type':'image'}], revision=old['revision'])
+        self.assertEqual(page['entries'][0]['modified']['key'], '3')
         new = CatalogApi(self.gallery).folder_index('', ordering=Ordering('modified'))
         self.assertEqual([entry['name'] for entry in new['items']], ['b.jpg','a.jpg'])
         self.assertEqual(old['revision'], new['revision'])
         self.assertNotEqual(old['view_revision'], new['view_revision'])
+
+    def test_size_change_with_unchanged_time_invalidates_only_related_orders(self):
+        self.file('a.jpg', 1)
+        self.file('b.jpg', 2)
+        self.file('Other/c.jpg', 3)
+        api = CatalogApi(self.gallery)
+        old = api.folder_index('', ordering=Ordering('size'))
+        other = api.folder_index('Other', ordering=Ordering('size'))
+        (self.root / 'a.jpg').write_bytes(b'larger fixture')
+        os.utime(self.root / 'a.jpg', ns=(1,1))
+        self.gallery.catalog.facts.cache.invalidate(lambda key: key[0] == 'a.jpg')
+        page = api.entry_page('', [{'name':'a.jpg', 'type':'image'}], revision=old['revision'])
+        self.assertEqual(page['entries'][0]['size'], len(b'larger fixture'))
+        new = api.folder_index('', ordering=Ordering('size'))
+        self.assertEqual([entry['name'] for entry in new['items'] if entry['type'] == 'image'], ['b.jpg', 'a.jpg'])
+        self.assertEqual(old['revision'], new['revision'])
+        self.assertNotEqual(old['view_revision'], new['view_revision'])
+        self.assertEqual(other['view_revision'], api.folder_index('Other', ordering=Ordering('size'))['view_revision'])
 
     def test_old_active_operations_survive_unrelated_refresh_history_rollover(self):
         valid = self.gallery.refresh.watch('A')
@@ -125,15 +164,29 @@ class CatalogContractTests(unittest.TestCase):
         self.gallery.invalidate('A/child')
         self.assertFalse(valid())
 
-    def test_stale_sort_preparation_is_a_conflict_instead_of_an_unreadable_branch(self):
+    def test_fresh_traversal_rebuilds_outdated_order_without_rejecting_new_facts(self):
         self.file('a.jpg', 1); self.file('b.jpg', 2)
         CatalogApi(self.gallery).folder_index('', ordering=Ordering('modified', 'desc'))
         self.file('a.jpg', 3)
         self.gallery.catalog.sort_values.invalidate()
         self.gallery.catalog.facts.cache.invalidate()
-        with self.assertRaises(StaleView):
-            self.gallery.walk(ordering=Ordering('modified'))
         self.assertEqual(self.gallery.walk(ordering=Ordering('modified'))['images'], ['b.jpg','a.jpg'])
+
+    def test_fact_changes_preserve_source_reads_and_revalidate_active_ancestors(self):
+        self.file('a.jpg', 1)
+        self.file('child/b.jpg', 2)
+        self.file('child/c.jpg', 3)
+        ordering = Ordering('size')
+        first = self.gallery.walk(ordering=ordering, limit=2)
+        valid = self.gallery.refresh.watch('a.jpg')
+        (self.root / 'a.jpg').write_bytes(b'changed bytes')
+        self.gallery.catalog.facts.cache.invalidate(lambda key: key[0] == 'a.jpg')
+        CatalogApi(self.gallery).entry_page('', [{'name':'a.jpg', 'type':'image'}])
+        self.assertTrue(valid(), 'Derived order invalidation must not cancel source readers')
+        with self.assertRaises(StaleView):
+            self.gallery.walk(ordering=ordering, cursor=first['cursor'], limit=1)
+        self.gallery.invalidate('a.jpg')
+        self.assertFalse(valid(), 'Explicit source refresh still cancels readers')
 
     def test_known_source_version_supersedes_an_older_inflight_fact_read(self):
         self.file('a.jpg', 1)

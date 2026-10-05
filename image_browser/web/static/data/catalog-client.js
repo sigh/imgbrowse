@@ -8,7 +8,7 @@ export function createCatalogClient(request) {
     const walks = new ResourceCache(4 * 1024 * 1024, 256);
     const folders = new ResourceCache(4 * 1024 * 1024, 32);
     const folderListeners = new Set();
-    const orderListeners = new Map();
+    const folderRequests = new Map();
     function onFolderListing(listener) {
         folderListeners.add(listener);
         return () => folderListeners.delete(listener);
@@ -31,32 +31,40 @@ export function createCatalogClient(request) {
 
     /** Membership carries identities. Basic facts use a separate bounded POST. */
     async function getFolder(path, signal, ordering = {}, progress = () => {}) {
-        const settings = sortSettings(ordering);
-        const load = async (settings, callback = () => {}) => {
-            const key = JSON.stringify([path, settings]);
-            const listeners = orderListeners.get(key) || new Set();
-            orderListeners.set(key, listeners);
-            const listener = state => { if (!signal?.aborted) callback(state); };
-            listeners.add(listener);
-            let result;
-            try {
-                result = await folders.get(key,
-                    shared => request('/api/folder?' + new URLSearchParams({path, ...settings}), shared, undefined,
-                        state => { for (const listener of orderListeners.get(key) || []) listener(state); }), signal,
-                    value => JSON.stringify(value).length * 2);
-            } finally {
-                listeners.delete(listener);
-                if (!listeners.size && orderListeners.get(key) === listeners) orderListeners.delete(key);
-            }
-            signal?.throwIfAborted();
+        const settings = sortSettings(ordering), key = JSON.stringify([path, settings]);
+        const normalize = result => {
             entries.register(path, result.revision);
             return {...result, folders:result.items.filter(item => item.type === 'folder').map(item => item.name),
                 images:result.items.filter(item => item.type === 'image').map(item => item.name),
                 other_files:result.items.filter(item => item.type === 'file').map(item => item.name)};
         };
-        if (settings.sort === 'modified' && !folders.peek(JSON.stringify([path, settings])) && typeof progress === 'function')
-            progress(await load({sort:'natural', order:'asc'}), {status:'preparing'});
-        const listing = await load(settings, state => typeof progress === 'function' && progress(null, state));
+        const active = folderRequests.get(key) || {listeners:new Set()};
+        folderRequests.set(key, active);
+        const listener = (listing, preparation) => { if (!signal?.aborted) progress(listing, preparation); };
+        active.listeners.add(listener);
+        let listing;
+        try {
+            if (active.preparation) listener(active.listing || null, active.preparation);
+            const result = await folders.get(key,
+                shared => {
+                    shared.addEventListener('abort', () => {
+                        if (folderRequests.get(key) === active) folderRequests.delete(key);
+                    }, {once:true});
+                    return request('/api/folder?' + new URLSearchParams({path, ...settings}), shared, undefined, state => {
+                        shared.throwIfAborted();
+                        const {listing, ...preparation} = state;
+                        const preview = listing ? normalize(listing) : null;
+                        if (preview) active.listing = preview;
+                        active.preparation = preparation;
+                        for (const listener of active.listeners) listener(preview, preparation);
+                    });
+                }, signal, value => JSON.stringify(value).length * 2);
+            signal?.throwIfAborted();
+            listing = normalize(result);
+        } finally {
+            active.listeners.delete(listener);
+            if (!active.listeners.size && folderRequests.get(key) === active) folderRequests.delete(key);
+        }
         if (listing.natural_folders) publishFolders(path, listing.natural_folders);
         return listing;
     }

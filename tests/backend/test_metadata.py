@@ -2,6 +2,7 @@
 
 import io
 import json
+import os
 import tempfile
 import unittest
 import zipfile
@@ -15,6 +16,7 @@ from PIL import Image
 from PIL.ExifTags import GPS, IFD, Base
 from PIL.TiffImagePlugin import IFDRational
 
+from image_browser.catalog.ordering import Ordering
 from image_browser.http.server import GalleryServer
 from image_browser.media.metadata import _gps_location
 
@@ -63,6 +65,32 @@ class MetadataTests(unittest.TestCase):
             return response.status, json.loads(response.read())
         finally:
             connection.close()
+
+    def test_info_returns_changed_size_on_first_request_despite_a_cached_order(self):
+        file = self.root / 'notes.txt'
+        file.write_bytes(b'notes')
+        timestamp = 1700000000000000000
+        os.utime(file, ns=(timestamp, timestamp))
+        self.server.gallery.listing('', ordering=Ordering('size'))
+        file.write_bytes(b'longer notes')
+        os.utime(file, ns=(timestamp, timestamp))
+        status, info = self.request('notes.txt')
+        self.assertEqual(status, 200)
+        self.assertEqual(info['size'], len(b'longer notes'))
+        self.assertEqual(info['modified']['key'], str(timestamp))
+
+    def test_info_uses_shared_sizes_when_the_file_changes_after_lookup(self):
+        file = self.root / 'notes.txt'
+        file.write_bytes(b'old')
+        read = self.server.gallery.catalog.facts.read
+        def changed(entry):
+            file.write_bytes(b'newer contents')
+            return read(entry)
+        with patch.object(self.server.gallery.catalog.facts, 'read', side_effect=changed):
+            status, info = self.request('notes.txt')
+        self.assertEqual(status, 200)
+        self.assertEqual(info['size'], file.stat().st_size)
+        self.assertEqual(info['size'], int(info['source_version'][-1]))
 
     def test_image_details_and_location(self):
         status, data = self.request('photo.jpg')
@@ -113,6 +141,7 @@ class MetadataTests(unittest.TestCase):
             status, data = self.request('')
             self.assertEqual(status, 200)
             self.assertEqual((data['kind'], data['folders'], data['media']), ('directory', 1, 1))
+            self.assertIsNone(data['size'])
             self.assertEqual(scan.call_count, 1)
 
     def test_archive_members_and_virtual_folders(self):
@@ -126,9 +155,13 @@ class MetadataTests(unittest.TestCase):
         self.assertAlmostEqual(data['location']['latitude'], -33.86)
         self.assertAlmostEqual(data['location']['longitude'], 151.2)
         self.assertLess(data['compressed_size'], data['size'])
-        self.assertEqual(self.request('book.cbz')[1]['kind'], 'archive')
+        container = self.request('book.cbz')[1]
+        self.assertEqual(container['kind'], 'archive')
+        self.assertIsNone(container['size'])
+        self.assertEqual(container['archive_size'], (self.root / 'book.cbz').stat().st_size)
         folder = self.request('book.cbz/chapter')[1]
         self.assertEqual((folder['kind'], folder['folders'], folder['media']), ('directory', 0, 1))
+        self.assertIsNone(folder['size'])
         self.assertEqual(self.request('book.cbz/missing')[0], 404)
 
     def test_unreadable_image_still_has_file_details(self):

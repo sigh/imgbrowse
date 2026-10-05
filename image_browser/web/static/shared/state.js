@@ -2,7 +2,7 @@
 export const ScreenMode = Object.freeze({BROWSE: 'browse', OVERVIEW: 'overview', VIEW: 'view'});
 export const ReadingLayout = Object.freeze({STRIP: 'strip', SINGLE: 'single', SCROLL: 'scroll'});
 export const FolderLayout = Object.freeze({PREVIEWS: 'previews', LIST: 'list'});
-export const SortCriterion = Object.freeze({NAME: 'natural', MODIFIED: 'modified'});
+export const SortCriterion = Object.freeze({NAME: 'natural', MODIFIED: 'modified', SIZE: 'size'});
 export const SortOrder = Object.freeze({ASCENDING: 'asc', DESCENDING: 'desc'});
 export const ImageSize = Object.freeze({DEFAULT: 'auto', ORIGINAL: '1'});
 export const ViewerEntry = Object.freeze({TOP: 'top', BOTTOM: 'bottom', KEEP: 'keep'});

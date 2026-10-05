@@ -79,9 +79,7 @@ def metadata(gallery, relative, image_work, archive_work, *, kind=None):
         return result
 
     source = entry.file_source()
-    result.update(kind=source.kind, size=source.size)
-    if source.member:
-        result['compressed_size'] = source.member.compress_size
+    result['kind'] = source.kind
     if source.kind == 'image':
         try:
             with ExitStack() as stack:

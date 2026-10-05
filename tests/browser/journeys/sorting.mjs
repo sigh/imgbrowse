@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict';
+import {statSync} from 'node:fs';
+import {join} from 'node:path';
 import {SortCriterion, SortOrder} from '../../../image_browser/web/static/shared/state.js';
 
-export async function run(browser, {first, second, last}) {
+export async function run(browser, {first, second, last, fixtureRoot}) {
     const {start, click, evaluate, waitFor, readyImage, waitImage, presentation, setZoom, nativeKey, screenshot, call, viewerUrl} = browser;
     const app = expression => `import('/gallery.js').then(({app}) => ${expression})`;
     const state = expression => `import('/static/shared/state.js').then(({readState}) => ${expression})`;
@@ -28,7 +30,7 @@ export async function run(browser, {first, second, last}) {
     await waitFor(app(`app.grid.items[0]?.path === ${JSON.stringify(second)}`));
     assert.equal(await evaluate("document.getElementById('sort-direction-toggle').title"), 'Oldest first; switch to newest first');
     assert.equal(await evaluate("document.querySelector('#sort-toggle .sort-caption').textContent"), 'File modified');
-    assert.equal(await evaluate("document.querySelectorAll('#sort-popover input[type=radio]').length"), 2);
+    assert.equal(await evaluate("document.querySelectorAll('#sort-popover input[type=radio]').length"), 3);
     assert.equal(await evaluate("document.querySelectorAll('#sort-popover select').length"), 0);
 
     // Native radio keys change only the criterion and retain focus in the picker.
@@ -83,6 +85,9 @@ export async function run(browser, {first, second, last}) {
     const cases = [
         [SortCriterion.NAME, SortOrder.ASCENDING, [first, second]], [SortCriterion.MODIFIED, SortOrder.ASCENDING, [second, first]],
         [SortCriterion.NAME, SortOrder.DESCENDING, [second, first]], [SortCriterion.MODIFIED, SortOrder.DESCENDING, [first, second]],
+        ...[SortOrder.ASCENDING, SortOrder.DESCENDING].map(direction => [SortCriterion.SIZE, direction,
+            [first, second].sort((a, b) => (statSync(join(fixtureRoot, a)).size - statSync(join(fixtureRoot, b)).size)
+                * (direction === SortOrder.ASCENDING ? 1 : -1))]),
     ];
     for (const layout of ['strip', 'single', 'scroll']) {
         await presentation(layout);
@@ -134,6 +139,23 @@ export async function run(browser, {first, second, last}) {
     await waitFor(app(`app.grid.items.map(item => item.path).join('|') === ${JSON.stringify(['Album/Chapter 2', 'Album/Chapter 1'].join('|'))}`));
     await change('order', 'desc');
     await waitFor(app(`app.grid.items.map(item => item.path).join('|') === ${JSON.stringify(['Album/Chapter 1', 'Album/Chapter 2'].join('|'))}`));
+
+    await change('sort', SortCriterion.SIZE);
+    assert.equal(await evaluate("document.getElementById('sort-direction-toggle').title"), 'Largest first; switch to smallest first');
+    assert.deepEqual(await evaluate(app('app.grid.items.map(item => item.path)')), ['Album/Chapter 1', 'Album/Chapter 2'],
+        'Folders retain natural order when sorting files by size');
+    await change('order', 'asc');
+    assert.equal(await evaluate("document.getElementById('sort-direction-toggle').title"), 'Smallest first; switch to largest first');
+    assert.deepEqual(await evaluate(app('app.grid.items.map(item => item.path)')), ['Album/Chapter 1', 'Album/Chapter 2']);
+
+    await start('/?compact=1&folder=Other%20files&sort=size&order=desc');
+    await waitFor(app('app.grid.directory && !app.grid.directory.preparation && !app.grid.loadingFolder'));
+    await waitFor("document.querySelector('.other-files-toggle')");
+    await evaluate("document.querySelector('.other-files-toggle').click()");
+    await waitFor("document.querySelectorAll('.other-file').length === 2");
+    const other = ['Other files/notes.txt', 'Other files/sunrise.heic'];
+    const otherDescending = [...other].sort((a, b) => statSync(join(fixtureRoot, b)).size - statSync(join(fixtureRoot, a)).size);
+    assert.deepEqual(await evaluate("Array.from(document.querySelectorAll('.other-file'), card => card.dataset.path)"), otherDescending);
 
     await start('/?folder=Album&view=grid&sort=modified');
     await waitFor(app(`app.grid.items.map(item => item.path).join('|') === ${JSON.stringify([last, second, first].join('|'))}`));

@@ -68,9 +68,12 @@
             <main id="grid-viewport" tabindex="0" aria-label="Folder contents">
                 <div id="grid"></div>
                 <p id="grid-status" role="status"></p>
-                <button id="load-more" hidden>Retry</button>
             </main>
-            <footer id="summary" aria-live="polite"></footer>
+            <footer id="summary">
+                <span id="folder-summary" aria-live="polite"></span>
+                <span id="folder-feedback" role="status"></span>
+                <button id="load-more" hidden>Retry</button>
+            </footer>
             <section id="viewer" class="viewer" role="region" aria-label="Media viewer" hidden>
                 <div id="overview" hidden></div>
                 <div id="viewer-stage" class="viewer-stage">
@@ -94,6 +97,7 @@
             <legend id="sort-title">Sort by</legend>
             <label><input class="visually-hidden" type="radio" name="sort" value="natural" checked><span class="criterion-label">Name</span></label>
             <label><input class="visually-hidden" type="radio" name="sort" value="modified"><span class="criterion-label">File modified</span></label>
+            <label><input class="visually-hidden" type="radio" name="sort" value="size"><span class="criterion-label">File size</span></label>
         </fieldset>
     </section>
 </body>

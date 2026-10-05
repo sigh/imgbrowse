@@ -112,6 +112,8 @@ class CatalogEntry:
 
 @dataclass(frozen=True)
 class EntryFacts:
+    """Basic entry values; size is file content bytes, never directory bytes."""
+
     modified: Timestamp | None
     source_version: tuple | None
     size: int | None = None
@@ -122,7 +124,7 @@ class EntryFacts:
         return {'facts_revision': fingerprint((self.source_version, self.modified.serialize() if self.modified else None, self.size, self.compressed_size, self.unavailable)),
                 'modified': self.modified.serialize() if self.modified else None,
                 'source_version': list(map(str, self.source_version)) if self.source_version else None,
-                **({'size': self.size} if self.size is not None else {}),
+                'size': self.size,
                 **({'compressed_size': self.compressed_size} if self.compressed_size is not None else {}),
                 **({'unavailable': self.unavailable} if self.unavailable else {})}
 
@@ -151,5 +153,5 @@ class OrderedView:
     ordering: Ordering
     groups: Mapping[str, tuple[str, ...]]
     keys: Mapping[str, tuple]
-    dates: Mapping[str, Mapping[str, int | None]]
+    values: Mapping[str, Mapping[str, int | None]]
     revision: str

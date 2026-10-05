@@ -1,5 +1,5 @@
 import {CollectionWindow} from './collection-window.js';
-import {filename, joinPath, parentPath, relatedScope, sortKey, sortSettings} from '../shared/state.js';
+import {entryKey, filename, joinPath, parentPath, relatedScope, sortKey, sortSettings, SortCriterion} from '../shared/state.js';
 
 const MAX_PATHS = 2000;
 const PAGE_SIZE = 60;
@@ -29,6 +29,8 @@ export class FolderData {
             const create = (listing, preparation = null) => {
                 if (signal.aborted) return;
                 directory = {path, key, ordering, listing, preparation,
+                    comparisons:new Map((listing.items || []).filter(item => Object.hasOwn(item, 'sort_key'))
+                        .map(item => [entryKey({path:joinPath(path, item.name), type:item.type}), item.sort_key])),
                     window:this.createWindow(path, ordering)};
                 directory.window.edges[0].done = true;
                 return directory;
@@ -40,7 +42,6 @@ export class FolderData {
             });
             signal.throwIfAborted();
             create(listing);
-            directory.window.edges[0].done = true;
         }
         signal.throwIfAborted();
         this.remember(directory);
@@ -56,6 +57,14 @@ export class FolderData {
         const count = () => [...this.cache.values()].reduce((sum, item) => sum + item.window.paths.length
             + item.listing.folders.length + item.listing.images.length + item.listing.other_files.length, 0);
         while (this.cache.size > 3 || count() > 20000) this.cache.delete(this.cache.keys().next().value);
+    }
+
+    matchesFacts(directory, item, fact) {
+        const key = entryKey(item);
+        if (fact.status !== 'ready' || !directory.comparisons.has(key)) return true;
+        let value = fact.modified?.key ?? null;
+        if (directory.ordering.sort === SortCriterion.SIZE) value = fact.size === null ? null : String(fact.size);
+        return directory.comparisons.get(key) === value;
     }
 
     reveal(directory, path) {

@@ -1,4 +1,4 @@
-"""Bounded, leased background preparation for cold modified ordering.
+"""Bounded, leased background preparation for fact-based ordering.
 
 Live jobs own their index and comparison values independently of LRU retention.
 Only a completed set of facts can be used to publish an ordered view.
@@ -19,13 +19,14 @@ from image_browser.runtime.work import Busy, Cancelled, Invalidated, request_wor
 
 class Preparing(Exception):
     def __init__(self, progress):
-        super().__init__('Preparing modified order')
+        super().__init__('Preparing order')
         self.progress = progress
 
 
 @dataclass
 class Preparation:
     index: object
+    ordering: object
     weight: int
     valid: object
     leases: dict = field(default_factory=dict)
@@ -80,8 +81,8 @@ class OrderPreparations:
         jobs.update(self.running)
         return sum(job.weight for job in jobs.values())
 
-    def ready(self, index, valid):
-        key = (index.path, index.revision)
+    def ready(self, index, ordering, valid):
+        key = (index.path, index.revision, ordering.sort)
         with self.lock:
             self.cleanup()
             job = self.jobs.get(key)
@@ -94,16 +95,16 @@ class OrderPreparations:
                 # Includes descriptors, references, keys, and eventual fact values.
                 weight = 512 + sum(768 + len(entry.path) * 8 for entry in index.entries.values())
                 if weight > self.MAX_BYTES:
-                    raise OrderTooLarge('Collection exceeds modified-order preparation budget; browse by name')
+                    raise OrderTooLarge('Collection exceeds ordering preparation budget; browse by name')
                 if len(self.running) >= self.MAX_JOBS:
-                    raise Busy('Modified ordering preparation is at capacity; retry shortly')
+                    raise Busy('Ordering preparation is at capacity; retry shortly')
                 while self.bytes_used() + weight > self.MAX_BYTES:
                     candidates = [(item.touched, old_key) for old_key, item in self.jobs.items()
                                   if item.values is not None and not item.leases]
                     if not candidates:
-                        raise Busy('Modified ordering preparation is at capacity; retry shortly')
+                        raise Busy('Ordering preparation is at capacity; retry shortly')
                     del self.jobs[min(candidates)[1]]
-                job = Preparation(index, weight, valid)
+                job = Preparation(index, ordering, weight, valid)
                 self.jobs[key] = job
                 self.running[id(job)] = job
                 start = True
@@ -116,14 +117,14 @@ class OrderPreparations:
             job.touched = monotonic()
             if start:
                 threading.Thread(target=self.run, args=(job,), daemon=True,
-                                 name='modified-order').start()
+                                 name='order-preparation').start()
             if job.error:
                 error = job.error
                 self.jobs.pop(key, None)
                 raise error
             raise Preparing({'status': 'preparing', 'path': index.path, 'revision': index.revision,
                              'completed': job.completed,
-                             'total': sum(len(index.groups[kind]) for kind in ('images', 'folders')),
+                             'total': sum(len(index.groups[kind]) for kind in ordering.fact_groups),
                              'token': token})
 
     def run(self, job):
@@ -133,7 +134,7 @@ class OrderPreparations:
                         not any(until > monotonic() for until in job.leases.values()))
         try:
             with request_work(2, cancelled):
-                values = self.repository.modified_values(job.index, job.valid,
+                values = self.repository.comparison_values(job.index, job.ordering, job.valid,
                     progress=lambda: self.advance(job))
             with self.lock:
                 if not cancelled():
@@ -153,10 +154,11 @@ class OrderPreparations:
         with self.lock:
             job.completed += 1
 
-    def completed(self, path):
+    def completed(self, path, criterion):
         with self.lock:
             return tuple(job.values for key, job in self.jobs.items()
-                         if key[0] == path and job.values is not None and not job.stop.is_set())
+                         if key[0] == path and key[2] == criterion
+                         and job.values is not None and not job.stop.is_set())
 
     def cancel(self, token):
         if not isinstance(token, str):

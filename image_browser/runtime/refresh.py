@@ -36,11 +36,19 @@ class RefreshScopes:
 
     def invalidate(self, path):
         with self.lock:
-            self.sequence += 1
-            self.history.append((self.sequence, path))
+            self._record_change(path)
             for operation in self.active:
                 if intersects(operation.path, path):
                     operation.valid = False
+
+    def record_change(self, path):
+        """Revalidate subsequent cursors while active reads keep their snapshots."""
+        with self.lock:
+            self._record_change(path)
+
+    def _record_change(self, path):
+        self.sequence += 1
+        self.history.append((self.sequence, path))
 
     def watch(self, path):
         with self.lock:

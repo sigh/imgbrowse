@@ -71,7 +71,7 @@ export async function run(browser, fixtures) {
     assert.ok(await evaluate("document.querySelector('.metadata-path-text').textContent.endsWith('/Packed.cbz/clip.mp4')"));
     await click('folders-toggle');
     await click('overview-folder');
-    await waitFor("document.getElementById('summary').textContent === '3 items'");
+    await waitFor("document.getElementById('folder-summary').textContent === '3 items'");
     assert.equal(await evaluate("document.querySelector('.other-files-heading')"), null, 'Overview remains a media collection');
 
     const large = join(fixtures.fixtureRoot, 'Many other files');

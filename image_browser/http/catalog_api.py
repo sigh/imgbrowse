@@ -16,9 +16,9 @@ class CatalogApi:
         snapshot = self.gallery.snapshot(relative, ordering=ordering)
         return {'revision': snapshot.index.revision, 'view_revision': snapshot.view.revision,
                 'items': [{**EntryId(name, ENTRY_TYPES[kind]).serialize(),
-                           **({'modified_key':str(snapshot.view.dates[kind][name])
-                               if snapshot.view.dates[kind][name] is not None else None}
-                              if kind in snapshot.view.dates else {})}
+                           **({'sort_key':str(snapshot.view.values[kind][name])
+                               if snapshot.view.values[kind][name] is not None else None}
+                              if kind in snapshot.view.values else {})}
                           for kind, names in snapshot.view.groups.items() for name in names],
                 'natural_folders': list(snapshot.index.groups['folders'])}
 

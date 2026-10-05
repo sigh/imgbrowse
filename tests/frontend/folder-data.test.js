@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {FolderData} from '../../image_browser/web/static/data/folder-data.js';
+import {EntryStore, FactDemand} from '../../image_browser/web/static/data/entry-store.js';
 
 test('Browse and Overview open a cheap membership index without fetching facts', async () => {
     const requests = [];
@@ -70,4 +71,50 @@ test('a cancelled folder response cannot enter retained data', async () => {
     release({folders:[], images:[], other_files:[]});
     await assert.rejects(pending, {name:'AbortError'});
     assert.equal(data.cache.size, 0);
+});
+
+test('folder orders verify fresh shared facts without coupling visible demand to ordering', async () => {
+    const item = {path:'Album/a.jpg', type:'image'};
+    const data = new FolderData({
+        getFolder:async (path, signal, ordering) => ({folders:[], images:['a.jpg'], other_files:[], revision:'membership',
+            items:[{name:'a.jpg', type:'image', sort_key:ordering.sort === 'size' ? '10' : '1'}]}),
+        seed:() => {},
+    });
+    const signal = new AbortController().signal;
+    const modified = await data.open({folder:'Album', sort:'modified'}, signal);
+    const size = await data.open({folder:'Album', sort:'size'}, signal);
+    const store = new EntryStore(async () => ({entries:[{name:'a.jpg', type:'image', status:'ready', facts_revision:'first',
+        modified:{key:'2'}, size:10}]}));
+    let matches;
+    const demand = new FactDemand(store, 'Album', 'membership', () => {
+        matches = data.matchesFacts(modified, item, demand.state(item));
+    });
+    demand.update([item]);
+    await new Promise(resolve => setTimeout(resolve, 0));
+    assert.equal(matches, false, 'The ordered listing detects changed keys');
+    assert.equal(demand.state(item).status, 'ready', 'The shared fact remains usable by other views');
+    assert.equal(demand.errors.size, 0, 'Retrieval does not interpret sort policy');
+    assert.equal(data.matchesFacts(size, item, demand.state(item)), true, 'Only the modified order disagrees');
+    store.retain(item, 'membership', {status:'ready', facts_revision:'second', modified:{key:'1'}, size:20});
+    assert.equal(matches, true, 'Info publication uses the existing callback');
+    assert.equal(data.matchesFacts(size, item, demand.state(item)), false, 'A size change is detected even with unchanged modified time');
+    demand.dispose();
+    assert.equal(store.listeners.size, 0);
+});
+
+test('comparison keys distinguish unknown sizes, zero, and known byte counts', async () => {
+    for (const key of [null, '0', '1024']) {
+        const data = new FolderData({
+            getFolder:async () => ({folders:['Chapter'], images:['a.jpg'], other_files:[], revision:'v1',
+                items:[{name:'Chapter', type:'folder'}, {name:'a.jpg', type:'image', sort_key:key}]}),
+            seed:() => {},
+        });
+        const directory = await data.open({folder:'Album', sort:'size'}, new AbortController().signal);
+        const item = {path:'Album/a.jpg', type:'image'};
+        assert.equal(data.matchesFacts(directory, item, {status:'loading'}), true);
+        assert.equal(data.matchesFacts(directory, item, {status:'error', error:new Error('Busy')}), true);
+        assert.equal(data.matchesFacts(directory, item, {status:'ready', size:key === null ? null : Number(key)}), true);
+        assert.equal(data.matchesFacts(directory, item, {status:'ready', size:2048}), false);
+        assert.equal(data.matchesFacts(directory, {path:'Album/Chapter', type:'folder'}, {status:'ready', size:null}), true);
+    }
 });

@@ -1,6 +1,7 @@
 import {durationLabel, fileExtension, isVideo, MetadataKind} from '../shared/media-kind.js';
 
-function bytes(value) {
+export function formatBytes(value) {
+    if (value == null) return undefined;
     if (value < 1024) return `${value} bytes`;
     const units = ['KiB', 'MiB', 'GiB', 'TiB'];
     let index = -1;
@@ -66,14 +67,14 @@ export function metadataInfo(data, now = Date.now()) {
     if (data.width !== undefined && data.height !== undefined) add('Dimensions', `${data.width} × ${data.height}`);
     add('Duration', durationLabel(data.duration));
     add('Format', data.format || ([MetadataKind.VIDEO, MetadataKind.FILE].includes(data.kind) ? fileExtension(data.name) : undefined));
-    if (data.size !== undefined) add('Size', bytes(data.size));
+    add('Size', formatBytes(data.size));
     if (data.media !== undefined) add('Contents', `${data.media} direct media`);
     if (data.folders !== undefined) add('Subfolders', `${data.folders} subfolders`);
     const modified = dateRow('Modified', data.modified, now);
     if (modified) facts.push(modified);
     const containerModified = dateRow('Archive file modified', data.container_modified, now);
     if (containerModified) facts.push(containerModified);
-    if (data.archive_size !== undefined) add('Archive size', bytes(data.archive_size));
+    add('Archive size', formatBytes(data.archive_size));
     const exif = data.exif || {};
     const taken = dateRow('Taken', exif.Taken, now);
     if (taken) facts.push(taken);

@@ -198,6 +198,7 @@ button:disabled, input:disabled {
 }
 
 #workspace-content {
+    container: workspace / inline-size;
     display: flex;
     flex-direction: column;
     flex: 1;
@@ -805,6 +806,7 @@ input[type=search] {
     --list-kind-width: 22px;
     --list-detail-width: 42px;
     --list-date-width: 152px;
+    --list-size-width: 88px;
     --list-row-height: 44px;
     --list-padding-block: var(--space-sm);
     --list-border-width: 1px;
@@ -923,15 +925,32 @@ input[type=search] {
 }
 
 #load-more {
-    display: block;
-    margin: 0 auto 20px;
+    flex-shrink: 0;
 }
 
 #summary {
+    display: flex;
+    align-items: center;
+    gap: var(--space-md);
+    flex-shrink: 0;
+    height: calc(var(--control-height) + 16px);
     padding: 8px 22px;
     color: var(--color-muted);
     font-size: .78rem;
+    line-height: 16px;
     border-top: 1px solid var(--color-border-subtle);
+}
+
+#folder-summary, #folder-feedback {
+    flex: 1;
+    min-width: 0;
+    max-height: var(--control-height);
+    overflow: auto;
+    overflow-wrap: anywhere;
+}
+
+#folder-feedback:empty {
+    display: none;
 }
 
 .folder-heading a {
@@ -1061,10 +1080,20 @@ input[type=search] {
 
 .list-item .item-modified {
     flex: 0 0 var(--list-date-width);
-    order: 1;
+    order: 2;
     text-align: right;
     font-size: var(--card-label-font-size);
     font-variant-numeric: tabular-nums;
+}
+
+.list-item .item-size {
+    flex: 0 0 var(--list-size-width);
+    order: 1;
+    text-align: right;
+    font-size: var(--card-label-font-size);
+    color: var(--color-muted);
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
 }
 
 .list-duration, .list-file-type {
@@ -1077,22 +1106,35 @@ input[type=search] {
     white-space: nowrap;
 }
 
-@media (max-width: 700px) {
+@container workspace (max-width: 700px) {
     #grid-viewport {
         --list-date-width: 0px;
+        --list-size-width: 0px;
     }
 
     .list-item .item-label {
-        display: block;
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        column-gap: var(--list-gap);
     }
 
     .list-item .item-label .list-name {
         width: 100%;
+        grid-column: 1 / -1;
     }
 
     .list-item .item-modified {
+        grid-column: 1;
+        grid-row: 2;
         text-align: left;
         font-size: var(--item-date-font-size);
+    }
+
+    .list-item .item-size {
+        grid-column: 2;
+        grid-row: 2;
+        font-size: var(--item-date-font-size);
+        line-height: var(--item-date-line-height);
     }
 }
 

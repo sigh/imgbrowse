@@ -31,8 +31,11 @@ export class SortControls {
         const label = this.criteria.find(input => input.checked).nextElementSibling.textContent;
         this.trigger.querySelector('.sort-caption').textContent = label;
         setButtonLabel(this.trigger, `Sort by ${label}`);
-        const labels = sort === SortCriterion.MODIFIED
-            ? ['Oldest first', 'Newest first'] : ['Name ascending', 'Name descending'];
+        const labels = {
+            [SortCriterion.NAME]: ['Name ascending', 'Name descending'],
+            [SortCriterion.MODIFIED]: ['Oldest first', 'Newest first'],
+            [SortCriterion.SIZE]: ['Smallest first', 'Largest first'],
+        }[sort];
         const index = ascending ? 0 : 1;
         this.direction.firstElementChild.textContent = index === 0 ? '↑' : '↓';
         const action = `Switch to ${labels[1 - index].toLowerCase()}`;

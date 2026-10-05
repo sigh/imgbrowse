@@ -9,7 +9,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from image_browser.app import Gallery
-from image_browser.catalog.errors import OrderTooLarge, StaleView
+from image_browser.catalog.errors import OrderTooLarge
 from image_browser.catalog.ordering import Ordering
 from image_browser.catalog.preparation import Preparing
 from image_browser.http.catalog_api import CatalogApi
@@ -30,20 +30,20 @@ class PreparationTests(unittest.TestCase):
         self.gallery = Gallery(self.root)
         self.preparations = self.gallery.catalog.preparations
 
-    def prepare(self, path, token=None):
+    def prepare(self, path, token=None, sort='modified', order='asc'):
         with self.preparations.required(token):
-            return CatalogApi(self.gallery).folder_index(path, ordering=Ordering('modified'))
+            return CatalogApi(self.gallery).folder_index(path, ordering=Ordering(sort, order))
 
-    def pending(self, path, token=None):
+    def pending(self, path, token=None, sort='modified'):
         with self.assertRaises(Preparing) as raised:
-            self.prepare(path, token)
+            self.prepare(path, token, sort)
         return raised.exception.progress
 
-    def wait_ready(self, path, token):
+    def wait_ready(self, path, token, sort='modified'):
         deadline = time.monotonic() + 3
         while time.monotonic() < deadline:
             try:
-                return self.prepare(path, token)
+                return self.prepare(path, token, sort)
             except Preparing:
                 time.sleep(.005)
         self.fail('Preparation did not finish')
@@ -67,10 +67,45 @@ class PreparationTests(unittest.TestCase):
             release.set()
             ready = self.wait_ready('A', second['token'])
             self.assertEqual([item['name'] for item in ready['items']], ['b.jpg', 'a.jpg'])
+            self.preparations.invalidate('A', exact=True)
             with self.preparations.required():
                 reverse = CatalogApi(self.gallery).folder_index('A', ordering=Ordering('modified', 'desc'))
             self.assertEqual([item['name'] for item in reverse['items']], ['a.jpg', 'b.jpg'])
             self.assertEqual(reads.call_count, 2)
+
+    def test_worker_result_remains_available_when_completed_values_do_not_fit_cache(self):
+        self.gallery.catalog.indexes.max_weight = self.gallery.catalog.views.max_weight = 1
+        self.gallery.catalog.sort_values.max_weight = 1
+        progress = self.pending('A')
+        ready = self.wait_ready('A', progress['token'])
+        self.assertEqual([item['name'] for item in ready['items']], ['b.jpg', 'a.jpg'])
+        self.preparations.cancel(progress['token'])
+        with patch.object(self.gallery.catalog.facts, 'get', side_effect=AssertionError('Prepared values were lost')):
+            reverse = self.prepare('A', order='desc')
+        self.assertEqual([item['name'] for item in reverse['items']], ['a.jpg', 'b.jpg'])
+
+    def test_switching_criteria_keeps_distinct_jobs_and_independent_leases(self):
+        entered, release = threading.Event(), threading.Event()
+        read = self.gallery.catalog.facts.read
+        def blocked(entry):
+            entered.set()
+            self.assertTrue(release.wait(3))
+            return read(entry)
+        try:
+            with patch.object(self.gallery.catalog.facts, 'read', blocked):
+                modified = self.pending('A')
+                self.assertTrue(entered.wait(1))
+                size = self.pending('A', sort='size')
+                self.assertEqual(len(self.preparations.running), 2)
+                self.preparations.cancel(modified['token'])
+                self.assertTrue(any(size['token'] in job.leases for job in self.preparations.jobs.values()))
+                release.set()
+                ready = self.wait_ready('A', size['token'], sort='size')
+                self.assertEqual([item['name'] for item in ready['items']], ['a.jpg', 'b.jpg'])
+                reverse = self.prepare('A', sort='size', order='desc')
+                self.assertEqual([item['name'] for item in reverse['items']], ['a.jpg', 'b.jpg'])
+        finally:
+            release.set()
 
     def test_capacity_counts_cancelled_work_until_its_storage_call_returns(self):
         entered, release = threading.Event(), threading.Event()
@@ -139,8 +174,8 @@ class PreparationTests(unittest.TestCase):
                 self.assertTrue(entered.wait(1))
                 os.utime(file, ns=(2,2))
                 self.gallery.catalog.facts.cache.invalidate(lambda key: key[0] == 'root.jpg')
-                with self.assertRaises(StaleView):
-                    CatalogApi(self.gallery).entry_page('', [{'name':'root.jpg','type':'image'}])
+                page = CatalogApi(self.gallery).entry_page('', [{'name':'root.jpg','type':'image'}])
+                self.assertEqual(page['entries'][0]['modified']['key'], '2')
                 self.assertTrue(any(b['token'] in job.leases for job in self.preparations.jobs.values()))
                 release.set()
                 self.wait_ready('B', b['token'])

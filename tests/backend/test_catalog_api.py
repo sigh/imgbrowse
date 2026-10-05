@@ -107,3 +107,25 @@ class CatalogApiTests(unittest.TestCase):
         self.server.gallery.catalog.preparations.MAX_BYTES = 1
         status, error = self.request('/api/walk', {'sort':'modified'})
         self.assertEqual((status, error['code'], error['retryable']), (413, 'order_too_large', False))
+
+    def test_only_initial_folder_preparation_supplies_a_cheap_listing(self):
+        (self.root / 'a.jpg').write_bytes(b'fixture')
+        entered, release = threading.Event(), threading.Event()
+        read = self.server.gallery.catalog.facts.read
+        def blocked(entry):
+            entered.set()
+            self.assertTrue(release.wait(3))
+            return read(entry)
+        try:
+            with patch.object(self.server.gallery.catalog.facts, 'read', side_effect=blocked):
+                status, progress = self.request('/api/folder?sort=size')
+                self.assertEqual(status, 202)
+                self.assertTrue(entered.wait(1))
+                self.assertEqual(progress['listing']['items'], [{'name':'a.jpg', 'type':'image'}])
+                self.assertEqual(progress['listing']['root_name'], self.root.name)
+                status, poll = self.request('/api/folder?' + urlencode({'sort':'size', 'order_token':progress['token']}))
+                self.assertEqual(status, 202)
+                self.assertNotIn('listing', poll, 'Polling must not resend the whole folder')
+                self.request('/api/order/cancel', {'token':progress['token']})
+        finally:
+            release.set()

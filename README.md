@@ -22,7 +22,7 @@ Hidden names and symlinks are omitted. See `imgbrowse --help` for options.
 
 - **Browse** shows the current folder; **Overview** includes its descendants.
 - **View** offers single-image, thumbnail, and continuous-scroll layouts.
-- Sort by name or modification date, and use **↑ / ↓** to reverse the order.
+- Sort by name, modification date, or file size, and use **↑ / ↓** to reverse the order.
 - Use left/right arrows to turn pages, Escape to return to Browse, and **− / +**
   to zoom. Click an image to toggle 100% sizing.
 - Open **Info** in the sidebar for metadata and the full path.
